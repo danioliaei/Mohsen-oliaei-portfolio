@@ -1,0 +1,13 @@
+version: '3.8'
+
+services:
+  portfolio-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000" # Change the first 3000 if you want a different port on Windows
+    volumes:
+      - .:/app
+    environment:
+      - NODE_ENV=development
