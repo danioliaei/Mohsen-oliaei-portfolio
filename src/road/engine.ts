@@ -5,15 +5,24 @@
    ========================================================================= */
 
 // ---- camera / projection tuning ----
-// An ELEVATED, looking-down aerial eye (the "tilt-shift miniature" vantage of the
-// reference): the eye sits high above the valley floor (large CAM_H) and the
-// horizon is pushed up the frame (small HORIZON) so the topographic land fills
-// almost the whole view and recedes to a compressed, distant ridge line.
-export const FOCAL = 1.04;
-export const CAM_H = 3850;
-export const HORIZON = 0.24;
-export const VIEW_DEPTH = 11000;
+// A forward-looking "driver" camera: an elevated eye set back behind the current
+// position, looking AHEAD and slightly down the road as it threads a VALLEY, so
+// the route recedes to a vanishing point with hills rising on either side and we
+// feel like we're travelling through the land. The SAME view-projection matrix
+// drives both the GPU terrain and the 2-D road/station overlay, so they align.
+export const VIEW_DEPTH = 13000;
 export const STEP = 120;
+
+/** Vertical field of view (rad) — a fairly normal lens for the travelling view. */
+const FOVY = (40 * Math.PI) / 180;
+/** Camera pitch DOWN from horizontal (rad) — elevated, looking into the valley. */
+const PITCH = (30 * Math.PI) / 180;
+/** Eye→target distance (world units): set back behind, riding above the road. */
+const EYE_DIST = 3000;
+/** How far down the road (world units) the camera aims. */
+const LOOK_AHEAD = 2600;
+const NEAR = 120;
+const FAR = VIEW_DEPTH * 1.7;
 
 /** World half-width of the tarmac near the camera. Tapered with depth below. */
 export const ROAD_W = 13;
@@ -32,11 +41,15 @@ export const setLensX = (v: number): void => {
 };
 export const getLensX = (): number => LENS_X;
 
-/** Lateral sway of the road centreline at depth z — a winding mountain route. */
+/**
+ * Lateral position of the road centreline at depth z — a route that genuinely
+ * CHANGES DIRECTION as it travels: layered swings of different wavelengths give
+ * long sweeping bends with shorter kinks on top, so the road heads left, then
+ * right, then back, rather than holding one gentle curve.
+ */
 export const LAT = (z: number): number =>
-  300 * Math.sin(z * 0.00019) +
-  150 * Math.sin(z * 0.00052 + 1.2) +
-  78 * Math.sin(z * 0.00091 + 2.4);
+  560 * Math.sin(z * 0.0001 + 0.4) +
+  200 * Math.sin(z * 0.00024 + 1.6);
 
 /** A localised terrain feature — a smooth hill crest or valley dip. */
 const gauss = (z: number, c: number, w: number, a: number): number =>
@@ -68,39 +81,46 @@ export const roadElevation = (z: number): number => {
  * road genuinely sits in the trough between the hills.
  */
 /**
- * Terrain RELIEF above the local valley floor at (x, z), GIVEN the precomputed
- * road centreline `road = LAT(z)`. This is the per-point work only — it contains
- * no z-only terms — so the hot sampling loop can hoist the costly `LAT(z)` and
- * `roadElevation(z)` (sines + exponentials) out to once per depth row.
+ * Organic hill field (domain-warped ridges) — the EXACT JS twin of `organic()`
+ * in gl.ts. The low-frequency waves bend the coordinates before the higher
+ * octaves sample, giving the braided, swirling topography of real eroded land.
  */
-export const reliefAt = (x: number, z: number, road: number): number => {
-  const ad = Math.abs(x - road); // lateral distance from the road centreline
-  const side = smoothstep(90, 1700, ad); // 0 on the road .. 1 up the hillsides
-
-  // valley walls climb away from the road — kept close so the glowing land
-  // hugs the verge rather than leaving a bare plain between road and hills
-  const wall = smoothstep(200, 2500, ad) * 2550;
-  // rolling ridges/peaks textured onto the hillsides (muted near the road).
-  // Layered octaves — broad swells down to fine crinkle — so the contour field
-  // reads as DENSE, organically flowing isolines like the reference.
-  const rolling =
-    640 * Math.sin(z * 0.00055 + x * 0.0007) +
-    430 * Math.sin(z * 0.0011 - x * 0.0009 + 1.3) +
-    270 * Math.sin(x * 0.0014 + 0.6) +
-    190 * Math.sin(z * 0.0019 + x * 0.0016 + 2.1) +
-    125 * Math.sin(x * 0.0027 - z * 0.0009 + 0.9) +
-    78 * Math.sin(z * 0.0036 + x * 0.0031 + 3.2);
-
-  return wall + rolling * side;
+const organic = (x: number, z: number): number => {
+  const wx = x + 760 * Math.sin(z * 0.00042 + 0.3) + 420 * Math.sin(z * 0.00097 + 2.1);
+  const wz = z + 760 * Math.sin(x * 0.00038 + 1.7) + 420 * Math.sin(x * 0.00091 + 0.4);
+  return (
+    900 * Math.sin(wx * 0.00115 + wz * 0.0008) +
+    520 * Math.sin(wz * 0.00175 - wx * 0.00135 + 1.3) +
+    300 * Math.sin(wx * 0.00255 + wz * 0.0021 + 0.6) +
+    175 * Math.sin(wz * 0.0036 + wx * 0.0033 + 2.1) +
+    100 * Math.sin(wx * 0.0047 - wz * 0.0043 + 0.9)
+  );
 };
 
-/** Absolute world elevation at (x, z) — the valley floor plus its relief. */
-export const terrainHeight = (x: number, z: number): number =>
-  roadElevation(z) + reliefAt(x, z, LAT(z));
+/** The road's own smooth vertical grade — gentle climbs and descents, the kind a
+ *  real road can hold, independent of the surrounding hills' fine relief. */
+const roadFloor = (z: number): number =>
+  520 * Math.sin(z * 0.00012 + 0.5) + 240 * Math.sin(z * 0.00026 + 2.1);
 
-/** Height of the terrain ABOVE the local road floor (>= 0). Drives the land. */
-export const terrainRelief = (x: number, z: number): number =>
-  reliefAt(x, z, LAT(z));
+/** Elevation of the valley FLOOR the road runs along (a gentle road grade). */
+export const roadGradeY = (z: number): number => roadFloor(z);
+
+/**
+ * Terrain surface height at (x, z) — INDEPENDENT rolling hills (the organic
+ * field) with a shallow corridor lowered along the road, so the route travels
+ * the low ground while real hills rise around it and can stand BETWEEN the
+ * camera and a far stretch of road (which still shows, drawn on top). The road
+ * itself rides a smooth grade, so it never folds over a crest. EXACT twin of
+ * `terrainH()` in gl.ts.
+ */
+export const surfaceY = (x: number, z: number): number => {
+  const d = Math.abs(x - LAT(z));
+  const t = 0.12 + 0.88 * smoothstep(120, 1300, d); // 0.12 near road .. 1 in hills
+  return roadFloor(z) * (1 - t) + organic(x, z) * t;
+};
+
+/** The road, stations and camera ride a smooth grade just above the low ground. */
+export const roadBedY = (z: number): number => roadGradeY(z) + 25;
 
 /**
  * Half-width of the tarmac at depth `dz` from the camera. The near width is
@@ -117,33 +137,108 @@ export interface Projected {
   dz: number;
 }
 
+/* ---- mat4 (column-major) helpers — tiny, dependency-free ---------------- */
+type Mat4 = Float32Array;
+
+function mPerspective(fovy: number, aspect: number, near: number, far: number): Mat4 {
+  const f = 1 / Math.tan(fovy / 2);
+  const nf = 1 / (near - far);
+  const m = new Float32Array(16);
+  m[0] = f / aspect;
+  m[5] = f;
+  m[10] = (far + near) * nf;
+  m[11] = -1;
+  m[14] = 2 * far * near * nf;
+  return m;
+}
+
+function mLookAt(
+  ex: number, ey: number, ez: number,
+  cx: number, cy: number, cz: number,
+  ux: number, uy: number, uz: number,
+): Mat4 {
+  let zx = ex - cx, zy = ey - cy, zz = ez - cz;
+  let rl = 1 / Math.hypot(zx, zy, zz);
+  zx *= rl; zy *= rl; zz *= rl;
+  let xx = uy * zz - uz * zy, xy = uz * zx - ux * zz, xz = ux * zy - uy * zx;
+  rl = 1 / Math.hypot(xx, xy, xz);
+  xx *= rl; xy *= rl; xz *= rl;
+  const yx = zy * xz - zz * xy, yy = zz * xx - zx * xz, yz = zx * xy - zy * xx;
+  const m = new Float32Array(16);
+  m[0] = xx; m[1] = yx; m[2] = zx; m[3] = 0;
+  m[4] = xy; m[5] = yy; m[6] = zy; m[7] = 0;
+  m[8] = xz; m[9] = yz; m[10] = zz; m[11] = 0;
+  m[12] = -(xx * ex + xy * ey + xz * ez);
+  m[13] = -(yx * ex + yy * ey + yz * ez);
+  m[14] = -(zx * ex + zy * ey + zz * ez);
+  m[15] = 1;
+  return m;
+}
+
+function mMul(a: Mat4, b: Mat4): Mat4 {
+  const o = new Float32Array(16);
+  for (let c = 0; c < 4; c++) {
+    for (let r = 0; r < 4; r++) {
+      o[c * 4 + r] =
+        a[r] * b[c * 4] +
+        a[4 + r] * b[c * 4 + 1] +
+        a[8 + r] * b[c * 4 + 2] +
+        a[12 + r] * b[c * 4 + 3];
+    }
+  }
+  return o;
+}
+
+// ---- shared camera state: one view-projection matrix per frame ----
+let _vp: Mat4 = new Float32Array(16);
+let _W = 1;
+let _H = 1;
+let _f = 1;
+
 /**
- * Perspective-project a world point into screen space.
- *   px – lateral world position
- *   pz – depth (down the road)
- *   py – world elevation (terrain height)
- * for a camera at (camX, camZ) whose eye-line sits at elevation camY.
- * Returns null for points behind the camera.
+ * Build the frame's view-projection matrix for a forward-looking camera riding
+ * the road at (camX, camZ), aimed straight down its own axis. Call once per frame
+ * before `project()` / before drawing the GPU terrain.
  */
-export function project(
-  px: number,
-  pz: number,
-  py: number,
-  camX: number,
-  camZ: number,
-  camY: number,
-  W: number,
-  H: number,
-): Projected | null {
-  const dz = pz - camZ;
-  if (dz < 1) return null;
-  const scale = FOCAL / dz;
+export function setCamera(
+  camX: number, camZ: number, W: number, H: number,
+): void {
+  _W = W;
+  _H = H;
+  _f = 1 / Math.tan(FOVY / 2);
+  const cz = camZ + LOOK_AHEAD;
+  const cx = camX;
+  const cy = roadBedY(cz) + 200; // aim a touch above the road grade ahead
+  const ex = camX;
+  const ey = roadBedY(camZ) + EYE_DIST * Math.sin(PITCH); // eye rides the road grade
+  const ez = camZ - EYE_DIST * Math.cos(PITCH);
+  const proj = mPerspective(FOVY, W / H, NEAR, FAR);
+  const view = mLookAt(ex, ey, ez, cx, cy, cz, 0, 1, 0);
+  _vp = mMul(proj, view);
+}
+
+/** The current frame's view-projection matrix (column-major) — for the GPU. */
+export const getViewProj = (): Mat4 => _vp;
+
+/**
+ * Project a world point (px lateral, pz depth, py elevation) to screen space
+ * using the frame's shared camera. A horizontal LENS_X shift slides the whole
+ * scene so the road can ride the left third. Returns null for points behind the
+ * camera.  `scale` = screen px per world unit at this depth; `dz` = view depth.
+ */
+export function project(px: number, pz: number, py: number): Projected | null {
+  const m = _vp;
+  const cx = m[0] * px + m[4] * py + m[8] * pz + m[12];
+  const cy = m[1] * px + m[5] * py + m[9] * pz + m[13];
+  const cw = m[3] * px + m[7] * py + m[11] * pz + m[15];
+  if (cw <= 1) return null;
+  const ndcx = cx / cw + (LENS_X - 0.5) * 2;
+  const ndcy = cy / cw;
   return {
-    x: W * LENS_X + scale * (px - camX) * (W / 2),
-    // higher terrain (py > camY) lifts the point up the screen
-    y: H * HORIZON + scale * (CAM_H - (py - camY)) * (H / 2),
-    scale,
-    dz,
+    x: (ndcx * 0.5 + 0.5) * _W,
+    y: (1 - (ndcy * 0.5 + 0.5)) * _H,
+    scale: _f / cw,
+    dz: cw,
   };
 }
 

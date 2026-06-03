@@ -127,6 +127,9 @@ canvas#road {
   width: 100%;
   height: 100%;
   display: block;
+  /* grading profile — saturation boost + contrast/black-crush so the contour
+     land reads like a painted plastic miniature under hard studio lighting */
+  filter: saturate(1.14) contrast(1.11) brightness(0.97);
 }
 
 /* ---------------- floating navigation card (right) ---------------- */
@@ -141,7 +144,7 @@ canvas#road {
   pointer-events: none;
 }
 .station {
-  width: min(412px, 42vw);
+  width: min(312px, 32vw);
   will-change: opacity, transform;
 }
 
@@ -151,8 +154,11 @@ canvas#road {
 .station-card {
   --accent: var(--c-career);
   position: relative;
-  padding: 2px 0 2px 24px;
+  padding: 2px 0 2px 20px;
   text-align: left;
+  /* a slow, weightless drift so the read-out feels like it floats in the
+     valley air beside the road rather than being pinned to the frame */
+  animation: cardfloat 7.5s ease-in-out infinite;
   /* a soft pool of shade that melts out at the edges — no panel, just enough
      contrast for the type to read over bright focal contours */
   background: radial-gradient(
@@ -161,6 +167,15 @@ canvas#road {
     rgba(6, 4, 2, 0.28) 42%,
     rgba(6, 4, 2, 0) 72%
   );
+}
+@keyframes cardfloat {
+  0%,
+  100% {
+    transform: translateY(-6px);
+  }
+  50% {
+    transform: translateY(6px);
+  }
 }
 .station-card.education {
   --accent: var(--c-education);
@@ -203,10 +218,10 @@ canvas#road {
 .station-head {
   display: flex;
   align-items: center;
-  gap: 14px;
-  margin-bottom: 16px;
-  font-size: 11px;
-  letter-spacing: 2.6px;
+  gap: 11px;
+  margin-bottom: 12px;
+  font-size: 10px;
+  letter-spacing: 2.4px;
   text-transform: uppercase;
 }
 .station-index {
@@ -225,39 +240,39 @@ canvas#road {
 .station-tag {
   font-family: var(--sans);
   font-weight: 500;
-  font-size: 11.5px;
-  letter-spacing: 2.4px;
+  font-size: 10.5px;
+  letter-spacing: 2.2px;
   text-transform: uppercase;
   color: rgba(244, 241, 234, 0.52);
-  margin-bottom: 13px;
+  margin-bottom: 10px;
 }
 .station-title {
   font-family: var(--sans);
   font-weight: 600;
-  font-size: clamp(22px, 2.1vw, 30px);
-  line-height: 1.12;
+  font-size: clamp(18px, 1.6vw, 23px);
+  line-height: 1.14;
   letter-spacing: -0.015em;
-  margin-bottom: 14px;
+  margin-bottom: 11px;
   color: var(--ink);
   text-shadow: 0 2px 28px rgba(0, 0, 0, 0.62);
 }
 .station-summary {
   font-family: var(--sans);
   font-weight: 300;
-  font-size: 14.5px;
-  line-height: 1.62;
+  font-size: 12.5px;
+  line-height: 1.58;
   color: rgba(244, 241, 234, 0.82);
-  margin-bottom: 18px;
-  max-width: 35ch;
+  margin-bottom: 14px;
+  max-width: 32ch;
   text-shadow: 0 1px 20px rgba(0, 0, 0, 0.55);
 }
 .station-points {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
   font-family: var(--sans);
   font-weight: 400;
-  font-size: 11.5px;
+  font-size: 10.5px;
   letter-spacing: 0.4px;
   color: rgba(244, 241, 234, 0.58);
 }
