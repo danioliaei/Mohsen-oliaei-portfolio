@@ -95,6 +95,7 @@ export function useDescent(groups: GroupRefs) {
     pos: new Vector3(0.15, 0.28, CAM_DIST.ORBIT),
     look: ORBIT_LOOK.clone(),
     fov: FOV.ORBIT,
+    up: new Vector3(0, 1, 0),
   });
   const goalDist = useRef<number>(CAM_DIST.ORBIT);
   const wheelVel = useRef(0);
@@ -411,7 +412,9 @@ export function useDescent(groups: GroupRefs) {
       cam.current.pos.lerp(goal.pos, ka);
       cam.current.look.lerp(goal.look, ka);
       cam.current.fov += (goal.fov - cam.current.fov) * ka;
+      cam.current.up.lerp(goal.up, ka).normalize();
     }
+    camera.up.copy(cam.current.up);
     camera.position.copy(cam.current.pos);
     camera.lookAt(cam.current.look);
     if (Math.abs(camera.fov - cam.current.fov) > 0.01) {
@@ -474,15 +477,42 @@ export function useDescent(groups: GroupRefs) {
         pos: tmpGoalPos.set(0.15, 0.28, goalDist.current),
         look: ORBIT_LOOK,
         fov: fovFor("ORBIT"),
+        up: UP_Y,
       };
     }
-    // descent: camera on +Z, globe rotates focus to front, slight tilt
+    if (lod === "FACILITY") {
+      // Bird's-eye: look down at the project from the sky. After focus the node
+      // sits at +Z, so the building's vertical axis is world +Z and its footprint
+      // lies in the world X-Y plane. We rise along that vertical (into the sky)
+      // and swing round to a 3/4 corner, using +Z as camera-up so the building
+      // stands upright on screen and we read it from above, isometric-style.
+      const anchor = facAnchor.set(0, 0, GLOBE_RADIUS + 0.05);
+      const fd = Math.min(0.95, Math.max(0.44, goalDist.current * 0.46));
+      const pitch = 0.92; // ~53° down from the footprint plane → high aerial
+      const pos = tmpGoalPos
+        .copy(anchor)
+        .addScaledVector(UP_Z, fd * Math.sin(pitch))
+        .addScaledVector(FAC_AZ, fd * Math.cos(pitch));
+      return { pos, look: anchor, fov: 32, up: UP_Z };
+    }
     const d = goalDist.current;
-    return {
-      pos: tmpGoalPos.set(0, d * 0.05, d),
-      look: ORIGIN,
-      fov: fovFor(lod),
-    };
+    if (lod === "WORLD") {
+      // whole globe in frame — a recognisable dotted Earth, focus hub at front.
+      return {
+        pos: tmpGoalPos.set(0, d * 0.05, d),
+        look: ORIGIN,
+        fov: fovFor("WORLD"),
+        up: UP_Y,
+      };
+    }
+    // COUNTRY / CITY / TOWN: fly down toward the focused surface point (now at +Z)
+    // and look at it from an oblique aerial angle, so the focused region fills the
+    // frame and its land + borders become legible instead of a far-off speckle.
+    const surfaceDist = Math.max(0.3, d - GLOBE_RADIUS);
+    const pos = facAnchor
+      .copy(SURFACE_PT)
+      .addScaledVector(OBLIQUE_DIR, surfaceDist);
+    return { pos, look: SURFACE_PT, fov: fovFor(lod), up: UP_Y };
   }
 }
 
@@ -497,3 +527,14 @@ const BACK_POS = new Vector3(
 );
 const SPIN_AXIS = new Vector3(-0.18, 1, 0.08).normalize();
 const tmpGoalPos = new Vector3();
+
+// Camera-up targets + the bird's-eye facility framing helpers.
+const UP_Y = new Vector3(0, 1, 0);
+const UP_Z = new Vector3(0, 0, 1);
+// Azimuth in the facility footprint plane (world X-Y) — a 3/4 corner approach.
+const FAC_AZ = new Vector3(0.42, 0.86, 0).normalize();
+const facAnchor = new Vector3();
+// The focused surface point (a node is rotated to +Z) and the oblique aerial
+// direction the descent camera sits along when looking down at it.
+const SURFACE_PT = new Vector3(0, 0, GLOBE_RADIUS);
+const OBLIQUE_DIR = new Vector3(0, 0.45, 1).normalize();

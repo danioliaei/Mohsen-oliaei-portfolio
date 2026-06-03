@@ -39,8 +39,12 @@ export const roomAnchor = {
   quaternion: new Quaternion(),
 };
 
+/** Distance at which the density ramp begins (just beyond the WORLD framing), so
+ *  continents + borders are already filling in by the time we enter a world. */
+const ZOOM_FAR = 3.0;
+
 /** Map a camera distance to a 0..1 closeness used by the shaders. */
 export function distToZoom(dist: number): number {
-  const z = (CAM_DIST.WORLD - dist) / (CAM_DIST.WORLD - DOLLY.min);
+  const z = (ZOOM_FAR - dist) / (ZOOM_FAR - DOLLY.min);
   return Math.min(1, Math.max(0, z));
 }

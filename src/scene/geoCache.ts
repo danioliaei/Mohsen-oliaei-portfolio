@@ -8,9 +8,11 @@
    ========================================================================== */
 
 import type { BufferGeometry } from "three";
+import type { Feature } from "geojson";
 import { GLOBE_RADIUS } from "../theme";
 import {
   type GeoData,
+  buildCountryTagger,
   fibonacciSphere,
   graticulePoints,
   loadGeo,
@@ -18,6 +20,14 @@ import {
   sampleLandPoints,
 } from "../lib/geo";
 import { pointsGeometry } from "./buildGeometry";
+
+/** Highlight country indices — must match COUNTRY_HL in data/world.ts.
+ *  1 = Sweden · 2 = Iran · 3 = USA. */
+const NAME_TO_INDEX: Record<string, number> = {
+  Sweden: 1,
+  Iran: 2,
+  "United States of America": 3,
+};
 
 export interface GlobeGeometries {
   ocean: BufferGeometry;
@@ -44,9 +54,12 @@ export function buildGeometries(
   geo: GeoData,
   quality: number,
 ): GlobeGeometries {
-  const oceanCount = Math.round(9000 * quality);
-  const landCandidates = Math.round(110000 * quality);
-  const borderSpacing = quality < 1 ? 1.8 : 1.1;
+  const oceanCount = Math.round(13000 * quality);
+  // Far denser land sampling — continents read as a solid dot-density texture
+  // rather than a scatter, so the planet stays legible as you descend.
+  const landCandidates = Math.round(320000 * quality);
+  // Tighter border spacing → near-continuous dotted country outlines.
+  const borderSpacing = quality < 1 ? 1.0 : 0.6;
   const gratStep = 15;
   const gratDot = quality < 1 ? 3.2 : 2.4;
 
@@ -58,33 +71,54 @@ export function buildGeometries(
     aCore: () => (Math.random() < 0.012 ? 1 : 0),
   });
 
+  // Per-country tagger (Sweden / Iran / USA) for the focus spotlight.
+  const tagger = buildCountryTagger(geo.countries, NAME_TO_INDEX);
+  const indexOf = (f: Feature): number =>
+    NAME_TO_INDEX[(f.properties?.name as string) ?? ""] ?? 0;
+
   // --- continents: hero dot-density land, with a density ramp ---
-  const { positions: landPos, count: landCount } = sampleLandPoints(
-    geo.land,
-    landCandidates,
-    GLOBE_RADIUS,
-  );
+  const {
+    positions: landPos,
+    count: landCount,
+    country: landCountry,
+  } = sampleLandPoints(geo.land, landCandidates, GLOBE_RADIUS, tagger);
   const land = pointsGeometry(landPos, {
     aLand: 1,
     aAccent: 0,
-    // ~42% base (visible at orbit), rest fades in as we descend
+    aCountry: (i) => landCountry[i],
+    // ~60% base (visible from orbit); the rest fills in fast so continents are
+    // essentially fully dense by the time we enter a WORLD — nothing stays sparse.
     aIn: () => {
       const r = Math.random();
-      return r < 0.42 ? 0 : 0.2 + Math.random() * 0.42;
+      return r < 0.6 ? 0 : 0.04 + Math.random() * 0.18;
     },
-    aCore: () => (Math.random() < 0.03 ? 1 : 0),
+    aCore: () => (Math.random() < 0.02 ? 1 : 0),
   });
 
-  // --- borders: dotted hairline, fades in at COUNTRY ---
-  const borders = pointsGeometry(
-    sampleBorderPoints(geo.countries, borderSpacing, GLOBE_RADIUS * 1.001),
-    { aLand: 0, aAccent: 0, aIn: 0.12, aOut: 0.9 },
+  // --- borders: glowing periwinkle outlines (coastlines + country boundaries).
+  // A distinct accent (aAccent = 2) sets them apart from the ink land; a portion
+  // are cores so they bloom into bright, near-continuous outlines that make the
+  // countries legible. aOut = 2 keeps them visible all the way to the surface. ---
+  const borderSamples = sampleBorderPoints(
+    geo.countries,
+    borderSpacing,
+    GLOBE_RADIUS * 1.0025,
+    indexOf,
   );
+  const borders = pointsGeometry(borderSamples.positions, {
+    aLand: 0,
+    aAccent: 2,
+    aCountry: (i) => borderSamples.country[i],
+    aIn: 0.04,
+    aOut: 2,
+    aCore: () => (Math.random() < 0.05 ? 1 : 0),
+  });
 
-  // --- graticule: faint lat/long dots ---
+  // --- graticule: faint lat/long dots; recede early (gone by COUNTRY) so the
+  // close-in views aren't cluttered by the grid. ---
   const graticule = pointsGeometry(
-    graticulePoints(gratStep, gratDot, GLOBE_RADIUS * 1.001),
-    { aLand: 0, aAccent: 0, aIn: 0.06, aOut: 0.85 },
+    graticulePoints(gratStep, gratDot, GLOBE_RADIUS * 1.0015),
+    { aLand: 0, aAccent: 0, aIn: 0.06, aOut: 0.45 },
   );
 
   return { ocean, land, borders, graticule, landCount };

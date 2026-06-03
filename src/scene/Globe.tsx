@@ -3,6 +3,7 @@ import { useFrame } from "@react-three/fiber";
 import type { ShaderMaterial } from "three";
 
 import type { World } from "../data/world";
+import { focusCountryIndex } from "../data/world";
 import { getState, useStore } from "../store";
 import { type SharedUniforms, createPointsMaterial } from "./materials/points";
 import type { GlobeGeometries } from "./geoCache";
@@ -39,6 +40,8 @@ export function Globe({
 
   const hover = useRef(false);
   const vis = useRef(1);
+  const focusAmt = useRef(0);
+  const lastFocus = useRef(0);
 
   const mats = useMemo(() => {
     const mk = (size: number, opacity: number): MatEntry => ({
@@ -46,13 +49,14 @@ export function Globe({
       base: opacity,
     });
     return {
-      ocean: mk(1.7, 0.4),
-      land: mk(2.1, 0.96),
-      borders: mk(1.5, 0.5),
-      graticule: mk(1.2, 0.32),
-      marker: mk(5.0, 1.0),
-      arc: mk(1.7, 0.72),
-      facility: mk(2.7, 1.0),
+      ocean: mk(1.5, 0.34),
+      // dense land reads as solid continents (the masses); borders outline them.
+      land: mk(2.3, 0.9),
+      // borders are clean periwinkle outlines over the land — present, not a wash.
+      borders: mk(2.0, 0.78),
+      graticule: mk(1.2, 0.22),
+      marker: mk(5.2, 1.0),
+      arc: mk(1.7, 0.66),
     };
   }, [shared, theme]);
 
@@ -81,6 +85,17 @@ export function Globe({
       m.uniforms.uZoom.value = reveal;
       m.uniforms.uOpacity.value = base * op * hoverMul;
     }
+
+    // focus spotlight: light the focused country on the geography layers only
+    // (markers/arcs stay full strength). Eased so it fades in/out smoothly.
+    const idx = isFront ? focusCountryIndex(world, s.focusedNodeId) : 0;
+    if (idx > 0) lastFocus.current = idx;
+    const amtTarget = idx > 0 ? 1 : 0;
+    focusAmt.current += (amtTarget - focusAmt.current) * (1 - Math.exp(-5 * dt));
+    for (const m of [mats.land.m, mats.borders.m]) {
+      m.uniforms.uFocusCountry.value = lastFocus.current;
+      m.uniforms.uFocusAmt.value = focusAmt.current;
+    }
   });
 
   const isFront = world.id === activeWorld;
@@ -97,7 +112,7 @@ export function Globe({
         graticuleMat={mats.graticule.m}
       />
       <Markers world={world} markerMat={mats.marker.m} arcMat={mats.arc.m} />
-      <Facility world={world} material={mats.facility.m} />
+      <Facility world={world} shared={shared} />
 
       {showCollider && (
         <mesh

@@ -7,7 +7,7 @@
    dot-density cloud — never vector borders or filled meshes.
    ========================================================================== */
 
-import { geoContains, geoDistance, geoInterpolate } from "d3-geo";
+import { geoBounds, geoContains, geoDistance, geoInterpolate } from "d3-geo";
 import { feature, merge } from "topojson-client";
 import type { Topology, GeometryCollection } from "topojson-specification";
 import type {
@@ -94,41 +94,99 @@ export async function loadGeo(
 export interface LandSamples {
   positions: Float32Array; // xyz on the unit sphere
   count: number;
+  /** per-point highlight country index (0 = none), parallel to count. */
+  country: Float32Array;
+}
+
+/** Tags a [lng,lat] with a highlight country index (0 if none). */
+export type CountryTagger = (lng: number, lat: number) => number;
+
+/**
+ * Build a fast lat/lng → country-index tagger for a small set of highlight
+ * countries (matched by `properties.name`). A bounding-box prefilter keeps the
+ * per-point geoContains tests cheap during land sampling.
+ */
+export function buildCountryTagger(
+  countries: FeatureCollection,
+  nameToIndex: Record<string, number>,
+): CountryTagger {
+  const entries: Array<{
+    idx: number;
+    geom: Feature["geometry"];
+    w: number;
+    s: number;
+    e: number;
+    n: number;
+  }> = [];
+  for (const f of countries.features) {
+    const name = (f.properties?.name as string) ?? "";
+    const idx = nameToIndex[name];
+    if (!idx) continue;
+    const [[w, s], [e, n]] = geoBounds(f);
+    entries.push({ idx, geom: f.geometry, w, s, e, n });
+  }
+  return (lng, lat) => {
+    for (const en of entries) {
+      if (lat < en.s || lat > en.n) continue;
+      const inLng =
+        en.w <= en.e ? lng >= en.w && lng <= en.e : lng >= en.w || lng <= en.e;
+      if (!inLng) continue;
+      if (geoContains(en.geom, [lng, lat])) return en.idx;
+    }
+    return 0;
+  };
 }
 
 /**
  * Sample land as a dot-density cloud. Generates `candidates` evenly spread
  * lat/lng points and keeps those that fall on land (geoContains). Returns far
  * fewer points than candidates (land is ~29% of the globe), giving glowing
- * dotted continents.
+ * dotted continents. Each kept point is tagged with a highlight country index.
  */
 export function sampleLandPoints(
   land: MultiPolygon,
   candidates: number,
   radius = 1,
+  tagger?: CountryTagger,
 ): LandSamples {
   const pts = fibonacciLngLat(candidates);
   const keep: number[] = [];
+  const tags: number[] = [];
   for (const p of pts) {
     if (geoContains(land, p)) {
       const [x, y, z] = latLngToVec3(p[1], p[0], radius);
       keep.push(x, y, z);
+      tags.push(tagger ? tagger(p[0], p[1]) : 0);
     }
   }
-  return { positions: new Float32Array(keep), count: keep.length / 3 };
+  return {
+    positions: new Float32Array(keep),
+    count: keep.length / 3,
+    country: new Float32Array(tags),
+  };
+}
+
+export interface BorderSamples {
+  positions: Float32Array;
+  /** per-point highlight country index (0 = none). */
+  country: Float32Array;
 }
 
 /**
- * Resample country boundaries as a trail of dots at a fixed angular spacing.
- * Never a stroked line — a dotted hairline that reads as part of the cloud.
+ * Resample country boundaries (incl. coastlines) as a trail of dots at a fixed
+ * angular spacing. Never a stroked line — a dotted hairline that reads as part
+ * of the cloud. Each point is tagged with its feature's highlight index.
  */
 export function sampleBorderPoints(
   countries: FeatureCollection,
   spacingDeg = 0.9,
   radius = 1,
-): Float32Array {
+  indexOf?: (f: Feature) => number,
+): BorderSamples {
   const spacing = spacingDeg * DEG;
   const out: number[] = [];
+  const tags: number[] = [];
+  let cur = 0;
 
   const ring = (coords: Position[]) => {
     for (let i = 0; i < coords.length - 1; i++) {
@@ -141,6 +199,7 @@ export function sampleBorderPoints(
         const [lng, lat] = lerp(s / steps);
         const [x, y, z] = latLngToVec3(lat, lng, radius);
         out.push(x, y, z);
+        tags.push(cur);
       }
     }
   };
@@ -148,11 +207,15 @@ export function sampleBorderPoints(
   const polygon = (poly: Polygon["coordinates"]) => poly.forEach(ring);
 
   for (const f of countries.features) {
+    cur = indexOf ? indexOf(f) : 0;
     const g = f.geometry;
     if (g.type === "Polygon") polygon(g.coordinates);
     else if (g.type === "MultiPolygon") g.coordinates.forEach(polygon);
   }
-  return new Float32Array(out);
+  return {
+    positions: new Float32Array(out),
+    country: new Float32Array(tags),
+  };
 }
 
 /** Dotted lat/long graticule. */

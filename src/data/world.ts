@@ -313,6 +313,26 @@ export function findProject(id: string): Project | undefined {
   return DIGITAL_PROJECTS.find((p) => p.id === id);
 }
 
+/** Highlight country index for the focus spotlight — must match the
+ *  NAME_TO_INDEX map in scene/geoCache.ts. 1 = Sweden · 2 = Iran · 3 = USA. */
+const COUNTRY_HL: Record<string, number> = {
+  sweden: 1,
+  iran: 2,
+  usa: 3,
+  "sweden-d": 1,
+};
+
+/** Highlight index of the focused node's country ancestor (0 if none). Lets the
+ *  globe spotlight the country you've descended into. */
+export function focusCountryIndex(world: World, id: string | null): number {
+  if (!id) return 0;
+  for (const n of pathToNode(world, id)) {
+    const v = COUNTRY_HL[n.id];
+    if (v) return v;
+  }
+  return 0;
+}
+
 /** Path of nodes from the world root down to (and including) `id`. */
 export function pathToNode(world: World, id: string): GeoNode[] {
   const stack: GeoNode[] = [];
