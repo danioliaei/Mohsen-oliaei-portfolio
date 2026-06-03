@@ -1,14 +1,12 @@
 :root {
   /* ONE global UI typeface, used at many weights (the wordmark's family) */
   --sans: "Inter", "Helvetica Neue", Helvetica, Arial, sans-serif;
-  /* a single reading serif for the experience summaries (Garamond) */
-  --serif: "EB Garamond", "Iowan Old Style", Georgia, serif;
-  --ink: #fffaf0;
-  --label: rgba(34, 18, 6, 0.72);
-  /* station kind accent colours (labels only) */
+  --ink: #f4f1ea;
+  --label: rgba(244, 241, 234, 0.5);
+  /* station kind accent colours */
   --c-education: #ffc45c;
-  --c-career: #ff7e38;
-  --c-teaching: #54e9de;
+  --c-career: #ff9450;
+  --c-teaching: #78e8e0;
 }
 
 * {
@@ -28,13 +26,11 @@ body {
   overflow-x: hidden;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
-  /* warm sunset gradient */
+  /* deep dark field with a faint warm glow toward the route's horizon */
   background:
-    radial-gradient(ellipse 85% 50% at 50% 53%, rgba(245, 198, 96, 0.55), rgba(245, 198, 96, 0) 62%),
-    radial-gradient(ellipse 130% 75% at 50% 108%, rgba(48, 23, 8, 0.95), rgba(48, 23, 8, 0) 55%),
-    radial-gradient(circle at 8% 100%, rgba(40, 18, 6, 0.9), rgba(40, 18, 6, 0) 45%),
-    radial-gradient(circle at 95% 100%, rgba(50, 24, 8, 0.85), rgba(50, 24, 8, 0) 48%),
-    linear-gradient(180deg, #c98a2a 0%, #d6962c 34%, #c67c1d 58%, #8a4d18 80%, #5f3211 100%);
+    radial-gradient(ellipse 64% 48% at 31% 44%, rgba(255, 150, 64, 0.1), rgba(255, 150, 64, 0) 60%),
+    radial-gradient(ellipse 120% 80% at 50% 118%, rgba(48, 26, 12, 0.5), rgba(48, 26, 12, 0) 60%),
+    linear-gradient(180deg, #050609 0%, #07080c 48%, #0a0a0e 100%);
   background-attachment: fixed;
 }
 
@@ -45,7 +41,7 @@ body::after {
   inset: 0;
   pointer-events: none;
   z-index: 60;
-  opacity: 0.05;
+  opacity: 0.04;
   mix-blend-mode: overlay;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
 }
@@ -131,99 +127,144 @@ canvas#road {
   display: block;
 }
 
-/* ---------------- centered station panel ---------------- */
+/* ---------------- floating navigation card (right) ---------------- */
 .station-layer {
   position: absolute;
   inset: 0;
   z-index: 12;
-  display: grid;
-  place-items: center;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 0 clamp(26px, 6vw, 104px);
   pointer-events: none;
 }
 .station {
-  position: relative;
-  width: min(680px, 88vw);
-  text-align: center;
-  /* nudged just below true centre so the road reads above & below it */
-  transform: translateY(2vh);
+  width: min(412px, 42vw);
   will-change: opacity, transform;
 }
-/* soft warm scrim so the light text reads over the bright sky/road */
-.station::before {
+
+/* HUD-style glass panel — a navigation read-out floating off the route */
+.station-card {
+  --accent: var(--c-career);
+  position: relative;
+  padding: 20px 22px 22px;
+  text-align: left;
+  background: linear-gradient(180deg, rgba(13, 15, 21, 0.78), rgba(8, 9, 13, 0.66));
+  border: 1px solid rgba(255, 240, 222, 0.14);
+  border-radius: 2px;
+  -webkit-backdrop-filter: blur(8px) saturate(1.05);
+  backdrop-filter: blur(8px) saturate(1.05);
+  box-shadow:
+    0 18px 50px rgba(0, 0, 0, 0.55),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+.station-card.education {
+  --accent: var(--c-education);
+}
+.station-card.career {
+  --accent: var(--c-career);
+}
+.station-card.teaching {
+  --accent: var(--c-teaching);
+}
+/* glowing accent tab on the left edge — where the connector line meets it */
+.station-card::before {
   content: "";
   position: absolute;
-  left: 50%;
+  left: -1px;
   top: 50%;
-  width: 184%;
-  height: 280%;
-  transform: translate(-50%, -50%);
-  background: radial-gradient(
-    ellipse 56% 50% at 50% 50%,
-    rgba(34, 16, 5, 0.56),
-    rgba(34, 16, 5, 0.26) 54%,
-    rgba(34, 16, 5, 0) 78%
-  );
-  z-index: -1;
+  transform: translateY(-50%);
+  width: 2px;
+  height: 38px;
+  background: var(--accent);
+  box-shadow: 0 0 14px var(--accent);
+}
+/* hairline corner ticks (top-right + bottom-left) for the instrument feel */
+.station-card::after {
+  content: "";
+  position: absolute;
+  inset: 6px;
   pointer-events: none;
+  background:
+    linear-gradient(var(--accent), var(--accent)) right 0 top 0 / 12px 1px no-repeat,
+    linear-gradient(var(--accent), var(--accent)) right 0 top 0 / 1px 12px no-repeat,
+    linear-gradient(var(--accent), var(--accent)) left 0 bottom 0 / 12px 1px no-repeat,
+    linear-gradient(var(--accent), var(--accent)) left 0 bottom 0 / 1px 12px no-repeat;
+  opacity: 0.5;
+}
+
+.station-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 15px;
+  font-size: 11px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+}
+.station-index {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: rgba(244, 241, 234, 0.85);
+}
+.station-index i {
+  font-style: normal;
+  color: rgba(244, 241, 234, 0.38);
+}
+.station-kind {
+  font-weight: 600;
+  color: var(--accent);
 }
 .station-tag {
   font-family: var(--sans);
-  font-weight: 600;
-  font-size: 12.5px;
-  letter-spacing: 3.4px;
+  font-weight: 500;
+  font-size: 11.5px;
+  letter-spacing: 2.2px;
   text-transform: uppercase;
-  color: #ffe0b0;
-  margin-bottom: 16px;
-  /* dark halo lifts the small label off the bright sky */
-  text-shadow: 0 1px 16px rgba(36, 17, 5, 0.9), 0 0 2px rgba(36, 17, 5, 0.6);
-}
-.station-tag.education {
-  color: #ffdf9c;
-}
-.station-tag.career {
-  color: #ffb277;
-}
-.station-tag.teaching {
-  color: #6bf0e6;
+  color: rgba(244, 241, 234, 0.58);
+  margin-bottom: 12px;
 }
 .station-title {
   font-family: var(--sans);
   font-weight: 600;
-  font-size: clamp(28px, 4.4vw, 52px);
-  line-height: 1.04;
-  letter-spacing: -0.022em;
-  margin-bottom: 20px;
-  text-shadow: 0 2px 44px rgba(40, 18, 6, 0.55);
+  font-size: clamp(21px, 2vw, 27px);
+  line-height: 1.12;
+  letter-spacing: -0.012em;
+  margin-bottom: 13px;
+  color: var(--ink);
 }
 .station-summary {
-  font-family: var(--serif);
-  font-weight: 400;
-  font-size: clamp(17px, 1.55vw, 21px);
+  font-family: var(--sans);
+  font-weight: 300;
+  font-size: 14.5px;
   line-height: 1.62;
-  color: rgba(255, 250, 240, 0.94);
-  max-width: 580px;
-  margin: 0 auto 22px;
-  text-shadow: 0 1px 24px rgba(40, 18, 6, 0.6);
+  color: rgba(244, 241, 234, 0.78);
+  margin-bottom: 17px;
 }
 .station-points {
   display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 7px 22px;
+  flex-direction: column;
+  gap: 8px;
   font-family: var(--sans);
   font-weight: 400;
-  font-size: 12.5px;
-  letter-spacing: 0.3px;
-  color: rgba(255, 250, 240, 0.66);
+  font-size: 11.5px;
+  letter-spacing: 0.4px;
+  color: rgba(244, 241, 234, 0.56);
 }
 .station-points span {
   position: relative;
+  padding-left: 15px;
 }
-.station-points span:not(:first-child)::before {
-  content: "·";
+.station-points span::before {
+  content: "";
   position: absolute;
-  left: -13px;
-  color: rgba(255, 250, 240, 0.4);
+  left: 1px;
+  top: 0.62em;
+  width: 5px;
+  height: 5px;
+  border: 1px solid var(--accent);
+  transform: rotate(45deg);
+  opacity: 0.9;
 }
 
 /* ---------------- scroll hint ---------------- */
@@ -237,7 +278,7 @@ canvas#road {
   font-weight: 500;
   font-size: 11px;
   letter-spacing: 3px;
-  color: rgba(255, 250, 240, 0.66);
+  color: rgba(244, 241, 234, 0.62);
   text-transform: uppercase;
   pointer-events: none;
 }
@@ -279,7 +320,7 @@ footer span {
   white-space: nowrap;
 }
 
-@media (max-width: 720px) {
+@media (max-width: 760px) {
   header {
     padding: 16px 18px;
   }
@@ -292,6 +333,15 @@ footer span {
   .wordmark {
     font-size: 18px;
   }
+  /* card drops to bottom-centre, full readable width */
+  .station-layer {
+    align-items: flex-end;
+    justify-content: center;
+    padding: 0 16px 92px;
+  }
+  .station {
+    width: min(540px, 92vw);
+  }
   footer {
     padding: 18px 20px;
     font-size: 11px;
@@ -299,9 +349,6 @@ footer span {
     gap: 10px 18px;
     flex-wrap: wrap;
     justify-content: center;
-  }
-  .station {
-    transform: translateY(0);
   }
 }
 
