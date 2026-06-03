@@ -6,8 +6,5 @@ services:
       context: .
       dockerfile: Dockerfile
     ports:
-      - "3000:3000" # Change the first 3000 if you want a different port on Windows
-    volumes:
-      - .:/app
-    environment:
-      - NODE_ENV=development
+      - "3000:80" # nginx serves on 80 inside the container; change the first 3000 for a different host port
+    restart: unless-stopped
