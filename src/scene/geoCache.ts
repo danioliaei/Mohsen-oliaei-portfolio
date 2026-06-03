@@ -44,9 +44,12 @@ export function buildGeometries(
   geo: GeoData,
   quality: number,
 ): GlobeGeometries {
-  const oceanCount = Math.round(9000 * quality);
-  const landCandidates = Math.round(110000 * quality);
-  const borderSpacing = quality < 1 ? 1.8 : 1.1;
+  const oceanCount = Math.round(13000 * quality);
+  // Far denser land sampling — continents read as a solid dot-density texture
+  // rather than a scatter, so the planet stays legible as you descend.
+  const landCandidates = Math.round(320000 * quality);
+  // Tighter border spacing → near-continuous dotted country outlines.
+  const borderSpacing = quality < 1 ? 1.0 : 0.55;
   const gratStep = 15;
   const gratDot = quality < 1 ? 3.2 : 2.4;
 
@@ -67,24 +70,27 @@ export function buildGeometries(
   const land = pointsGeometry(landPos, {
     aLand: 1,
     aAccent: 0,
-    // ~42% base (visible at orbit), rest fades in as we descend
+    // ~50% base (visible at orbit); the rest fills in quickly so the continents
+    // are fully dense by the COUNTRY framing — nothing stays sparse up close.
     aIn: () => {
       const r = Math.random();
-      return r < 0.42 ? 0 : 0.2 + Math.random() * 0.42;
+      return r < 0.5 ? 0 : 0.05 + Math.random() * 0.33;
     },
-    aCore: () => (Math.random() < 0.03 ? 1 : 0),
+    aCore: () => (Math.random() < 0.022 ? 1 : 0),
   });
 
-  // --- borders: dotted hairline, fades in at COUNTRY ---
+  // --- borders: dotted periwinkle hairline. A distinct accent (aAccent = 2) so
+  // country outlines stand apart from the ink land, and aOut = 2 keeps them
+  // visible all the way to the surface — borders never fade out on zoom. ---
   const borders = pointsGeometry(
-    sampleBorderPoints(geo.countries, borderSpacing, GLOBE_RADIUS * 1.001),
-    { aLand: 0, aAccent: 0, aIn: 0.12, aOut: 0.9 },
+    sampleBorderPoints(geo.countries, borderSpacing, GLOBE_RADIUS * 1.0025),
+    { aLand: 0, aAccent: 2, aIn: 0.1, aOut: 2 },
   );
 
-  // --- graticule: faint lat/long dots ---
+  // --- graticule: faint lat/long dots; recede before the surface to de-clutter ---
   const graticule = pointsGeometry(
-    graticulePoints(gratStep, gratDot, GLOBE_RADIUS * 1.001),
-    { aLand: 0, aAccent: 0, aIn: 0.06, aOut: 0.85 },
+    graticulePoints(gratStep, gratDot, GLOBE_RADIUS * 1.0015),
+    { aLand: 0, aAccent: 0, aIn: 0.06, aOut: 0.72 },
   );
 
   return { ocean, land, borders, graticule, landCount };

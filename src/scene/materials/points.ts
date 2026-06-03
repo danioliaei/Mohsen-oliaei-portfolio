@@ -172,7 +172,7 @@ export function createSharedUniforms(
     uPixelRatio: { value: pixelRatio },
     uMotion: { value: 1 },
     uDark: { value: dark ? 1 : 0 },
-    uSizeMul: { value: dark ? 1.0 : 2.3 },
+    uSizeMul: { value: dark ? 1.0 : 2.0 },
   };
 }
 
@@ -215,5 +215,5 @@ export function applyThemeToShared(shared: SharedUniforms, theme: Theme) {
   shared.uBlue.value.set(p.blue);
   shared.uCoreAdd.value = dark ? 1.0 : 0.25;
   shared.uDark.value = dark ? 1 : 0;
-  shared.uSizeMul.value = dark ? 1.0 : 2.3;
+  shared.uSizeMul.value = dark ? 1.0 : 2.0;
 }

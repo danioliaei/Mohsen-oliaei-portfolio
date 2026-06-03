@@ -105,32 +105,38 @@ function pushSawtooth(
   }
 }
 
-export function buildIso(kind: IsoKind, scale = 1): Float32Array {
+/**
+ * Build an isometric facility as a dense point cloud. `density` multiplies every
+ * point budget so the building resolves into a near-solid scanned model at the
+ * deepest zoom; base counts are already high and scale from there.
+ */
+export function buildIso(kind: IsoKind, scale = 1, density = 1): Float32Array {
   const out: P = [];
+  const N = (n: number) => Math.max(1, Math.round(n * density));
   switch (kind) {
     case "steel": {
       // gabled hall + chimney stacks + silos
-      pushBoxShell(out, 0, 0, 0, 1.6, 0.7, 1.0, 900);
-      pushGableRoof(out, 0, 0.7, 0, 1.6, 0.45, 1.0, 360);
-      pushCylinder(out, 0.55, 0.7, -0.3, 0.07, 1.5, 320); // tall chimney
-      pushCylinder(out, 0.72, 0.7, -0.1, 0.06, 1.2, 240);
-      pushCylinder(out, -0.7, 0.0, 0.35, 0.22, 0.8, 320); // silo
-      pushCylinder(out, -0.4, 0.0, 0.45, 0.18, 0.7, 260);
+      pushBoxShell(out, 0, 0, 0, 1.6, 0.7, 1.0, N(3400));
+      pushGableRoof(out, 0, 0.7, 0, 1.6, 0.45, 1.0, N(1400));
+      pushCylinder(out, 0.55, 0.7, -0.3, 0.07, 1.5, N(1000)); // tall chimney
+      pushCylinder(out, 0.72, 0.7, -0.1, 0.06, 1.2, N(760));
+      pushCylinder(out, -0.7, 0.0, 0.35, 0.22, 0.8, N(1100)); // silo
+      pushCylinder(out, -0.4, 0.0, 0.45, 0.18, 0.7, N(900));
       break;
     }
     case "battery": {
       // long low sawtooth / north-light shed
-      pushBoxShell(out, 0, 0, 0, 2.2, 0.4, 1.1, 900);
-      pushSawtooth(out, 0, 0.4, 0, 2.2, 1.1, 7, 0.28, 700);
-      pushCylinder(out, -1.0, 0.0, -0.5, 0.05, 0.9, 120);
+      pushBoxShell(out, 0, 0, 0, 2.2, 0.4, 1.1, N(3600));
+      pushSawtooth(out, 0, 0.4, 0, 2.2, 1.1, 7, 0.28, N(2800));
+      pushCylinder(out, -1.0, 0.0, -0.5, 0.05, 0.9, N(420));
       break;
     }
     case "tower": {
       // high-rise slab with floor lines
-      pushBoxShell(out, 0, 0, 0, 0.7, 2.4, 0.7, 1100);
+      pushBoxShell(out, 0, 0, 0, 0.7, 2.4, 0.7, N(4200));
       for (let f = 0; f < 14; f++) {
         const y = (f / 14) * 2.4;
-        for (let i = 0; i < 40; i++) {
+        for (let i = 0; i < N(110); i++) {
           const e = Math.floor(Math.random() * 4);
           const u = (Math.random() - 0.5) * 0.7;
           if (e === 0) out.push(0.35, y, u);
@@ -143,16 +149,16 @@ export function buildIso(kind: IsoKind, scale = 1): Float32Array {
     }
     case "office": {
       // medium block with a stepped wing
-      pushBoxShell(out, -0.2, 0, 0, 1.1, 0.9, 0.9, 800);
-      pushBoxShell(out, 0.7, 0, 0.1, 0.7, 0.55, 0.7, 420);
+      pushBoxShell(out, -0.2, 0, 0, 1.1, 0.9, 0.9, N(3000));
+      pushBoxShell(out, 0.7, 0, 0.1, 0.7, 0.55, 0.7, N(1500));
       break;
     }
     case "module":
     default: {
       // abstract stacked cubes — generic "tool" massing
-      pushBoxShell(out, -0.3, 0, -0.2, 0.6, 0.6, 0.6, 320);
-      pushBoxShell(out, 0.35, 0, 0.1, 0.5, 0.9, 0.5, 360);
-      pushBoxShell(out, 0.0, 0.6, 0.3, 0.45, 0.45, 0.45, 260);
+      pushBoxShell(out, -0.3, 0, -0.2, 0.6, 0.6, 0.6, N(1200));
+      pushBoxShell(out, 0.35, 0, 0.1, 0.5, 0.9, 0.5, N(1300));
+      pushBoxShell(out, 0.0, 0.6, 0.3, 0.45, 0.45, 0.45, N(950));
       break;
     }
   }

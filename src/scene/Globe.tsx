@@ -46,13 +46,15 @@ export function Globe({
       base: opacity,
     });
     return {
-      ocean: mk(1.7, 0.4),
-      land: mk(2.1, 0.96),
-      borders: mk(1.5, 0.5),
-      graticule: mk(1.2, 0.32),
-      marker: mk(5.0, 1.0),
-      arc: mk(1.7, 0.72),
-      facility: mk(2.7, 1.0),
+      ocean: mk(1.5, 0.34),
+      // denser land → slightly smaller/softer points so it reads as crisp
+      // stippling instead of blowing out to a solid mass under additive bloom.
+      land: mk(1.9, 0.72),
+      // borders carry the country legibility — bright + bold periwinkle dots.
+      borders: mk(2.0, 0.9),
+      graticule: mk(1.2, 0.24),
+      marker: mk(5.2, 1.0),
+      arc: mk(1.7, 0.66),
     };
   }, [shared, theme]);
 
@@ -97,7 +99,7 @@ export function Globe({
         graticuleMat={mats.graticule.m}
       />
       <Markers world={world} markerMat={mats.marker.m} arcMat={mats.arc.m} />
-      <Facility world={world} material={mats.facility.m} />
+      <Facility world={world} shared={shared} />
 
       {showCollider && (
         <mesh
