@@ -127,9 +127,50 @@ canvas#road {
   width: 100%;
   height: 100%;
   display: block;
-  /* grading profile — saturation boost + contrast/black-crush so the contour
-     land reads like a painted plastic miniature under hard studio lighting */
-  filter: saturate(1.14) contrast(1.11) brightness(0.97);
+  /* colour grade (saturation + contrast) happens in the GPU composite pass. */
+}
+
+/* ---------------- WebGPU-required notice (no-WebGPU browsers) ---------------- */
+.gpu-notice {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 0 24px;
+}
+.gpu-notice-inner {
+  max-width: 540px;
+  padding: 40px;
+  background: radial-gradient(
+    120% 100% at 50% 50%,
+    rgba(6, 4, 2, 0.55) 0%,
+    rgba(6, 4, 2, 0.3) 48%,
+    rgba(6, 4, 2, 0) 78%
+  );
+}
+.gpu-notice-eyebrow {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: var(--c-education);
+  margin-bottom: 18px;
+}
+.gpu-notice-title {
+  font-size: clamp(28px, 5vw, 50px);
+  font-weight: 600;
+  line-height: 1.08;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+  margin-bottom: 18px;
+  text-shadow: 0 2px 30px rgba(0, 0, 0, 0.6);
+}
+.gpu-notice-body {
+  font-size: 15px;
+  font-weight: 300;
+  line-height: 1.62;
+  color: rgba(244, 241, 234, 0.78);
+  text-shadow: 0 1px 18px rgba(0, 0, 0, 0.5);
 }
 
 /* ---------------- floating navigation card (right) ---------------- */
