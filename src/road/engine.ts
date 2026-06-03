@@ -5,9 +5,13 @@
    ========================================================================= */
 
 // ---- camera / projection tuning ----
-export const FOCAL = 1.1;
-export const CAM_H = 2200;
-export const HORIZON = 0.42;
+// An ELEVATED, looking-down aerial eye (the "tilt-shift miniature" vantage of the
+// reference): the eye sits high above the valley floor (large CAM_H) and the
+// horizon is pushed up the frame (small HORIZON) so the topographic land fills
+// almost the whole view and recedes to a compressed, distant ridge line.
+export const FOCAL = 1.04;
+export const CAM_H = 3850;
+export const HORIZON = 0.24;
 export const VIEW_DEPTH = 11000;
 export const STEP = 120;
 
@@ -63,26 +67,40 @@ export const roadElevation = (z: number): number => {
  * on both sides. The point cloud and the road read from this same field, so the
  * road genuinely sits in the trough between the hills.
  */
-export const terrainHeight = (x: number, z: number): number => {
-  const road = LAT(z);
+/**
+ * Terrain RELIEF above the local valley floor at (x, z), GIVEN the precomputed
+ * road centreline `road = LAT(z)`. This is the per-point work only — it contains
+ * no z-only terms — so the hot sampling loop can hoist the costly `LAT(z)` and
+ * `roadElevation(z)` (sines + exponentials) out to once per depth row.
+ */
+export const reliefAt = (x: number, z: number, road: number): number => {
   const ad = Math.abs(x - road); // lateral distance from the road centreline
   const side = smoothstep(90, 1700, ad); // 0 on the road .. 1 up the hillsides
 
-  // valley walls climb away from the road — kept close so the glowing cloud
+  // valley walls climb away from the road — kept close so the glowing land
   // hugs the verge rather than leaving a bare plain between road and hills
-  const wall = smoothstep(200, 2400, ad) * 2300;
-  // rolling ridges/peaks textured onto the hillsides (muted near the road)
+  const wall = smoothstep(200, 2500, ad) * 2550;
+  // rolling ridges/peaks textured onto the hillsides (muted near the road).
+  // Layered octaves — broad swells down to fine crinkle — so the contour field
+  // reads as DENSE, organically flowing isolines like the reference.
   const rolling =
-    560 * Math.sin(z * 0.00055 + x * 0.0007) +
-    360 * Math.sin(z * 0.0011 - x * 0.0009 + 1.3) +
-    240 * Math.sin(x * 0.0014 + 0.6);
+    640 * Math.sin(z * 0.00055 + x * 0.0007) +
+    430 * Math.sin(z * 0.0011 - x * 0.0009 + 1.3) +
+    270 * Math.sin(x * 0.0014 + 0.6) +
+    190 * Math.sin(z * 0.0019 + x * 0.0016 + 2.1) +
+    125 * Math.sin(x * 0.0027 - z * 0.0009 + 0.9) +
+    78 * Math.sin(z * 0.0036 + x * 0.0031 + 3.2);
 
-  return roadElevation(z) + wall + rolling * side;
+  return wall + rolling * side;
 };
 
-/** Height of the terrain ABOVE the local road floor (>= 0). Drives the cloud. */
+/** Absolute world elevation at (x, z) — the valley floor plus its relief. */
+export const terrainHeight = (x: number, z: number): number =>
+  roadElevation(z) + reliefAt(x, z, LAT(z));
+
+/** Height of the terrain ABOVE the local road floor (>= 0). Drives the land. */
 export const terrainRelief = (x: number, z: number): number =>
-  terrainHeight(x, z) - roadElevation(z);
+  reliefAt(x, z, LAT(z));
 
 /**
  * Half-width of the tarmac at depth `dz` from the camera. The near width is

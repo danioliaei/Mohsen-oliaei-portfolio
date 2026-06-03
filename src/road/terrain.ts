@@ -18,21 +18,23 @@
    batched into one Path2D per depth band — a handful of stroke() calls total.
    ========================================================================= */
 
-import { VIEW_DEPTH, project, roadElevation, terrainHeight } from "./engine";
+import { LAT, VIEW_DEPTH, project, reliefAt, roadElevation } from "./engine";
 
-const NX = 168; // lateral grid cells
-const NZ = 150; // depth grid cells
+const NX = 232; // lateral grid cells (fine, for smooth dense isolines)
+const NZ = 168; // depth grid cells
 const HALF_W = 8200; // world lateral half-range, centred on the camera
 const NODES = (NX + 1) * (NZ + 1);
 
-// contour levels — relief (height above the local road floor) in world units
-const LMIN = 90;
-const LSTEP = 150;
-const NLEV = 19; // LMIN .. LMIN+(NLEV-1)*LSTEP  → up to ~2790
+// contour levels — relief (height above the local road floor) in world units.
+// Tight spacing + many levels → the dense, closely-stacked topographic isolines
+// of the reference (a fine survey map, not a few sparse rings).
+const LMIN = 46;
+const LSTEP = 60;
+const NLEV = 56; // LMIN .. LMIN+(NLEV-1)*LSTEP  → up to ~3346
 
 // depth bands: segments are grouped by depth so each band strokes once with its
 // own focus/alpha/width — gives the depth-of-field fade cheaply.
-const NB = 11;
+const NB = 14;
 
 /** Edge → its two corner offsets (TL,TR,BR,BL order). */
 // corner indices within a cell: 0=TL 1=TR 2=BR 3=BL
@@ -87,11 +89,13 @@ export class Terrain {
       const tz = j / NZ;
       // bias rows toward the near field so foreground contours are finely sampled
       const z = near + (far - near) * (tz * tz * 0.62 + tz * 0.38);
+      const rz = roadElevation(z); // valley-floor elevation (z-only) — hoisted
+      const road = LAT(z); // road centreline (z-only) — hoisted
       for (let i = 0; i <= NX; i++, idx++) {
         const x = camX - HALF_W + ((2 * HALF_W) * i) / NX;
-        const el = terrainHeight(x, z);
-        F[idx] = el - roadElevation(z); // relief above the valley floor
-        const pr = project(x, z, el, camX, camZ, camY, W, H);
+        const relief = reliefAt(x, z, road);
+        F[idx] = relief; // relief above the valley floor
+        const pr = project(x, z, rz + relief, camX, camZ, camY, W, H);
         if (!pr) {
           OK[idx] = 0;
           continue;
@@ -198,20 +202,21 @@ export class Terrain {
       }
     }
 
-    // ---- 4. stroke each band with a depth-of-field focus fade ----
+    // ---- 4. stroke each band with a gentle atmospheric depth fade ----
+    // The sharp/soft FOCUS (tilt-shift bokeh) is applied by the compositor in
+    // RoadStage; here we only grade brightness + warmth with depth so distant
+    // ridges dissolve into the golden horizon while the near land stays luminous.
     ctx.save();
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
     for (let b = 0; b < NB; b++) {
       const t = b / (NB - 1); // 0 near .. 1 far
-      // soft focus window: sharpest just into the field, falling off near & far
-      const focus = Math.exp(-(((t - 0.16) / 0.4) ** 2));
-      const alpha = Math.min(0.62, 0.05 + 0.62 * focus);
-      if (alpha < 0.012) continue;
-      const width = 0.5 + (1 - t) * 0.95;
-      // luminous near-white, easing very slightly warm/cool with depth
-      const g = Math.round(249 - t * 16);
-      const bch = Math.round(241 - t * 34);
+      const fade = t < 0.42 ? 1 : Math.max(0, 1 - (t - 0.42) / 0.52);
+      const alpha = 0.12 + 0.52 * fade;
+      const width = 0.5 + (1 - t) * 0.58;
+      // luminous warm-ivory near → warm amber as it recedes into the sunset
+      const g = Math.round(248 - t * 34);
+      const bch = Math.round(236 - t * 96);
       ctx.strokeStyle = `rgba(255,${g},${bch},${alpha})`;
       ctx.lineWidth = width;
       ctx.stroke(this.paths[b]);
