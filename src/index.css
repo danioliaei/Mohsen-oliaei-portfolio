@@ -3,6 +3,10 @@
   --mono: "Space Mono", "Courier New", monospace;
   --ink: #fffaf0;
   --label: rgba(34, 18, 6, 0.72);
+  /* station kind accent colours (cards only) */
+  --c-education: #ffc45c;
+  --c-career: #ff7e38;
+  --c-teaching: #54e9de;
 }
 
 * {
@@ -103,7 +107,7 @@ nav a:hover::after {
 
 /* ---------------- scroll stage ---------------- */
 .scrollwrap {
-  height: 760vh;
+  height: 1130vh;
   position: relative;
 }
 .stage {
@@ -181,36 +185,6 @@ canvas#road {
   }
 }
 
-/* ---------------- hud ---------------- */
-.hud {
-  position: absolute;
-  z-index: 10;
-  left: 34px;
-  bottom: 64px;
-  font-family: var(--mono);
-  color: rgba(255, 250, 240, 0.85);
-  pointer-events: none;
-}
-.hud .idx {
-  font-size: 13px;
-  letter-spacing: 3px;
-}
-.hud .bar {
-  margin-top: 10px;
-  width: 180px;
-  height: 2px;
-  background: rgba(255, 250, 240, 0.22);
-  position: relative;
-  overflow: hidden;
-}
-.hud .bar > i {
-  position: absolute;
-  inset: 0 auto 0 0;
-  width: 0%;
-  background: #fffaf0;
-  box-shadow: 0 0 12px rgba(255, 220, 160, 0.9);
-}
-
 /* ---------------- perspective milestone cards ---------------- */
 .mk {
   position: absolute;
@@ -244,6 +218,20 @@ canvas#road {
   line-height: 1.7;
   color: rgba(255, 250, 240, 0.85);
   white-space: nowrap;
+}
+
+/* each kind of station is tagged in its own road colour */
+.mk.education .tag {
+  color: var(--c-education);
+  text-shadow: 0 0 18px rgba(255, 196, 92, 0.5);
+}
+.mk.career .tag {
+  color: var(--c-career);
+  text-shadow: 0 0 18px rgba(255, 126, 56, 0.5);
+}
+.mk.teaching .tag {
+  color: var(--c-teaching);
+  text-shadow: 0 0 18px rgba(84, 233, 222, 0.55);
 }
 
 /* ---------------- footer ---------------- */
