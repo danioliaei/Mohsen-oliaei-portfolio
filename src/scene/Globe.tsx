@@ -3,6 +3,7 @@ import { useFrame } from "@react-three/fiber";
 import type { ShaderMaterial } from "three";
 
 import type { World } from "../data/world";
+import { focusCountryIndex } from "../data/world";
 import { getState, useStore } from "../store";
 import { type SharedUniforms, createPointsMaterial } from "./materials/points";
 import type { GlobeGeometries } from "./geoCache";
@@ -39,6 +40,8 @@ export function Globe({
 
   const hover = useRef(false);
   const vis = useRef(1);
+  const focusAmt = useRef(0);
+  const lastFocus = useRef(0);
 
   const mats = useMemo(() => {
     const mk = (size: number, opacity: number): MatEntry => ({
@@ -47,12 +50,11 @@ export function Globe({
     });
     return {
       ocean: mk(1.5, 0.34),
-      // denser land → slightly smaller/softer points so it reads as crisp
-      // stippling instead of blowing out to a solid mass under additive bloom.
-      land: mk(1.9, 0.72),
-      // borders carry the country legibility — bright + bold periwinkle dots.
-      borders: mk(2.0, 0.9),
-      graticule: mk(1.2, 0.24),
+      // dense land reads as solid continents (the masses); borders outline them.
+      land: mk(2.3, 0.9),
+      // borders are clean periwinkle outlines over the land — present, not a wash.
+      borders: mk(2.0, 0.78),
+      graticule: mk(1.2, 0.22),
       marker: mk(5.2, 1.0),
       arc: mk(1.7, 0.66),
     };
@@ -82,6 +84,17 @@ export function Globe({
       m.uniforms.uReveal.value = revealH;
       m.uniforms.uZoom.value = reveal;
       m.uniforms.uOpacity.value = base * op * hoverMul;
+    }
+
+    // focus spotlight: light the focused country on the geography layers only
+    // (markers/arcs stay full strength). Eased so it fades in/out smoothly.
+    const idx = isFront ? focusCountryIndex(world, s.focusedNodeId) : 0;
+    if (idx > 0) lastFocus.current = idx;
+    const amtTarget = idx > 0 ? 1 : 0;
+    focusAmt.current += (amtTarget - focusAmt.current) * (1 - Math.exp(-5 * dt));
+    for (const m of [mats.land.m, mats.borders.m]) {
+      m.uniforms.uFocusCountry.value = lastFocus.current;
+      m.uniforms.uFocusAmt.value = focusAmt.current;
     }
   });
 

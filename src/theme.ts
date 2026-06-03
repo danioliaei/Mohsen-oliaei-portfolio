@@ -50,9 +50,9 @@ export const SLOT = {
 export const CAM_DIST = {
   ORBIT: 4.4,
   WORLD: 2.62,
-  COUNTRY: 1.92,
-  CITY: 1.45,
-  TOWN: 1.3,
+  COUNTRY: 1.78,
+  CITY: 1.42,
+  TOWN: 1.28,
   FACILITY: 1.16,
   ROOM: 1.16,
   SCREEN: 1.16,

@@ -32,6 +32,8 @@ const vertex = /* glsl */ `
   uniform float uMotion;     // 0 reduced-motion, 1 normal
   uniform float uBreathe;    // breathing amplitude scale
   uniform float uSizeMul;    // per-theme size multiplier
+  uniform float uFocusCountry; // highlighted country index (0 = none)
+  uniform float uFocusAmt;     // 0..1 spotlight strength
 
   attribute float aRand;
   attribute float aIn;
@@ -39,11 +41,13 @@ const vertex = /* glsl */ `
   attribute float aCore;
   attribute float aLand;
   attribute float aAccent;
+  attribute float aCountry;
 
   varying float vAlpha;
   varying float vCore;
   varying float vAccent;
   varying float vLand;
+  varying float vFocus;
 
   void main() {
     vec3 pos = position;
@@ -75,12 +79,21 @@ const vertex = /* glsl */ `
     // depth shading: dim the far hemisphere but keep the sphere legible
     float depthFade = mix(0.16, 1.0, front);
 
-    vAlpha = band * depthFade;
+    // focus spotlight: when a country is focused, lift its points and dim the
+    // rest, so the focused country reads as a clear, bright shape.
+    float isFocus = (uFocusCountry > 0.5 && abs(aCountry - uFocusCountry) < 0.5)
+      ? 1.0 : 0.0;
+    // dim non-focused geography but keep neighbours readable for context.
+    float spotlight = mix(1.0, mix(0.42, 1.0, isFocus), uFocusAmt);
+    float lift = isFocus * uFocusAmt;
+
+    vAlpha = band * depthFade * spotlight;
     vCore = aCore;
     vAccent = aAccent;
     vLand = aLand;
+    vFocus = lift;
 
-    float sizeBoost = 1.0 + aCore * 1.7 + aLand * 0.35;
+    float sizeBoost = 1.0 + aCore * 1.7 + aLand * 0.35 + lift * 0.8;
     float facingSize = mix(0.62, 1.0, front);
     float variance = 0.7 + aRand * 0.6;
     float s = uSize * uSizeMul * uPixelRatio * sizeBoost * facingSize * variance * (1.0 / max(0.05, -mvPosition.z));
@@ -104,6 +117,7 @@ const fragment = /* glsl */ `
   varying float vCore;
   varying float vAccent;
   varying float vLand;
+  varying float vFocus;
 
   void main() {
     vec2 uv = gl_PointCoord - 0.5;
@@ -115,15 +129,19 @@ const fragment = /* glsl */ `
     if (vAccent > 1.5) base = uBlue;
     else if (vAccent > 0.5) base = uPink;
 
+    // focused land glows pink so the country pops; focused borders stay blue.
+    base = mix(base, uPink, vFocus * vLand * 0.8);
+
     // On dark we brighten toward a hot, bloom-feeding core. On light we must NOT
     // lighten the dark dots (that kills contrast); instead we drive density via
     // alpha so land + cores read as crisp dark stippling on the light page.
-    float bright = 1.0 + vLand * 0.22 + vCore * uCoreAdd;
+    float bright = 1.0 + vLand * 0.22 + vCore * uCoreAdd + vFocus * 0.9;
     vec3 color = base * mix(1.0, bright, uDark);
     color += base * vCore * uCoreAdd * (1.0 - d) * 0.7 * uDark;
 
     float alpha = vAlpha * disc * uOpacity;
     alpha *= 1.0 + (vLand * 0.95 + vCore * 0.7) * (1.0 - uDark);
+    alpha += vFocus * disc * uOpacity * 0.2 * uDark; // focus glow (dark)
     alpha = min(alpha, 1.0);
     if (alpha < 0.01) discard;
 
@@ -196,6 +214,8 @@ export function createPointsMaterial(
       uReveal: { value: reveal },
       uZoom: { value: 0 },
       uBreathe: { value: breathe },
+      uFocusCountry: { value: 0 },
+      uFocusAmt: { value: 0 },
     },
     vertexShader: vertex,
     fragmentShader: fragment,

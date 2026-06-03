@@ -17,9 +17,18 @@ rendered as points. Continents are sampled from real geography with
 
 ## Tech
 
-Vite · React + TypeScript · react-three-fiber + @react-three/drei ·
-@react-three/postprocessing (Bloom) · GSAP · Zustand · d3-geo + world-atlas ·
-Inter (self-hosted via `@fontsource/inter`).
+Latest 2026 frontend stack:
+
+Vite 8 · React 19 + TypeScript 6 · react-three-fiber v9 + @react-three/drei v10 ·
+@react-three/postprocessing v3 (Bloom) · three r0.184 · GSAP · Zustand 5 ·
+d3-geo + world-atlas · Inter (self-hosted via `@fontsource/inter`).
+
+The globes are dense dot-density Earths: continents fill in as you approach,
+country outlines (coastlines + borders) glow in periwinkle and stay legible at
+every zoom, and the country you descend into is **spotlit** — its land lights up
+while the rest dims, so you always know where you are. Descending flies the
+camera down to an oblique aerial of the focused region; a Built project resolves
+into a near-solid point-cloud building viewed **bird's-eye, from the sky**.
 
 ## Run
 

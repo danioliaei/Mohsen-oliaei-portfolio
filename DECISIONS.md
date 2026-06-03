@@ -19,9 +19,13 @@ portfolio, per the brief's instruction to pick sensible defaults and keep moving
 
 ## Stack / versions
 
-- **React 18 + react-three-fiber v8 + drei v9 + postprocessing v2** — the most
-  stable, well-tested quad at time of writing (v9/v10 R3F requires React 19 and
-  is less battle-tested with the wider ecosystem). Easy to bump later.
+- **Latest 2026 stack: React 19 + react-three-fiber v9 + drei v10 +
+  postprocessing v3, on three r0.184, Vite 8, TypeScript 6 and Zustand 5.** The
+  whole toolchain is current as of 2026; the build + typecheck pass clean and the
+  app was smoke-tested headlessly (WebGL render + full navigation, no runtime
+  errors — only an upstream `THREE.Clock` deprecation warning from R3F).
+- TS 6 deprecates `baseUrl`; the `@/*` path alias now resolves relative to the
+  tsconfig dir (no `baseUrl`), mirrored by the Vite alias.
 - **Plain CSS with custom properties** for the HUD (not Tailwind). The
   editorial/instrument aesthetic wants precise, hand-tuned hairlines, grain and
   tabular numerics; tokens live in `src/styles/tokens.css` and are mirrored as
@@ -33,10 +37,21 @@ portfolio, per the brief's instruction to pick sensible defaults and keep moving
 ## Scene / camera architecture
 
 - **Navigation = rotate the active globe so the focus point faces the camera
-  (+Z), then dolly in along +Z.** This guarantees the limb of the sphere stays
-  in frame, so descending reads as dropping out of the sky toward a curved
-  planet rather than panning a flat map. Zoom-to-cursor is implemented by easing
-  the picked sphere point toward centre as you dolly.
+  (+Z), then dolly in along +Z.** Zoom-to-cursor eases the picked sphere point
+  toward centre as you dolly.
+- **Descent framing (2026 pass).** WORLD frames the whole globe (a recognisable
+  dotted Earth). COUNTRY / CITY / TOWN then **fly down toward the focused surface
+  point** and look at it from an oblique aerial angle, so the focused region
+  fills the frame and its land + borders become legible instead of a distant
+  speckle. The camera rig interpolates an **up-vector** alongside position / look
+  / fov.
+- **Bird's-eye projects.** A Built leaf (FACILITY) is framed from the sky: the
+  building's vertical axis is world +Z after focus, so the camera rises along it
+  and swings to a 3/4 corner with +Z as camera-up — a high aerial that reads the
+  isometric building from above. The facility's reveal is **decoupled** from the
+  globe density ramp (its own eased reveal), so this tight framing never thins
+  the model; building counts are ~4× denser so it resolves into a near-solid
+  point-cloud scan.
 - **The active world's globe always sits at the origin**; the inactive one sits
   in a smaller, offset "back" slot. The world switch animates the two trading
   slots (depth swap) and arcs the camera.
@@ -57,9 +72,18 @@ portfolio, per the brief's instruction to pick sensible defaults and keep moving
 - **Land is sampled once with `geoContains`** over a fibonacci candidate set and
   shared by BOTH globes (the back globe just keeps `uZoom = 0`, so its
   density-ramp points stay hidden). This halves the most expensive work.
-- **Continents are visible at ORBIT** (the hero dotted Earth) with ~30% "base"
-  land points; the remaining land + borders + graticule + city clusters fade in
-  via `aIn` as you descend — that is the "gets denser as you approach" ramp.
+- **Density / legibility (2026 pass).** Land is sampled far denser (~320k
+  candidates → tens of thousands of land points) with ~60% "base" visible from
+  orbit and the rest filling in fast, so the continents read as solid dot-density
+  texture rather than a sparse scatter. Country outlines (coastlines + borders)
+  are a distinct **periwinkle accent** (`aAccent = 2`), denser, and `aOut = 2` so
+  they **never fade out on zoom** — countries stay legible all the way in. The
+  graticule recedes early to de-clutter close-in views.
+- **Focus spotlight.** Land + border points are tagged per country (`aCountry`,
+  Sweden/Iran/USA via `world-atlas` `properties.name`); a `uFocusCountry` +
+  eased `uFocusAmt` uniform lights the focused country (pink land, bright
+  outline) and dims the rest — only on the geography layers, so markers/arcs stay
+  full strength. This is what makes "which country am I in" obvious up close.
 - **`world-atlas` `countries-110m.json`** provides both land (merged into one
   MultiPolygon for hit-testing) and per-country boundaries (resampled as dotted
   point trails). Copied to `public/geo/`.

@@ -495,14 +495,24 @@ export function useDescent(groups: GroupRefs) {
         .addScaledVector(FAC_AZ, fd * Math.cos(pitch));
       return { pos, look: anchor, fov: 32, up: UP_Z };
     }
-    // descent: camera on +Z, globe rotates focus to front, slight tilt
     const d = goalDist.current;
-    return {
-      pos: tmpGoalPos.set(0, d * 0.05, d),
-      look: ORIGIN,
-      fov: fovFor(lod),
-      up: UP_Y,
-    };
+    if (lod === "WORLD") {
+      // whole globe in frame — a recognisable dotted Earth, focus hub at front.
+      return {
+        pos: tmpGoalPos.set(0, d * 0.05, d),
+        look: ORIGIN,
+        fov: fovFor("WORLD"),
+        up: UP_Y,
+      };
+    }
+    // COUNTRY / CITY / TOWN: fly down toward the focused surface point (now at +Z)
+    // and look at it from an oblique aerial angle, so the focused region fills the
+    // frame and its land + borders become legible instead of a far-off speckle.
+    const surfaceDist = Math.max(0.3, d - GLOBE_RADIUS);
+    const pos = facAnchor
+      .copy(SURFACE_PT)
+      .addScaledVector(OBLIQUE_DIR, surfaceDist);
+    return { pos, look: SURFACE_PT, fov: fovFor(lod), up: UP_Y };
   }
 }
 
@@ -524,3 +534,7 @@ const UP_Z = new Vector3(0, 0, 1);
 // Azimuth in the facility footprint plane (world X-Y) — a 3/4 corner approach.
 const FAC_AZ = new Vector3(0.42, 0.86, 0).normalize();
 const facAnchor = new Vector3();
+// The focused surface point (a node is rotated to +Z) and the oblique aerial
+// direction the descent camera sits along when looking down at it.
+const SURFACE_PT = new Vector3(0, 0, GLOBE_RADIUS);
+const OBLIQUE_DIR = new Vector3(0, 0.45, 1).normalize();

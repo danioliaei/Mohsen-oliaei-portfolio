@@ -18,6 +18,8 @@ export interface AttrSpecs {
   aCore?: AttrSpec;
   aLand?: AttrSpec;
   aAccent?: AttrSpec;
+  /** highlight country index (0 = none) — drives the focus spotlight. */
+  aCountry?: AttrSpec;
 }
 
 const DEFAULTS: Required<AttrSpecs> = {
@@ -27,6 +29,7 @@ const DEFAULTS: Required<AttrSpecs> = {
   aCore: 0,
   aLand: 0,
   aAccent: 0,
+  aCountry: 0,
 };
 
 export function pointsGeometry(
