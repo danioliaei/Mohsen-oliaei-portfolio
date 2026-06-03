@@ -14,6 +14,20 @@ export const STEP = 120;
 /** World half-width of the tarmac near the camera. Tapered with depth below. */
 export const ROAD_W = 13;
 
+/**
+ * Horizontal "lens shift" — the screen-space fraction the world's optical axis
+ * (the road centreline at the camera) maps to. 0.5 = centred. We push it left
+ * so the glowing road rides the LEFT third of the frame, freeing the right side
+ * for the floating navigation cards. Set per-frame by the render loop (it eases
+ * back toward centre on narrow viewports). The lateral SPREAD is unchanged — we
+ * only move the origin, so the road geometry stays exactly as tuned.
+ */
+let LENS_X = 0.5;
+export const setLensX = (v: number): void => {
+  LENS_X = v;
+};
+export const getLensX = (): number => LENS_X;
+
 /** Lateral sway of the road centreline at depth z — a winding mountain route. */
 export const LAT = (z: number): number =>
   300 * Math.sin(z * 0.00019) +
@@ -107,7 +121,7 @@ export function project(
   if (dz < 1) return null;
   const scale = FOCAL / dz;
   return {
-    x: W / 2 + scale * (px - camX) * (W / 2),
+    x: W * LENS_X + scale * (px - camX) * (W / 2),
     // higher terrain (py > camY) lifts the point up the screen
     y: H * HORIZON + scale * (CAM_H - (py - camY)) * (H / 2),
     scale,

@@ -7,9 +7,8 @@ import {
   STEP,
   clamp,
   project,
-  roadColor,
   roadElevation,
-  roadHalfWidth,
+  setLensX,
   smoothstep,
 } from "../road/engine";
 import { Terrain } from "../road/terrain";
@@ -22,24 +21,20 @@ const TAU = 0.16; // smoothing time-constant for the scroll camera (seconds)
 /** How far ahead (world units) a station sits when the camera "arrives" at it. */
 const ARRIVE_DZ = 1300;
 
-/** Per-kind accent for station markers — echoes the tag colour. */
+/** Per-kind accent for station markers / connectors — echoes the tag colour. */
 const KIND_RGB: Record<string, string> = {
   education: "255,196,92",
-  career: "255,126,56",
-  teaching: "84,233,222",
+  career: "255,150,80",
+  teaching: "120,232,224",
 };
 
 /** Scroll-Y for each station's resting camera position. */
 const SNAP_Z = MILESTONES.map((m) => clamp(m.z - ARRIVE_DZ, 0, TRAVEL));
 
-/** Sampled road cross-section at one depth slice. */
+/** Sampled road centreline point at one depth slice. */
 interface RoadPt {
   cx: number;
   cy: number;
-  lx: number;
-  ly: number;
-  rx: number;
-  ry: number;
   scale: number;
   dz: number;
   depthT: number;
@@ -53,6 +48,7 @@ export default function RoadStage() {
   const wrapRef = useRef<HTMLDivElement>(null);
   const hintRef = useRef<HTMLDivElement>(null);
   const footerRef = useRef<HTMLElement>(null);
+  const cardRef = useRef<HTMLDivElement>(null);
   const activeRef = useRef(0);
   const [active, setActive] = useState(0);
 
@@ -64,7 +60,7 @@ export default function RoadStage() {
     if (!ctx) return;
 
     const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    const embers = reduce ? null : new EmberField(64);
+    const embers = reduce ? null : new EmberField(48);
     const terrain = new Terrain();
 
     let W = 0;
@@ -180,36 +176,32 @@ export default function RoadStage() {
       prevDisplayed = displayed;
       const speed = clamp(vel * 9, 0, 1); // 0..1 motion energy
 
+      // push the optical axis left on wide viewports so the road rides the left
+      // third and the floating cards own the right; ease back to centre on phones
+      const wide = W >= 760;
+      setLensX(wide ? 0.31 : 0.46);
+
       const camZ = p * TRAVEL;
       const camX = LAT(camZ);
       const camY = roadElevation(camZ); // eye rides the valley floor
 
       ctx.clearRect(0, 0, W, H);
 
-      // digital land: dense organic point cloud forming the valley
+      // digital land: flowing topographic contour lines forming the valley
       terrain.draw(ctx, W, H, camX, camZ, camY);
 
-      // atmosphere: drifting embers
+      // atmosphere: a few drifting warm motes
       embers?.draw(ctx, W, H, dt, t);
 
-      // sample the road ahead, following the valley floor, tapering with depth
+      // sample the road centreline ahead, following the valley floor
       const pts: RoadPt[] = [];
-      for (let z = camZ + 40; z < camZ + VIEW_DEPTH; z += STEP) {
+      for (let z = camZ + 30; z < camZ + VIEW_DEPTH; z += STEP) {
         const el = roadElevation(z);
-        const dz = z - camZ;
-        const half = roadHalfWidth(dz);
         const c = project(LAT(z), z, el, camX, camZ, camY, W, H);
         if (!c) continue;
-        const l = project(LAT(z) - half, z, el, camX, camZ, camY, W, H);
-        const r = project(LAT(z) + half, z, el, camX, camZ, camY, W, H);
-        if (!l || !r) continue;
         pts.push({
           cx: c.x,
           cy: c.y,
-          lx: l.x,
-          ly: l.y,
-          rx: r.x,
-          ry: r.y,
           scale: c.scale,
           dz: c.dz,
           depthT: Math.min(c.dz / VIEW_DEPTH, 1),
@@ -221,107 +213,67 @@ export default function RoadStage() {
 
         // breathing warm halo at the vanishing point (the destination glow)
         const pulse = 1 + 0.05 * Math.sin(t * 1.3);
-        const haloR = Math.max(W, H) * 0.22 * pulse;
+        const haloR = Math.max(W, H) * 0.2 * pulse;
         const halo = ctx.createRadialGradient(vp.cx, vp.cy, 0, vp.cx, vp.cy, haloR);
-        halo.addColorStop(0, `rgba(255,214,140,${0.4 + speed * 0.24})`);
-        halo.addColorStop(0.4, `rgba(255,150,60,${0.12 + speed * 0.1})`);
-        halo.addColorStop(1, "rgba(255,150,60,0)");
+        halo.addColorStop(0, `rgba(255,196,110,${0.26 + speed * 0.22})`);
+        halo.addColorStop(0.45, `rgba(255,140,54,${0.08 + speed * 0.08})`);
+        halo.addColorStop(1, "rgba(255,140,54,0)");
+        ctx.save();
+        ctx.globalCompositeOperation = "lighter";
         ctx.fillStyle = halo;
         ctx.fillRect(0, 0, W, H);
-
-        // wide soft bloom underlay along the centreline
-        ctx.save();
-        ctx.beginPath();
-        ctx.moveTo(pts[0].cx, pts[0].cy);
-        for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].cx, pts[i].cy);
-        ctx.strokeStyle = "rgba(255,236,200,0.26)";
-        ctx.lineWidth = 18;
-        ctx.lineCap = "round";
-        ctx.lineJoin = "round";
-        ctx.shadowColor = "rgba(255,150,60,0.9)";
-        ctx.shadowBlur = 30 + speed * 22;
-        ctx.stroke();
         ctx.restore();
 
-        // tarmac body — perspective ribbon with a softly lit crown
-        ctx.lineJoin = "round";
-        for (let i = 0; i < pts.length - 1; i++) {
-          const a = pts[i];
-          const b = pts[i + 1];
-          ctx.beginPath();
-          ctx.moveTo(a.lx, a.ly);
-          ctx.lineTo(b.lx, b.ly);
-          ctx.lineTo(b.rx, b.ry);
-          ctx.lineTo(a.rx, a.ry);
-          ctx.closePath();
-          const grad = ctx.createLinearGradient(a.lx, a.ly, a.rx, a.ry);
-          grad.addColorStop(0, roadColor(a.depthT, 0.34));
-          grad.addColorStop(0.5, roadColor(a.depthT, 0.95));
-          grad.addColorStop(1, roadColor(a.depthT, 0.34));
-          ctx.fillStyle = grad;
-          ctx.fill();
-        }
-
-        // luminous tapering edge rails for a crisp, modern definition
+        // ---- the road as a single glowing fibre ----
+        // one soft cohesive bloom underlay (a single shadow-blurred stroke)
         ctx.save();
         ctx.globalCompositeOperation = "lighter";
         ctx.lineCap = "round";
-        for (let i = 0; i < pts.length - 1; i++) {
-          const a = pts[i];
-          const b = pts[i + 1];
-          const lw = 0.6 + (1 - a.depthT) * 2.6;
-          const al = 0.62 * (1 - a.depthT) + 0.1;
-          ctx.strokeStyle = `rgba(255,242,218,${al})`;
-          ctx.lineWidth = lw;
-          ctx.beginPath();
-          ctx.moveTo(a.lx, a.ly);
-          ctx.lineTo(b.lx, b.ly);
-          ctx.moveTo(a.rx, a.ry);
-          ctx.lineTo(b.rx, b.ry);
-          ctx.stroke();
-        }
+        ctx.lineJoin = "round";
+        ctx.beginPath();
+        ctx.moveTo(pts[0].cx, pts[0].cy);
+        for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].cx, pts[i].cy);
+        ctx.strokeStyle = `rgba(255,150,60,${0.05 + speed * 0.04})`;
+        ctx.lineWidth = 5;
+        ctx.shadowColor = "rgba(255,150,60,0.9)";
+        ctx.shadowBlur = 22 + speed * 16;
+        ctx.stroke();
         ctx.restore();
 
-        // transverse rungs + a centre seam — WORLD-ANCHORED, so they stream
-        // toward the camera exactly when the camera advances: motion always
-        // matches scroll direction. Reads like a precise, lit architectural ribbon.
-        if (!reduce) {
-          const RUNG_SP = 230;
-          const startZ = Math.ceil((camZ + 70) / RUNG_SP) * RUNG_SP;
-          const endZ = camZ + VIEW_DEPTH * 0.8;
-          ctx.save();
-          ctx.globalCompositeOperation = "lighter";
-          ctx.lineCap = "round";
-          for (let zc = startZ; zc < endZ; zc += RUNG_SP) {
-            const dz = zc - camZ;
-            const half = roadHalfWidth(dz);
-            const el = roadElevation(zc);
-            const L = project(LAT(zc) - half, zc, el, camX, camZ, camY, W, H);
-            const R = project(LAT(zc) + half, zc, el, camX, camZ, camY, W, H);
-            if (!L || !R) continue;
-            const dt2 = Math.min(dz / VIEW_DEPTH, 1);
-            const fade = 1 - dt2;
-            // transverse rung
-            ctx.strokeStyle = `rgba(255,236,206,${fade * 0.3 + 0.03})`;
-            ctx.lineWidth = Math.max(0.5, fade * 1.5);
+        // layered tapered strokes → a luminous filament, thick & bright near,
+        // thinning to a faint point as it runs to the horizon
+        ctx.save();
+        ctx.globalCompositeOperation = "lighter";
+        ctx.lineCap = "round";
+        ctx.lineJoin = "round";
+        const PASSES = [
+          { w: 15, w0: 1.4, col: "255,148,62", a: 0.05, a1: 0.07 }, // outer amber glow
+          { w: 6.0, w0: 1.1, col: "255,196,120", a: 0.1, a1: 0.18 }, // mid warm glow
+          { w: 2.6, w0: 0.7, col: "255,232,190", a: 0.22, a1: 0.34 }, // inner warm
+          { w: 1.5, w0: 0.45, col: "255,252,245", a: 0.55, a1: 0.42 }, // white-hot core
+        ];
+        for (const pass of PASSES) {
+          for (let i = 0; i < pts.length - 1; i++) {
+            const a = pts[i];
+            const b = pts[i + 1];
+            const n = 1 - a.depthT;
+            ctx.strokeStyle = `rgba(${pass.col},${pass.a + n * pass.a1})`;
+            ctx.lineWidth = pass.w0 + n * pass.w;
             ctx.beginPath();
-            ctx.moveTo(L.x, L.y);
-            ctx.lineTo(R.x, R.y);
+            ctx.moveTo(a.cx, a.cy);
+            ctx.lineTo(b.cx, b.cy);
             ctx.stroke();
-            // bright centre node where the seam crosses the rung
-            const cx = (L.x + R.x) * 0.5;
-            const cy = (L.y + R.y) * 0.5;
-            ctx.fillStyle = `rgba(255,248,228,${fade * 0.55 + 0.05})`;
-            const nr = Math.max(0.6, fade * 1.8);
-            ctx.fillRect(cx - nr * 0.5, cy - nr * 0.5, nr, nr);
           }
-          ctx.restore();
         }
+        ctx.restore();
       }
 
-      // ---- station markers + active-station detection ----
+      // ---- station waypoints + active-station detection ----
       let nearest = 0;
       let nearestD = Infinity;
+      // remember the active station's projected node for the connector
+      let activeNode: { x: number; y: number; rgb: string } | null = null;
+
       MILESTONES.forEach((m, i) => {
         const d = Math.abs(SNAP_Z[i] - camZ);
         if (d < nearestD) {
@@ -335,30 +287,90 @@ export default function RoadStage() {
         if (vis <= 0.01) return;
         // brighter as this station nears its arrival point
         const prox = 1 - clamp(Math.abs(m.z - (camZ + ARRIVE_DZ)) / 2400, 0, 1);
-        const s = clamp(pr.scale * 3600, 0.45, 2.4);
+        const s = clamp(pr.scale * 3200, 0.4, 2.2);
         const rgb = KIND_RGB[m.kind] ?? "255,224,180";
 
-        // a soft vertical beam rising from the station — a glowing landmark
-        const beamH = clamp(pr.scale * 130000, 36, H * 0.46) * (0.5 + prox * 0.8);
-        const beamW = Math.max(1.4, s * 2.4);
-        const beam = ctx.createLinearGradient(pr.x, pr.y, pr.x, pr.y - beamH);
-        const beamA = vis * (0.12 + prox * 0.5);
-        beam.addColorStop(0, `rgba(${rgb},${beamA})`);
-        beam.addColorStop(1, `rgba(${rgb},0)`);
+        if (i === activeRef.current) activeNode = { x: pr.x, y: pr.y, rgb };
+
         ctx.save();
         ctx.globalCompositeOperation = "lighter";
-        ctx.fillStyle = beam;
-        ctx.fillRect(pr.x - beamW * 0.5, pr.y - beamH, beamW, beamH);
 
-        // node dot — warm, glowing
+        // a slim waypoint ring sitting on the route — a navigation marker
+        const ringR = Math.max(3, 7 * s) * (0.7 + prox * 0.6);
         ctx.beginPath();
-        ctx.arc(pr.x, pr.y, Math.max(1.6, 3.4 * s), 0, Math.PI * 2);
+        ctx.arc(pr.x, pr.y, ringR, 0, Math.PI * 2);
+        ctx.strokeStyle = `rgba(${rgb},${vis * (0.22 + prox * 0.5)})`;
+        ctx.lineWidth = Math.max(0.6, s * 0.9);
+        ctx.stroke();
+
+        // glowing node at the centre
+        ctx.beginPath();
+        ctx.arc(pr.x, pr.y, Math.max(1.4, 2.6 * s), 0, Math.PI * 2);
         ctx.fillStyle = `rgba(255,250,240,${vis * (0.5 + prox * 0.5)})`;
         ctx.shadowColor = `rgba(${rgb},${vis})`;
-        ctx.shadowBlur = 16 * s;
+        ctx.shadowBlur = 14 * s;
         ctx.fill();
         ctx.restore();
       });
+
+      // ---- connector: a fine line from the active waypoint to the HUD card ----
+      const card = cardRef.current;
+      if (wide && activeNode && card) {
+        const node = activeNode as { x: number; y: number; rgb: string };
+        const settle = 1 - clamp(Math.abs(camZ - SNAP_Z[activeRef.current]) / 1000, 0, 1);
+        const ca = (0.25 + settle * 0.75) * (1 - speed * 0.55);
+        if (ca > 0.02) {
+          const r = card.getBoundingClientRect();
+          const tx = r.left - 6; // just off the card's left edge
+          const ty = r.top + r.height * 0.5;
+          // gentle curve leaving the waypoint and sweeping to the card
+          const cpx = (node.x + tx) * 0.5;
+          const cpy = node.y * 0.5 + ty * 0.5 - 18;
+
+          ctx.save();
+          ctx.lineCap = "round";
+          ctx.lineJoin = "round";
+
+          // dark occluder under-stroke so the line reads over the bright contours
+          ctx.globalCompositeOperation = "source-over";
+          ctx.beginPath();
+          ctx.moveTo(node.x, node.y);
+          ctx.quadraticCurveTo(cpx, cpy, tx, ty);
+          ctx.strokeStyle = `rgba(6,7,11,${ca * 0.55})`;
+          ctx.lineWidth = 3.8;
+          ctx.stroke();
+
+          ctx.globalCompositeOperation = "lighter";
+          // soft glow underlay
+          ctx.beginPath();
+          ctx.moveTo(node.x, node.y);
+          ctx.quadraticCurveTo(cpx, cpy, tx, ty);
+          ctx.strokeStyle = `rgba(${node.rgb},${ca * 0.28})`;
+          ctx.lineWidth = 3;
+          ctx.stroke();
+
+          // crisp hairline
+          ctx.beginPath();
+          ctx.moveTo(node.x, node.y);
+          ctx.quadraticCurveTo(cpx, cpy, tx, ty);
+          ctx.strokeStyle = `rgba(255,248,236,${ca * 0.85})`;
+          ctx.lineWidth = 1;
+          ctx.stroke();
+
+          // small attach node on the card edge + short vertical tick
+          ctx.beginPath();
+          ctx.arc(tx, ty, 2.2, 0, Math.PI * 2);
+          ctx.fillStyle = `rgba(255,250,242,${ca})`;
+          ctx.fill();
+          ctx.beginPath();
+          ctx.moveTo(tx + 6, ty - 9);
+          ctx.lineTo(tx + 6, ty + 9);
+          ctx.strokeStyle = `rgba(${node.rgb},${ca * 0.6})`;
+          ctx.lineWidth = 1;
+          ctx.stroke();
+          ctx.restore();
+        }
+      }
 
       // commit the active station (with a little hysteresis to avoid flutter)
       if (nearest !== activeRef.current) {
@@ -390,6 +402,8 @@ export default function RoadStage() {
   }, []);
 
   const m = MILESTONES[active];
+  const idx = String(active + 1).padStart(2, "0");
+  const total = String(MILESTONES.length).padStart(2, "0");
 
   return (
     <>
@@ -402,18 +416,26 @@ export default function RoadStage() {
               <motion.div
                 key={active}
                 className="station"
-                initial={{ opacity: 0, y: 16 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -14 }}
+                initial={{ opacity: 0, x: 26, filter: "blur(6px)" }}
+                animate={{ opacity: 1, x: 0, filter: "blur(0px)" }}
+                exit={{ opacity: 0, x: 18, filter: "blur(6px)" }}
                 transition={{ duration: 0.5, ease }}
               >
-                <div className={`station-tag ${m.kind}`}>{m.tag}</div>
-                <h2 className="station-title">{m.title}</h2>
-                <p className="station-summary">{m.summary}</p>
-                <div className="station-points">
-                  {m.sub.map((s) => (
-                    <span key={s}>{s}</span>
-                  ))}
+                <div className={`station-card ${m.kind}`} ref={cardRef}>
+                  <div className="station-head">
+                    <span className="station-index">
+                      {idx}<i>/{total}</i>
+                    </span>
+                    <span className="station-kind">{m.kind}</span>
+                  </div>
+                  <div className="station-tag">{m.tag}</div>
+                  <h2 className="station-title">{m.title}</h2>
+                  <p className="station-summary">{m.summary}</p>
+                  <div className="station-points">
+                    {m.sub.map((s) => (
+                      <span key={s}>{s}</span>
+                    ))}
+                  </div>
                 </div>
               </motion.div>
             </AnimatePresence>
