@@ -11,7 +11,6 @@
 // feel like we're travelling through the land. The SAME view-projection matrix
 // drives both the GPU terrain and the 2-D road/station overlay, so they align.
 export const VIEW_DEPTH = 13000;
-export const STEP = 120;
 
 /** Vertical field of view (rad) — a fairly normal lens for the travelling view. */
 const FOVY = (40 * Math.PI) / 180;
@@ -23,9 +22,6 @@ const EYE_DIST = 3000;
 const LOOK_AHEAD = 2600;
 const NEAR = 120;
 const FAR = VIEW_DEPTH * 1.7;
-
-/** World half-width of the tarmac near the camera. Tapered with depth below. */
-export const ROAD_W = 13;
 
 /**
  * Horizontal "lens shift" — the screen-space fraction the world's optical axis
@@ -39,7 +35,6 @@ let LENS_X = 0.5;
 export const setLensX = (v: number): void => {
   LENS_X = v;
 };
-export const getLensX = (): number => LENS_X;
 
 /**
  * Lateral position of the road centreline at depth z — a route that genuinely
@@ -48,42 +43,16 @@ export const getLensX = (): number => LENS_X;
  * right, then back, rather than holding one gentle curve.
  */
 export const LAT = (z: number): number =>
-  560 * Math.sin(z * 0.0001 + 0.4) +
-  200 * Math.sin(z * 0.00024 + 1.6);
+  620 * Math.sin(z * 0.00012 + 0.4) +
+  300 * Math.sin(z * 0.00033 + 1.6) +
+  120 * Math.sin(z * 0.00062 + 0.5);
 
-/** A localised terrain feature — a smooth hill crest or valley dip. */
-const gauss = (z: number, c: number, w: number, a: number): number =>
-  a * Math.exp(-(((z - c) / w) ** 2));
-
-/**
- * The ROAD'S OWN vertical profile — the elevation of the tarmac (and the
- * valley floor it sits in) as it travels down its length. Authored to read
- * like a real route across terrain: rolling base undulation plus deliberate
- * features — crest a broad hill, descend into a wide low flat, a gentle late
- * rise, then a dip toward the end. The camera rides this profile, so scrolling
- * genuinely feels like cresting hills and dropping into low land.
- */
-export const roadElevation = (z: number): number => {
-  const rolling =
-    360 * Math.sin(z * 0.00024 + 0.5) + 210 * Math.sin(z * 0.00058 + 1.9);
-  const features =
-    gauss(z, 5200, 2500, 880) - // climb up and over a broad hill
-    gauss(z, 11800, 3300, 1020) + // long descent into wide low flat land
-    gauss(z, 17600, 2300, 560) - // gentle rise back up
-    gauss(z, 21200, 1700, 380); // a final dip toward the horizon
-  return rolling + features;
-};
-
-/**
- * Digital terrain — world elevation at (x, z), shaped as a VALLEY built around
- * the road's own profile: the tarmac runs along the low floor while hills rise
- * on both sides. The point cloud and the road read from this same field, so the
- * road genuinely sits in the trough between the hills.
- */
 /**
  * Organic hill field (domain-warped ridges) — the EXACT JS twin of `organic()`
- * in gl.ts. The low-frequency waves bend the coordinates before the higher
- * octaves sample, giving the braided, swirling topography of real eroded land.
+ * in the WGSL terrain field (gpu/shaders.ts). The low-frequency waves bend the
+ * coordinates before the higher octaves sample, giving the braided, swirling
+ * topography of real eroded land. The road and terrain read this same field so
+ * the route genuinely sits in the trough between the hills.
  */
 const organic = (x: number, z: number): number => {
   const wx = x + 760 * Math.sin(z * 0.00042 + 0.3) + 420 * Math.sin(z * 0.00097 + 2.1);
@@ -102,16 +71,13 @@ const organic = (x: number, z: number): number => {
 const roadFloor = (z: number): number =>
   520 * Math.sin(z * 0.00012 + 0.5) + 240 * Math.sin(z * 0.00026 + 2.1);
 
-/** Elevation of the valley FLOOR the road runs along (a gentle road grade). */
-export const roadGradeY = (z: number): number => roadFloor(z);
-
 /**
  * Terrain surface height at (x, z) — INDEPENDENT rolling hills (the organic
  * field) with a shallow corridor lowered along the road, so the route travels
  * the low ground while real hills rise around it and can stand BETWEEN the
  * camera and a far stretch of road (which still shows, drawn on top). The road
  * itself rides a smooth grade, so it never folds over a crest. EXACT twin of
- * `terrainH()` in gl.ts.
+ * `terrainH()` in the WGSL terrain field (gpu/shaders.ts).
  */
 export const surfaceY = (x: number, z: number): number => {
   const d = Math.abs(x - LAT(z));
@@ -120,15 +86,7 @@ export const surfaceY = (x: number, z: number): number => {
 };
 
 /** The road, stations and camera ride a smooth grade just above the low ground. */
-export const roadBedY = (z: number): number => roadGradeY(z) + 25;
-
-/**
- * Half-width of the tarmac at depth `dz` from the camera. The near width is
- * full `ROAD_W` (the size the user likes); it tapers down the road so the far
- * end reads markedly narrower than linear perspective alone — exaggerated depth.
- */
-export const roadHalfWidth = (dz: number): number =>
-  ROAD_W * (1 - 0.5 * smoothstep(0, VIEW_DEPTH * 0.9, dz));
+export const roadBedY = (z: number): number => roadFloor(z) + 25;
 
 export interface Projected {
   x: number;
@@ -194,11 +152,16 @@ let _vp: Mat4 = new Float32Array(16);
 let _W = 1;
 let _H = 1;
 let _f = 1;
+const _eye = new Float32Array(3);
 
 /**
  * Build the frame's view-projection matrix for a forward-looking camera riding
- * the road at (camX, camZ), aimed straight down its own axis. Call once per frame
- * before `project()` / before drawing the GPU terrain.
+ * the road at (camX, camZ). Crucially the camera AIMS AT THE ROAD AHEAD
+ * (`LAT(camZ + LOOK_AHEAD)`) rather than straight down the depth axis — so as the
+ * route bends the camera yaws to follow it, and the road visibly sweeps left and
+ * right through the frame. (Aiming straight ahead made the winding road collapse
+ * to a dead-straight vertical streak.) Call once per frame before `project()` /
+ * before drawing the GPU terrain.
  */
 export function setCamera(
   camX: number, camZ: number, W: number, H: number,
@@ -207,11 +170,12 @@ export function setCamera(
   _H = H;
   _f = 1 / Math.tan(FOVY / 2);
   const cz = camZ + LOOK_AHEAD;
-  const cx = camX;
+  const cx = LAT(cz); // aim along the road's heading → bends actually read
   const cy = roadBedY(cz) + 200; // aim a touch above the road grade ahead
   const ex = camX;
   const ey = roadBedY(camZ) + EYE_DIST * Math.sin(PITCH); // eye rides the road grade
   const ez = camZ - EYE_DIST * Math.cos(PITCH);
+  _eye[0] = ex; _eye[1] = ey; _eye[2] = ez;
   const proj = mPerspective(FOVY, W / H, NEAR, FAR);
   const view = mLookAt(ex, ey, ez, cx, cy, cz, 0, 1, 0);
   _vp = mMul(proj, view);
@@ -219,6 +183,9 @@ export function setCamera(
 
 /** The current frame's view-projection matrix (column-major) — for the GPU. */
 export const getViewProj = (): Mat4 => _vp;
+
+/** The current frame's camera eye position [x, y, z] in world units. */
+export const getCamEye = (): Float32Array => _eye;
 
 /**
  * Project a world point (px lateral, pz depth, py elevation) to screen space
@@ -250,15 +217,4 @@ export function smoothstep(a: number, b: number, x: number): number {
 
 export function clamp(x: number, lo: number, hi: number): number {
   return Math.min(Math.max(x, lo), hi);
-}
-
-/**
- * Road colour ramp: t:0 near (warm ivory) → 1 far (deep ember). A single,
- * constant warm road colour — no per-phase tinting.
- */
-export function roadColor(t: number, alpha = 1): string {
-  const r = 255;
-  const g = Math.round(248 + (150 - 248) * t);
-  const b = Math.round(236 + (70 - 236) * t);
-  return `rgba(${r},${g},${b},${alpha})`;
 }
