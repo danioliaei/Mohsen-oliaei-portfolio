@@ -12,6 +12,7 @@ import {
   smoothstep,
 } from "../road/engine";
 import { Terrain } from "../road/terrain";
+import { TiltShift } from "../road/bokeh";
 import { EmberField } from "../road/embers";
 import Footer from "./Footer";
 
@@ -62,6 +63,7 @@ export default function RoadStage() {
     const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     const embers = reduce ? null : new EmberField(48);
     const terrain = new Terrain();
+    const tilt = new TiltShift();
 
     let W = 0;
     let H = 0;
@@ -78,6 +80,7 @@ export default function RoadStage() {
       cvs.width = W * dpr;
       cvs.height = H * dpr;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      tilt.resize(W, H, dpr);
       computeSnaps();
     };
     resize();
@@ -187,8 +190,38 @@ export default function RoadStage() {
 
       ctx.clearRect(0, 0, W, H);
 
-      // digital land: flowing topographic contour lines forming the valley
-      terrain.draw(ctx, W, H, camX, camZ, camY);
+      // dusk scrim: darken the valley floor so the luminous isolines and the
+      // tilt-shift bokeh read crisply, while the warm sunset still glows along
+      // the high horizon (top) and bleeds at the frame edges
+      const scrim = ctx.createLinearGradient(0, 0, 0, H);
+      scrim.addColorStop(0.0, "rgba(22,12,5,0)");
+      scrim.addColorStop(0.18, "rgba(20,11,4,0.04)");
+      scrim.addColorStop(0.3, "rgba(15,8,3,0.56)");
+      scrim.addColorStop(0.48, "rgba(11,6,2,0.85)");
+      scrim.addColorStop(0.72, "rgba(8,4,2,0.93)");
+      scrim.addColorStop(1.0, "rgba(6,3,1,0.96)");
+      ctx.fillStyle = scrim;
+      ctx.fillRect(0, 0, W, H);
+
+      // digital land: flowing topographic contour lines, composited through a
+      // tilt-shift lens → a sharp focal band with soft bokeh above & below
+      tilt.draw(
+        ctx,
+        (c) => terrain.draw(c, W, H, camX, camZ, camY),
+        { blur: 12, focusY: 0.54, focusH: 0.075, feather: 0.32 },
+      );
+
+      // lens vignette — darken the frame edges so the eye settles on the sharp
+      // focal band; the photographic falloff reinforces the miniature read
+      const vig = ctx.createRadialGradient(
+        W * 0.5, H * 0.52, Math.min(W, H) * 0.18,
+        W * 0.5, H * 0.54, Math.max(W, H) * 0.74,
+      );
+      vig.addColorStop(0, "rgba(6,3,1,0)");
+      vig.addColorStop(0.74, "rgba(6,3,1,0.12)");
+      vig.addColorStop(1, "rgba(4,2,1,0.5)");
+      ctx.fillStyle = vig;
+      ctx.fillRect(0, 0, W, H);
 
       // atmosphere: a few drifting warm motes
       embers?.draw(ctx, W, H, dt, t);
