@@ -39,8 +39,11 @@ export class TiltShift {
   resize(W: number, H: number, dpr: number): void {
     this.W = W;
     this.H = H;
-    // cap internal resolution — the composite is soft, so 1px/CSS is plenty
-    this.sc = Math.min(dpr, 1);
+    // Internal resolution. The blurred base is soft so it wouldn't benefit, but
+    // the SHARP focal band is the hero of the miniature look — render it at full
+    // device density (capped at 2×) so its hairline isolines stay crisp and
+    // anti-aliased rather than softened by a 1× upscale.
+    this.sc = Math.min(dpr, 2);
     const pw = Math.max(1, Math.round(W * this.sc));
     const ph = Math.max(1, Math.round(H * this.sc));
     for (const c of [this.buf, this.blur, this.mask]) {

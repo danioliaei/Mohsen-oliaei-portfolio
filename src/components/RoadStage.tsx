@@ -7,13 +7,13 @@ import {
   STEP,
   clamp,
   project,
-  roadElevation,
+  roadBedY,
+  setCamera,
   setLensX,
   smoothstep,
 } from "../road/engine";
-import { Terrain } from "../road/terrain";
+import { TerrainGL } from "../road/gl";
 import { TiltShift } from "../road/bokeh";
-import { EmberField } from "../road/embers";
 import Footer from "./Footer";
 
 const ease = [0.22, 1, 0.36, 1] as const;
@@ -60,9 +60,7 @@ export default function RoadStage() {
     const ctx = cvs.getContext("2d");
     if (!ctx) return;
 
-    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    const embers = reduce ? null : new EmberField(48);
-    const terrain = new Terrain();
+    const terrain = new TerrainGL();
     const tilt = new TiltShift();
 
     let W = 0;
@@ -81,6 +79,10 @@ export default function RoadStage() {
       cvs.height = H * dpr;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       tilt.resize(W, H, dpr);
+      // render the GPU terrain at 1.5× the display buffer, then let the tilt-shift
+      // blit downsample it — supersampling AA that smooths the contour lines far
+      // better than the in-shader fwidth filter alone
+      terrain.resize(W, H, Math.min(dpr * 1.5, 3));
       computeSnaps();
     };
     resize();
@@ -179,14 +181,12 @@ export default function RoadStage() {
       prevDisplayed = displayed;
       const speed = clamp(vel * 9, 0, 1); // 0..1 motion energy
 
-      // push the optical axis left on wide viewports so the road rides the left
-      // third and the floating cards own the right; ease back to centre on phones
       const wide = W >= 760;
-      setLensX(wide ? 0.31 : 0.46);
+      setLensX(0.5); // road centred on screen
 
       const camZ = p * TRAVEL;
       const camX = LAT(camZ);
-      const camY = roadElevation(camZ); // eye rides the valley floor
+      setCamera(camX, camZ, W, H); // one shared camera for GPU + overlay
 
       ctx.clearRect(0, 0, W, H);
 
@@ -194,21 +194,30 @@ export default function RoadStage() {
       // tilt-shift bokeh read crisply, while the warm sunset still glows along
       // the high horizon (top) and bleeds at the frame edges
       const scrim = ctx.createLinearGradient(0, 0, 0, H);
-      scrim.addColorStop(0.0, "rgba(22,12,5,0)");
-      scrim.addColorStop(0.18, "rgba(20,11,4,0.04)");
-      scrim.addColorStop(0.3, "rgba(15,8,3,0.56)");
-      scrim.addColorStop(0.48, "rgba(11,6,2,0.85)");
-      scrim.addColorStop(0.72, "rgba(8,4,2,0.93)");
-      scrim.addColorStop(1.0, "rgba(6,3,1,0.96)");
+      scrim.addColorStop(0.0, "rgba(20,11,4,0.34)");
+      scrim.addColorStop(0.4, "rgba(13,7,3,0.5)");
+      scrim.addColorStop(0.72, "rgba(9,5,2,0.58)");
+      scrim.addColorStop(1.0, "rgba(7,4,2,0.66)");
       ctx.fillStyle = scrim;
       ctx.fillRect(0, 0, W, H);
 
-      // digital land: flowing topographic contour lines, composited through a
+      // digital land: GPU-rendered topographic contour map, composited through a
       // tilt-shift lens → a sharp focal band with soft bokeh above & below
+      terrain.render(camX, camZ);
       tilt.draw(
         ctx,
-        (c) => terrain.draw(c, W, H, camX, camZ, camY),
-        { blur: 12, focusY: 0.54, focusH: 0.075, feather: 0.32 },
+        (c) => {
+          c.imageSmoothingEnabled = true;
+          c.imageSmoothingQuality = "high";
+          c.drawImage(terrain.canvas, 0, 0, W, H);
+        },
+        {
+          // gentler depth-of-field for the travelling valley view (wider sharp band)
+          blur: clamp(H * 0.016, 10, 52),
+          focusY: 0.6, // sharp through the mid-ground road
+          focusH: 0.11, // wider fully-sharp core
+          feather: 0.32,
+        },
       );
 
       // lens vignette — darken the frame edges so the eye settles on the sharp
@@ -223,21 +232,18 @@ export default function RoadStage() {
       ctx.fillStyle = vig;
       ctx.fillRect(0, 0, W, H);
 
-      // atmosphere: a few drifting warm motes
-      embers?.draw(ctx, W, H, dt, t);
-
       // sample the road centreline ahead, following the valley floor
       const pts: RoadPt[] = [];
-      for (let z = camZ + 30; z < camZ + VIEW_DEPTH; z += STEP) {
-        const el = roadElevation(z);
-        const c = project(LAT(z), z, el, camX, camZ, camY, W, H);
+      for (let z = camZ + 30; z < camZ + VIEW_DEPTH * 0.92; z += STEP) {
+        const el = roadBedY(z); // smooth grade through the low ground (no folding)
+        const c = project(LAT(z), z, el);
         if (!c) continue;
         pts.push({
           cx: c.x,
           cy: c.y,
           scale: c.scale,
           dz: c.dz,
-          depthT: Math.min(c.dz / VIEW_DEPTH, 1),
+          depthT: clamp((z - camZ) / VIEW_DEPTH, 0, 1),
         });
       }
 
@@ -257,47 +263,40 @@ export default function RoadStage() {
         ctx.fillRect(0, 0, W, H);
         ctx.restore();
 
-        // ---- the road as a single glowing fibre ----
-        // one soft cohesive bloom underlay (a single shadow-blurred stroke)
-        ctx.save();
-        ctx.globalCompositeOperation = "lighter";
-        ctx.lineCap = "round";
-        ctx.lineJoin = "round";
-        ctx.beginPath();
-        ctx.moveTo(pts[0].cx, pts[0].cy);
-        for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].cx, pts[i].cy);
-        ctx.strokeStyle = `rgba(255,150,60,${0.05 + speed * 0.04})`;
-        ctx.lineWidth = 5;
-        ctx.shadowColor = "rgba(255,150,60,0.9)";
-        ctx.shadowBlur = 22 + speed * 16;
-        ctx.stroke();
-        ctx.restore();
-
-        // layered tapered strokes → a luminous filament, thick & bright near,
-        // thinning to a faint point as it runs to the horizon
-        ctx.save();
-        ctx.globalCompositeOperation = "lighter";
-        ctx.lineCap = "round";
-        ctx.lineJoin = "round";
-        const PASSES = [
-          { w: 15, w0: 1.4, col: "255,148,62", a: 0.05, a1: 0.07 }, // outer amber glow
-          { w: 6.0, w0: 1.1, col: "255,196,120", a: 0.1, a1: 0.18 }, // mid warm glow
-          { w: 2.6, w0: 0.7, col: "255,232,190", a: 0.22, a1: 0.34 }, // inner warm
-          { w: 1.5, w0: 0.45, col: "255,252,245", a: 0.55, a1: 0.42 }, // white-hot core
-        ];
-        for (const pass of PASSES) {
+        // ---- the road: a BOLD solid route, thick near and tapering to a thin
+        // line at the horizon (perspective), drawn over the terrain so it stays
+        // visible even where a hill would sit in front of it ----
+        const drawRoad = (
+          op: GlobalCompositeOperation,
+          w0: number,
+          wn: number,
+          col: string,
+          a0: number,
+          an: number,
+        ) => {
+          ctx.globalCompositeOperation = op;
           for (let i = 0; i < pts.length - 1; i++) {
             const a = pts[i];
             const b = pts[i + 1];
-            const n = 1 - a.depthT;
-            ctx.strokeStyle = `rgba(${pass.col},${pass.a + n * pass.a1})`;
-            ctx.lineWidth = pass.w0 + n * pass.w;
+            const n = 1 - a.depthT; // 1 near .. 0 far → perspective taper
+            ctx.strokeStyle = `rgba(${col},${a0 + n * an})`;
+            ctx.lineWidth = w0 + n * wn;
             ctx.beginPath();
             ctx.moveTo(a.cx, a.cy);
             ctx.lineTo(b.cx, b.cy);
             ctx.stroke();
           }
-        }
+        };
+
+        ctx.save();
+        ctx.lineCap = "round";
+        ctx.lineJoin = "round";
+        // soft amber bloom around the road
+        drawRoad("lighter", 2, 17, "255,150,48", 0.05, 0.12);
+        // solid bold body — opaque amber, thick near (~8px) → thin far
+        drawRoad("source-over", 0.8, 7.2, "255,166,46", 0.6, 0.38);
+        // warm bright centre highlight
+        drawRoad("lighter", 0.4, 2.6, "255,226,150", 0.28, 0.4);
         ctx.restore();
       }
 
@@ -313,14 +312,15 @@ export default function RoadStage() {
           nearestD = d;
           nearest = i;
         }
-        const el = roadElevation(m.z);
-        const pr = project(LAT(m.z), m.z, el, camX, camZ, camY, W, H);
-        if (!pr || pr.dz < 50) return;
-        const vis = 1 - smoothstep(VIEW_DEPTH * 0.72, VIEW_DEPTH, pr.dz);
+        const el = roadBedY(m.z);
+        const pr = project(LAT(m.z), m.z, el);
+        const ahead = m.z - camZ;
+        if (!pr || ahead < 50) return;
+        const vis = 1 - smoothstep(VIEW_DEPTH * 0.72, VIEW_DEPTH, ahead);
         if (vis <= 0.01) return;
         // brighter as this station nears its arrival point
         const prox = 1 - clamp(Math.abs(m.z - (camZ + ARRIVE_DZ)) / 2400, 0, 1);
-        const s = clamp(pr.scale * 3200, 0.4, 2.2);
+        const s = clamp(pr.scale * 680, 0.4, 2.2);
         const rgb = KIND_RGB[m.kind] ?? "255,224,180";
 
         if (i === activeRef.current) activeNode = { x: pr.x, y: pr.y, rgb };
