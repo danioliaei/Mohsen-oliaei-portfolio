@@ -85,7 +85,9 @@ public/
 - **Breadcrumb**, **Home (⌂)**, **+ / −**, and **arrow keys / Esc** all navigate.
 - **Theme toggle** (top right) recolors everything; default follows the OS.
 
-`prefers-reduced-motion` is respected; point budgets and DPR degrade gracefully
-on mobile / low-power devices.
+`prefers-reduced-motion` is respected. On phones the HUD reflows — safe-area
+insets for notches, larger tap targets, a single-column room gallery, a
+full-width project card — DPR is capped and point budgets scale down. One finger
+rotates the globe, two fingers pinch to zoom/descend, and markers are tappable.
 
 See **`DECISIONS.md`** for architecture rationale and content caveats.

@@ -7,6 +7,12 @@ import { pointsGeometry } from "../buildGeometry";
 import { useStore } from "../../store";
 import { PointsLayer } from "./PointsLayer";
 
+// Bigger invisible hit-spheres on touch devices so markers are easy to tap.
+const COARSE_POINTER =
+  typeof window !== "undefined" &&
+  !!window.matchMedia?.("(pointer: coarse)").matches;
+const HIT_RADIUS = COARSE_POINTER ? 0.12 : 0.07;
+
 /** Glowing pink point clusters at place centroids + great-circle arcs (drawn as
  *  trails of points) from the hub to each country. Deeper nodes carry a higher
  *  aIn so cities fade in only as you descend. Invisible hit-spheres drive the
@@ -104,7 +110,7 @@ export function Markers({
               focusNode(n.id);
             }}
           >
-            <sphereGeometry args={[0.07, 12, 12]} />
+            <sphereGeometry args={[HIT_RADIUS, 12, 12]} />
             <meshBasicMaterial transparent opacity={0} depthWrite={false} />
           </mesh>
         );
