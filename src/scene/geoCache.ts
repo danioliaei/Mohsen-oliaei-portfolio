@@ -54,12 +54,14 @@ export function buildGeometries(
   geo: GeoData,
   quality: number,
 ): GlobeGeometries {
-  const oceanCount = Math.round(13000 * quality);
+  const oceanCount = Math.round(22000 * quality);
   // Far denser land sampling — continents read as a solid dot-density texture
-  // rather than a scatter, so the planet stays legible as you descend.
-  const landCandidates = Math.round(320000 * quality);
-  // Tighter border spacing → near-continuous dotted country outlines.
-  const borderSpacing = quality < 1 ? 1.0 : 0.6;
+  // rather than a scatter, so countries are clearly recognizable and the planet
+  // stays legible (in fact sharpens) as you descend.
+  const landCandidates = Math.round(680000 * quality);
+  // Tighter border spacing → continuous dotted country outlines that make every
+  // nation read as a crisp, recognizable shape.
+  const borderSpacing = quality < 1 ? 0.6 : 0.35;
   const gratStep = 15;
   const gratDot = quality < 1 ? 3.2 : 2.4;
 
@@ -86,11 +88,12 @@ export function buildGeometries(
     aLand: 1,
     aAccent: 0,
     aCountry: (i) => landCountry[i],
-    // ~60% base (visible from orbit); the rest fills in fast so continents are
-    // essentially fully dense by the time we enter a WORLD — nothing stays sparse.
+    // ~50% base (already dense from orbit thanks to the high candidate count);
+    // the other half streams in across the descent so the surface visibly gains
+    // more, finer points the closer you get — denser, not just bigger.
     aIn: () => {
       const r = Math.random();
-      return r < 0.6 ? 0 : 0.04 + Math.random() * 0.18;
+      return r < 0.5 ? 0 : 0.02 + Math.random() * 0.4;
     },
     aCore: () => (Math.random() < 0.02 ? 1 : 0),
   });

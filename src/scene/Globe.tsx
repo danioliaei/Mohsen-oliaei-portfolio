@@ -49,11 +49,12 @@ export function Globe({
       base: opacity,
     });
     return {
-      ocean: mk(1.5, 0.34),
-      // dense land reads as solid continents (the masses); borders outline them.
-      land: mk(2.3, 0.9),
+      ocean: mk(1.3, 0.32),
+      // very dense, finer land dots read as solid, recognizable continents (the
+      // masses) without smearing into a blob; borders outline them.
+      land: mk(1.9, 0.92),
       // borders are clean periwinkle outlines over the land — present, not a wash.
-      borders: mk(2.0, 0.78),
+      borders: mk(1.8, 0.8),
       graticule: mk(1.2, 0.22),
       marker: mk(5.2, 1.0),
       arc: mk(1.7, 0.66),

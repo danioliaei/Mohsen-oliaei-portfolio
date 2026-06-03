@@ -96,7 +96,12 @@ const vertex = /* glsl */ `
     float sizeBoost = 1.0 + aCore * 1.7 + aLand * 0.35 + lift * 0.8;
     float facingSize = mix(0.62, 1.0, front);
     float variance = 0.7 + aRand * 0.6;
-    float s = uSize * uSizeMul * uPixelRatio * sizeBoost * facingSize * variance * (1.0 / max(0.05, -mvPosition.z));
+    // As we descend (uZoom 0->1) shrink each dot toward a fine stipple — combined
+    // with the density ramp this reads as "smaller but more numerous" points the
+    // closer you get, so continents resolve into crisp, recognizable detail
+    // instead of fat blobs.
+    float zoomShrink = mix(1.0, 0.5, clamp(uZoom, 0.0, 1.0));
+    float s = uSize * uSizeMul * uPixelRatio * sizeBoost * facingSize * variance * zoomShrink * (1.0 / max(0.05, -mvPosition.z));
     gl_PointSize = clamp(s, 0.0, 34.0 * uPixelRatio);
 
     gl_Position = projectionMatrix * mvPosition;
