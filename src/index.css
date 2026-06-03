@@ -1,9 +1,11 @@
 :root {
-  --sans: "Helvetica Neue", Helvetica, Arial, "Segoe UI", sans-serif;
-  --mono: "Space Mono", "Courier New", monospace;
+  /* ONE global UI typeface, used at many weights (the wordmark's family) */
+  --sans: "Inter", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  /* a single reading serif for the experience summaries (Garamond) */
+  --serif: "EB Garamond", "Iowan Old Style", Georgia, serif;
   --ink: #fffaf0;
   --label: rgba(34, 18, 6, 0.72);
-  /* station kind accent colours (cards only) */
+  /* station kind accent colours (labels only) */
   --c-education: #ffc45c;
   --c-career: #ff7e38;
   --c-teaching: #54e9de;
@@ -61,11 +63,13 @@ header {
   padding: 28px 34px;
 }
 .wordmark {
+  font-family: var(--sans);
   font-size: 27px;
-  font-weight: 500;
-  letter-spacing: 0.2px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
   color: var(--ink);
   text-decoration: none;
+  white-space: nowrap;
   transition: opacity 0.25s ease;
 }
 .wordmark:hover {
@@ -77,7 +81,9 @@ nav {
 }
 nav a {
   position: relative;
-  font-size: 17px;
+  font-size: 15px;
+  font-weight: 400;
+  letter-spacing: 0.01em;
   color: var(--ink);
   text-decoration: none;
   transition: opacity 0.25s ease;
@@ -124,48 +130,114 @@ canvas#road {
   height: 100%;
   display: block;
 }
-.markers {
+
+/* ---------------- centered station panel ---------------- */
+.station-layer {
   position: absolute;
   inset: 0;
+  z-index: 12;
+  display: grid;
+  place-items: center;
   pointer-events: none;
 }
-
-/* ---------------- intro ---------------- */
-.intro {
-  position: absolute;
-  z-index: 10;
-  top: 15%;
-  left: 0;
-  right: 0;
+.station {
+  position: relative;
+  width: min(680px, 88vw);
   text-align: center;
-  pointer-events: none;
+  /* nudged just below true centre so the road reads above & below it */
+  transform: translateY(2vh);
   will-change: opacity, transform;
 }
-.kicker {
-  font-family: var(--mono);
-  font-size: 13px;
-  letter-spacing: 4px;
+/* soft warm scrim so the light text reads over the bright sky/road */
+.station::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 184%;
+  height: 280%;
+  transform: translate(-50%, -50%);
+  background: radial-gradient(
+    ellipse 56% 50% at 50% 50%,
+    rgba(34, 16, 5, 0.56),
+    rgba(34, 16, 5, 0.26) 54%,
+    rgba(34, 16, 5, 0) 78%
+  );
+  z-index: -1;
+  pointer-events: none;
+}
+.station-tag {
+  font-family: var(--sans);
+  font-weight: 600;
+  font-size: 12.5px;
+  letter-spacing: 3.4px;
   text-transform: uppercase;
-  color: rgba(255, 250, 240, 0.8);
+  color: #ffe0b0;
   margin-bottom: 16px;
+  /* dark halo lifts the small label off the bright sky */
+  text-shadow: 0 1px 16px rgba(36, 17, 5, 0.9), 0 0 2px rgba(36, 17, 5, 0.6);
 }
-.intro h1 {
-  font-weight: 700;
-  font-size: clamp(34px, 5.4vw, 76px);
-  line-height: 0.98;
-  letter-spacing: -0.02em;
-  text-shadow: 0 2px 40px rgba(60, 28, 8, 0.35);
+.station-tag.education {
+  color: #ffdf9c;
 }
+.station-tag.career {
+  color: #ffb277;
+}
+.station-tag.teaching {
+  color: #6bf0e6;
+}
+.station-title {
+  font-family: var(--sans);
+  font-weight: 600;
+  font-size: clamp(28px, 4.4vw, 52px);
+  line-height: 1.04;
+  letter-spacing: -0.022em;
+  margin-bottom: 20px;
+  text-shadow: 0 2px 44px rgba(40, 18, 6, 0.55);
+}
+.station-summary {
+  font-family: var(--serif);
+  font-weight: 400;
+  font-size: clamp(17px, 1.55vw, 21px);
+  line-height: 1.62;
+  color: rgba(255, 250, 240, 0.94);
+  max-width: 580px;
+  margin: 0 auto 22px;
+  text-shadow: 0 1px 24px rgba(40, 18, 6, 0.6);
+}
+.station-points {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 7px 22px;
+  font-family: var(--sans);
+  font-weight: 400;
+  font-size: 12.5px;
+  letter-spacing: 0.3px;
+  color: rgba(255, 250, 240, 0.66);
+}
+.station-points span {
+  position: relative;
+}
+.station-points span:not(:first-child)::before {
+  content: "·";
+  position: absolute;
+  left: -13px;
+  color: rgba(255, 250, 240, 0.4);
+}
+
+/* ---------------- scroll hint ---------------- */
 .scrollhint {
   position: absolute;
   z-index: 10;
   left: 50%;
-  bottom: 92px;
+  bottom: 78px;
   transform: translateX(-50%);
-  font-family: var(--mono);
-  font-size: 12px;
+  font-family: var(--sans);
+  font-weight: 500;
+  font-size: 11px;
   letter-spacing: 3px;
-  color: rgba(255, 250, 240, 0.7);
+  color: rgba(255, 250, 240, 0.66);
   text-transform: uppercase;
   pointer-events: none;
 }
@@ -185,55 +257,6 @@ canvas#road {
   }
 }
 
-/* ---------------- perspective milestone cards ---------------- */
-.mk {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 280px;
-  transform-origin: left top;
-  will-change: transform, opacity, filter;
-  color: var(--ink);
-}
-.mk .tag {
-  font-family: var(--mono);
-  font-size: 12px;
-  letter-spacing: 2.5px;
-  text-transform: uppercase;
-  color: #ffd9a0;
-  margin-bottom: 9px;
-  text-shadow: 0 0 18px rgba(255, 170, 70, 0.55);
-  white-space: nowrap;
-}
-.mk .title {
-  font-size: 19px;
-  font-weight: 500;
-  line-height: 1.15;
-  margin-bottom: 8px;
-  text-shadow: 0 1px 22px rgba(50, 24, 8, 0.45);
-}
-.mk .sub {
-  font-family: var(--mono);
-  font-size: 12.5px;
-  line-height: 1.7;
-  color: rgba(255, 250, 240, 0.85);
-  white-space: nowrap;
-}
-
-/* each kind of station is tagged in its own road colour */
-.mk.education .tag {
-  color: var(--c-education);
-  text-shadow: 0 0 18px rgba(255, 196, 92, 0.5);
-}
-.mk.career .tag {
-  color: var(--c-career);
-  text-shadow: 0 0 18px rgba(255, 126, 56, 0.5);
-}
-.mk.teaching .tag {
-  color: var(--c-teaching);
-  text-shadow: 0 0 18px rgba(84, 233, 222, 0.55);
-}
-
 /* ---------------- footer ---------------- */
 footer {
   position: fixed;
@@ -245,9 +268,10 @@ footer {
   justify-content: space-between;
   align-items: center;
   padding: 22px 34px 24px;
-  font-family: var(--mono);
-  font-size: 15px;
-  letter-spacing: 1.5px;
+  font-family: var(--sans);
+  font-weight: 500;
+  font-size: 12px;
+  letter-spacing: 1.4px;
   color: var(--label);
   text-transform: uppercase;
 }
@@ -257,31 +281,27 @@ footer span {
 
 @media (max-width: 720px) {
   header {
-    padding: 20px;
+    padding: 16px 18px;
   }
   nav {
-    gap: 18px;
+    gap: 15px;
   }
   nav a {
-    font-size: 14px;
+    font-size: 13px;
   }
   .wordmark {
-    font-size: 22px;
-  }
-  .hud {
-    left: 20px;
-    bottom: 56px;
+    font-size: 18px;
   }
   footer {
     padding: 18px 20px;
-    font-size: 12px;
+    font-size: 11px;
     letter-spacing: 1px;
     gap: 10px 18px;
     flex-wrap: wrap;
     justify-content: center;
   }
-  .mk {
-    width: 220px;
+  .station {
+    transform: translateY(0);
   }
 }
 

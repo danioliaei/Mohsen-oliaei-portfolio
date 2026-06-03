@@ -18,6 +18,7 @@ interface RawPhase {
   durYears: number;
   tag: string;
   title: string;
+  summary: string;
   sub: string[];
 }
 
@@ -28,6 +29,8 @@ const RAW: RawPhase[] = [
     durYears: 4.4, // Sep 2014 – Feb 2019
     tag: "2014 — 2019 · Tehran",
     title: "Foundations",
+    summary:
+      "Where the road begins. A B.Sc. in Architectural Engineering at Shahid Beheshti, and a first encounter with BIM — modelling buildings in ArchiCAD at Boomshahr Paydar, long before it was a discipline of its own.",
     sub: [
       "B.Sc. Architectural Engineering — Shahid Beheshti",
       "First BIM models at Boomshahr Paydar (ArchiCAD)",
@@ -38,6 +41,8 @@ const RAW: RawPhase[] = [
     durYears: 2.8, // Sep 2020 – Jun 2023
     tag: "2020 — 2023 · Gothenburg",
     title: "M.Sc. — Chalmers University",
+    summary:
+      "A move to Sweden, and a master's at Chalmers where architecture met computation — learning to shape geometry with Rhino and Grasshopper, and to treat design as something you can program.",
     sub: [
       "Architectural Engineering",
       "Computational design · Rhino + Grasshopper",
@@ -48,6 +53,8 @@ const RAW: RawPhase[] = [
     durYears: 1.0, // Jan – Dec 2022
     tag: "2022 · Gothenburg",
     title: "White Arkitekter — BIM Modeler",
+    summary:
+      "Modelling healthcare projects in Revit at one of Scandinavia's leading practices — keeping the rhythm of weekly IFC coordination and delivering a model that dozens of disciplines depend upon.",
     sub: [
       "Revit modeling · healthcare projects",
       "IFC coordination & weekly submissions",
@@ -58,6 +65,8 @@ const RAW: RawPhase[] = [
     durYears: 0.7, // Jan – Sep 2023
     tag: "2023 · Los Angeles",
     title: "Office for Collective Architecture",
+    summary:
+      "A season in Los Angeles on a mixed-use development, pairing Rhino and Grasshopper with energy and daylight analysis so that environmental performance could guide the form itself.",
     sub: [
       "BIM Modeler · mixed-use development",
       "Energy & daylight analysis · Rhino + Grasshopper",
@@ -68,6 +77,8 @@ const RAW: RawPhase[] = [
     durYears: 1.3, // Sep 2023 – Dec 2024
     tag: "2023 — 2024 · Skellefteå",
     title: "Northvolt — BIM Coordinator",
+    summary:
+      "Coordinating BIM across the vast Northvolt Ett gigafactory to ISO 19650 — running clash coordination, leading design reviews, and mentoring cross-functional teams through the kick-off of an enormous build.",
     sub: [
       "ISO 19650 · clash coordination · Northvolt Ett",
       "Trained & mentored cross-functional teams",
@@ -79,6 +90,8 @@ const RAW: RawPhase[] = [
     durYears: 1.4, // Feb 2025 – present
     tag: "2025 — now · Gothenburg",
     title: "Neobuilt — BIM Developer",
+    summary:
+      "Founding Neobuilt to build the tools the industry was missing — custom BIM automation in C#, .NET and Python, scripting the Revit and Navisworks APIs to take the repetition out of coordination.",
     sub: [
       "Founder · custom BIM automation tools",
       "C# / .NET / Python · Revit & Navisworks APIs",
@@ -89,6 +102,8 @@ const RAW: RawPhase[] = [
     durYears: 1.4, // Feb 2025 – present
     tag: "2025 — now · Stockholm",
     title: "Stegra — BIM Specialist",
+    summary:
+      "Shaping Stegra's BIM strategy from the ground up — authoring EIR, LOIN and AIR requirements, standing up Power BI dashboards, and training the stakeholders and coordinators who carry the work forward.",
     sub: [
       "Re-defining Stegra's BIM strategy · Power BI KPIs",
       "Training stakeholders & supporting coordinators",
@@ -108,6 +123,7 @@ export interface Milestone {
   kind: MilestoneKind;
   tag: string;
   title: string;
+  summary: string;
   sub: string[];
 }
 
@@ -130,6 +146,7 @@ const _phases: Phase[] = [];
       kind: r.kind,
       tag: r.tag,
       title: r.title,
+      summary: r.summary,
       sub: r.sub,
     });
     _phases.push({ zStart, zEnd, kind: r.kind });
