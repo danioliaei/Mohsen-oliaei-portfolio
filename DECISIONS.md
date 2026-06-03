@@ -102,6 +102,21 @@ portfolio, per the brief's instruction to pick sensible defaults and keep moving
 - **Contact link** points to LinkedIn (no email was specified); change in
   `src/ui/TopRail.tsx`.
 
+## Mobile / touch
+
+- **Phones hold up.** DPR is capped (1.5 on coarse/low-power; AdaptiveDpr still
+  degrades under load) and MSAA is dropped there, since dense additive points +
+  bloom get expensive at retina DPR; bloom is also eased back. Point budgets
+  already scale via `detectQuality`.
+- **Touch:** one finger rotates, two fingers pinch to zoom/descend (custom
+  controller; `touch-action: none` + `user-scalable=no` so the browser doesn't
+  hijack the gestures). Marker hit-spheres grow on coarse pointers so they're
+  easy to tap; the +/−/⌂ cluster and world switch get larger targets too.
+- **Layout:** `env(safe-area-inset-*)` keeps the HUD clear of notches / home
+  indicators (`viewport-fit=cover`); the title plate, controls and world switch
+  reflow on small screens, the room gallery collapses to one column, and the
+  project card goes near-full-width.
+
 ## Misc
 
 - Default theme follows `prefers-color-scheme`; toggle recolors HUD + shaders +

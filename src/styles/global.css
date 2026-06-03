@@ -94,7 +94,12 @@ button {
   pointer-events: none;
   display: grid;
   grid-template-rows: auto 1fr auto;
-  padding: var(--rail-pad);
+  /* honour notches / home indicators (viewport-fit=cover) */
+  padding:
+    calc(var(--rail-pad) + env(safe-area-inset-top))
+    calc(var(--rail-pad) + env(safe-area-inset-right))
+    calc(var(--rail-pad) + env(safe-area-inset-bottom))
+    calc(var(--rail-pad) + env(safe-area-inset-left));
   gap: 0;
 }
 
@@ -260,8 +265,8 @@ button {
    ========================================================================== */
 .controls {
   position: fixed;
-  left: var(--rail-pad);
-  bottom: calc(var(--rail-pad) + 34px);
+  left: calc(var(--rail-pad) + env(safe-area-inset-left));
+  bottom: calc(var(--rail-pad) + 34px + env(safe-area-inset-bottom));
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -328,7 +333,7 @@ button {
 .world-switch {
   position: fixed;
   left: 50%;
-  bottom: calc(var(--rail-pad) + 30px);
+  bottom: calc(var(--rail-pad) + 30px + env(safe-area-inset-bottom));
   transform: translateX(-50%);
   z-index: var(--z-hud);
   display: inline-flex;
@@ -381,7 +386,11 @@ button {
   z-index: var(--z-card);
   display: grid;
   place-items: end;
-  padding: var(--rail-pad);
+  padding:
+    calc(var(--rail-pad) + env(safe-area-inset-top))
+    calc(var(--rail-pad) + env(safe-area-inset-right))
+    calc(var(--rail-pad) + env(safe-area-inset-bottom))
+    calc(var(--rail-pad) + env(safe-area-inset-left));
   pointer-events: none;
 }
 
@@ -518,7 +527,7 @@ button {
    ========================================================================== */
 .title-plate {
   position: fixed;
-  left: var(--rail-pad);
+  left: calc(var(--rail-pad) + env(safe-area-inset-left));
   top: 50%;
   transform: translateY(-50%);
   z-index: var(--z-hud);
@@ -803,13 +812,48 @@ button {
 }
 
 /* ============================================================================
+   Touch devices — enlarge tap targets so controls are comfortable with a thumb
+   ========================================================================== */
+@media (pointer: coarse) {
+  .btn-cluster button {
+    width: 42px;
+    height: 42px;
+  }
+  .world-switch__seg {
+    padding: 10px 20px;
+    font-size: 11px;
+  }
+  .theme-toggle {
+    width: 52px;
+    height: 26px;
+  }
+  .theme-toggle__knob {
+    width: 20px;
+    height: 20px;
+  }
+  :root[data-theme="light"] .theme-toggle__knob {
+    transform: translateX(26px);
+  }
+}
+
+/* ============================================================================
    Small screens
    ========================================================================== */
 @media (max-width: 640px) {
+  :root {
+    --rail-pad: 14px;
+  }
   .title-plate {
     top: auto;
-    bottom: 120px;
+    bottom: calc(150px + env(safe-area-inset-bottom));
     transform: none;
+    max-width: 24ch;
+  }
+  .title-plate__title {
+    font-size: clamp(30px, 11vw, 54px);
+  }
+  .title-plate__hint {
+    display: none;
   }
   .rail__center {
     display: none;
@@ -817,7 +861,33 @@ button {
   .card-scrim {
     place-items: end center;
   }
+  .card {
+    width: min(440px, 94vw);
+  }
+  /* keep the bottom cluster, world switch and rail from colliding */
   .controls {
-    bottom: calc(var(--rail-pad) + 70px);
+    bottom: calc(var(--rail-pad) + 64px + env(safe-area-inset-bottom));
+  }
+  .world-switch {
+    bottom: calc(var(--rail-pad) + 26px + env(safe-area-inset-bottom));
+  }
+  /* room gallery reflows to a single readable column on a phone */
+  .screen3d,
+  .screen {
+    width: 440px;
+  }
+  .screen {
+    padding: 20px;
+  }
+  .screen__grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+}
+
+/* Very narrow phones — trim the brand wordmark so the top rail never wraps. */
+@media (max-width: 380px) {
+  .brand__name {
+    display: none;
   }
 }
