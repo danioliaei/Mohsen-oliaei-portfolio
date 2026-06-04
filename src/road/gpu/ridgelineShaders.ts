@@ -209,11 +209,37 @@ struct VsOut {
   let f = i.wpos.z / Z_STEP;
   let dist = 0.5 - abs(fract(f) - 0.5);       // 0 on a line, 0.5 between
   let aa = max(fwidth(f), 1e-5);
-  var line = 1.0 - smoothstep(0.0, aa * 1.25, dist);
+
+  // ---- INDEX CONTOURS: the career as a surveyed timeline --------------------
+  // Seven iso-lines — the contour bands nearest each career station, marching
+  // from the near dune approach (2014) up to just below the summit (now) — are
+  // promoted to bolder, brighter "index contours", exactly as a topographic
+  // survey thickens its key elevations. At rest the mountain still reads as one
+  // clean monochrome peak; these seven strata are its quiet biography. The band
+  // index is round(worldZ / Z_STEP), so each lands exactly on a real contour
+  // (never floating between two). Even-spaced for now — trivial to retune to the
+  // true per-year depths once the look is approved.
+  var STATIONS = array<f32, 7>(23.0, 38.0, 53.0, 68.0, 83.0, 98.0, 114.0);
+  let band = round(f);
+  var nearIdx = 999.0;
+  for (var k = 0; k < 7; k = k + 1) {
+    nearIdx = min(nearIdx, abs(band - STATIONS[k]));
+  }
+  let isIndex = 1.0 - step(0.5, nearIdx);                  // this band IS a station
+  let isMoat  = step(0.5, nearIdx) * (1.0 - step(1.5, nearIdx)); // exactly 1 band off
+
+  // index strokes are bolder + brighter, and each is framed by a one-contour dark
+  // "moat" (its two nearest hairline neighbours are dimmed) so the seven milestone
+  // strata read as distinct surveyed bands instead of dissolving into the weave
+  let widthAA = mix(1.25, 3.6, isIndex);
+  var line = 1.0 - smoothstep(0.0, aa * widthAA, dist);
   // where the projected lines pack tighter than the pixel grid, dissolve them so
   // far/steep faces read as smooth tone instead of a buzzing moiré (eased so the
-  // dense snowy summit keeps most of its strokes)
-  line = line * (1.0 - smoothstep(0.48, 1.10, aa));
+  // dense snowy summit keeps most of its strokes; index lines hold on a touch
+  // longer so the milestones stay legible where the hairlines have faded)
+  let dissolve = mix(1.10, 1.6, isIndex);
+  line = line * (1.0 - smoothstep(0.48, dissolve, aa));
+  line = line * (1.0 - isMoat * 0.82);                     // breathing room
 
   // ---- monochrome shading: form from a soft key light, snow from elevation --
   let n = normalize(i.nrm);
@@ -228,7 +254,11 @@ struct VsOut {
   // bright contour strokes: mid-grey on rock/dune, near-white on the snowy summit
   let rockBright = 0.42 + 0.22 * lit;
   let lineLum = mix(rockBright, 1.02, snow);
-  var lum = lineLum * line + rim * 0.50;       // + luminous ridge silhouettes
+  // index contours lift above the bloom threshold so they read as the brightest
+  // strokes on the slope and pick up a faint snow-glow (still pure greyscale)
+  let indexLum = mix(1.18, 1.62, snow);
+  let strokeLum = mix(lineLum, indexLum, isIndex);
+  var lum = strokeLum * line + rim * 0.50;       // + luminous ridge silhouettes
 
   // a luminous snowFIELD wash so the summit reads as a bright solid mass that the
   // fine darker striations sit on — the inverse of the dark-rock / bright-line
