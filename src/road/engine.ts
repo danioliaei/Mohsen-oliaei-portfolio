@@ -43,9 +43,9 @@ export const setLensX = (v: number): void => {
  * right, then back, rather than holding one gentle curve.
  */
 export const LAT = (z: number): number =>
-  620 * Math.sin(z * 0.00012 + 0.4) +
-  300 * Math.sin(z * 0.00033 + 1.6) +
-  120 * Math.sin(z * 0.00062 + 0.5);
+  960 * Math.sin(z * 0.00014 + 0.4) +
+  500 * Math.sin(z * 0.00040 + 1.6) +
+  200 * Math.sin(z * 0.00075 + 0.5);
 
 /**
  * Organic hill field (domain-warped ridges) — the EXACT JS twin of `organic()`
