@@ -3,6 +3,9 @@
   --sans: "Inter", "Helvetica Neue", Helvetica, Arial, sans-serif;
   --ink: #f4f1ea;
   --label: rgba(244, 241, 234, 0.5);
+  /* warm umber-black used for the cinematic framing scrims (top/bottom of the
+     stage) — same family as the deepest ground tone, never a flat grey */
+  --frame: 24, 11, 4;
   /* station kind accent colours */
   --c-education: #ffc45c;
   --c-career: #ff9450;
@@ -59,11 +62,11 @@ header {
   align-items: center;
   justify-content: space-between;
   padding: 28px 34px;
-  /* keep the wordmark + nav legible where the bright horizon glow rises behind
-     them on wide/short viewports — a soft warm-dark halo, no visible box */
+  /* the top scrim now carries most of the contrast, so the type can wear a
+     crisper, tighter shadow — definition without the old fuzzy halo */
   text-shadow:
-    0 1px 22px rgba(24, 10, 2, 0.55),
-    0 1px 3px rgba(24, 10, 2, 0.45);
+    0 1px 2px rgba(18, 8, 2, 0.5),
+    0 2px 16px rgba(18, 8, 2, 0.34);
 }
 .wordmark {
   font-family: var(--sans);
@@ -80,32 +83,33 @@ header {
 }
 nav {
   display: flex;
-  gap: 34px;
+  gap: 30px;
 }
 nav a {
   position: relative;
-  font-size: 15px;
-  font-weight: 400;
-  letter-spacing: 0.01em;
-  color: var(--ink);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: rgba(244, 241, 234, 0.78);
   text-decoration: none;
-  transition: opacity 0.25s ease;
+  transition: color 0.3s ease;
 }
 nav a::after {
   content: "";
   position: absolute;
   left: 0;
   right: 100%;
-  bottom: -4px;
+  bottom: -6px;
   height: 1px;
   background: currentColor;
-  transition: right 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+  transition: right 0.4s cubic-bezier(0.22, 1, 0.36, 1);
 }
 nav a:hover {
-  opacity: 0.85;
+  color: var(--ink);
 }
 nav a:hover::after {
-  right: 0;
+  right: 0.16em; /* stop the rule short of the trailing letter-spacing */
 }
 
 :where(a, button):focus-visible {
@@ -125,6 +129,44 @@ nav a:hover::after {
   height: 100vh;
   width: 100%;
   overflow: hidden;
+}
+/* ---- cinematic framing ---------------------------------------------------
+   Two warm-dark scrims that sit ABOVE the canvas but BELOW the UI text. They
+   frame the diorama like a film still: a whisper at the top so the wordmark and
+   nav settle onto controlled shade instead of raw glare, and a deeper pool at
+   the base that grounds the composition, melts the busy contours into shadow,
+   and lifts the scroll cue + footer. The sun glow above the header band is left
+   untouched. Decorative only — pointer events pass straight through to the
+   free-look canvas. */
+.stage::before,
+.stage::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  z-index: 4;
+  pointer-events: none;
+}
+.stage::before {
+  top: 0;
+  height: 22vh;
+  background: linear-gradient(
+    to bottom,
+    rgba(var(--frame), 0.5) 0%,
+    rgba(var(--frame), 0.16) 42%,
+    rgba(var(--frame), 0) 100%
+  );
+}
+.stage::after {
+  bottom: 0;
+  height: 48vh;
+  background: linear-gradient(
+    to top,
+    rgba(var(--frame), 0.82) 0%,
+    rgba(var(--frame), 0.34) 32%,
+    rgba(var(--frame), 0.1) 62%,
+    rgba(var(--frame), 0) 100%
+  );
 }
 canvas#road {
   position: absolute;
@@ -342,120 +384,66 @@ canvas#road {
   position: absolute;
   z-index: 10;
   left: 50%;
-  bottom: 78px;
+  bottom: 64px;
   transform: translateX(-50%);
-  font-family: var(--sans);
-  font-weight: 500;
-  font-size: 11px;
-  letter-spacing: 3px;
-  color: rgba(244, 241, 234, 0.62);
-  text-transform: uppercase;
-  pointer-events: none;
-}
-.scrollhint .arrow {
-  display: block;
-  text-align: center;
-  margin-top: 10px;
-  animation: bob 1.8s ease-in-out infinite;
-}
-@keyframes bob {
-  0%,
-  100% {
-    transform: translateY(0);
-  }
-  50% {
-    transform: translateY(7px);
-  }
-}
-
-/* ---------------- free-look view controls ---------------- */
-.camnav {
-  position: absolute;
-  z-index: 30;
-  right: 30px;
-  bottom: 104px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
-}
-.camnav-btn {
-  width: 42px;
-  height: 42px;
-  display: grid;
-  place-items: center;
-  border-radius: 50%;
-  border: 1px solid rgba(244, 241, 234, 0.18);
-  background: rgba(28, 16, 7, 0.42);
-  -webkit-backdrop-filter: blur(7px);
-  backdrop-filter: blur(7px);
-  color: rgba(244, 241, 234, 0.82);
-  cursor: pointer;
-  box-shadow: 0 4px 18px rgba(10, 4, 1, 0.35);
-  transition:
-    background 0.25s ease,
-    border-color 0.25s ease,
-    color 0.25s ease,
-    transform 0.18s ease,
-    opacity 0.3s ease,
-    box-shadow 0.3s ease;
-}
-.camnav-btn svg {
-  width: 19px;
-  height: 19px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.8;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-.camnav-btn:hover {
-  background: rgba(48, 28, 12, 0.62);
-  border-color: rgba(255, 196, 92, 0.55);
-  color: #fff;
-  transform: translateY(-1px);
-}
-.camnav-btn:active {
-  transform: translateY(0) scale(0.95);
-}
-.camnav-btn:disabled {
-  cursor: default;
-}
-/* recenter sits quiet until the camera has actually been moved, then lights up */
-.camnav-reset {
-  margin-top: 3px;
-  opacity: 0.38;
-}
-.camnav-reset.is-active {
-  opacity: 1;
-  border-color: rgba(255, 180, 90, 0.5);
-  color: var(--c-education);
-  box-shadow:
-    0 0 0 1px rgba(255, 180, 90, 0.18),
-    0 0 18px rgba(255, 160, 70, 0.28);
-}
-.camnav-reset.is-active:hover {
-  background: rgba(70, 40, 14, 0.72);
-  color: #fff;
-}
-.camhint {
-  position: absolute;
-  z-index: 30;
-  right: 30px;
-  bottom: 252px;
-  max-width: 208px;
-  text-align: right;
-  font-size: 10px;
-  font-weight: 500;
-  letter-spacing: 1.4px;
-  line-height: 1.55;
-  text-transform: uppercase;
-  color: rgba(244, 241, 234, 0.46);
+  align-items: center;
+  gap: 14px;
   pointer-events: none;
-  text-shadow: 0 1px 12px rgba(20, 8, 2, 0.6);
-  transition: opacity 0.5s ease;
 }
-.camhint.is-hidden {
-  opacity: 0;
+.scroll-label {
+  font-family: var(--sans);
+  font-weight: 500;
+  font-size: 10.5px;
+  letter-spacing: 3.4px;
+  text-transform: uppercase;
+  color: rgba(244, 241, 234, 0.66);
+}
+/* a thin survey line with a bead of light dropping down it — the same gesture
+   as the data pulses travelling the fibre road, scaled down to a UI cue */
+.scroll-line {
+  position: relative;
+  width: 1px;
+  height: 34px;
+  overflow: hidden;
+  background: linear-gradient(
+    to bottom,
+    rgba(244, 241, 234, 0) 0%,
+    rgba(244, 241, 234, 0.32) 50%,
+    rgba(244, 241, 234, 0) 100%
+  );
+}
+.scroll-line::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 1px;
+  height: 11px;
+  background: linear-gradient(
+    to bottom,
+    rgba(255, 236, 200, 0) 0%,
+    rgba(255, 238, 205, 0.95) 50%,
+    rgba(255, 236, 200, 0) 100%
+  );
+  animation: scrolldrop 2.4s cubic-bezier(0.5, 0, 0.5, 1) infinite;
+}
+@keyframes scrolldrop {
+  0% {
+    transform: translateY(-12px);
+    opacity: 0;
+  }
+  28% {
+    opacity: 1;
+  }
+  72% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(34px);
+    opacity: 0;
+  }
 }
 
 /* ---------------- footer ---------------- */
@@ -468,30 +456,39 @@ footer {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 22px 34px 24px;
+  padding: 22px 34px 26px;
   font-family: var(--sans);
   font-weight: 500;
-  font-size: 12px;
-  letter-spacing: 1.4px;
-  color: var(--label);
+  font-size: 11.5px;
+  letter-spacing: 2px;
+  color: rgba(244, 241, 234, 0.64);
   text-transform: uppercase;
 }
 footer span {
   white-space: nowrap;
+  transition: color 0.3s ease;
+}
+footer span:hover {
+  color: rgba(244, 241, 234, 0.92);
 }
 
 @media (max-width: 760px) {
   header {
-    padding: 16px 18px;
+    padding: 15px 16px;
   }
   nav {
-    gap: 15px;
+    gap: 13px;
   }
+  /* tighten the tracked caps so wordmark + four links share the narrow bar */
   nav a {
-    font-size: 13px;
+    font-size: 10px;
+    letter-spacing: 0.07em;
   }
   .wordmark {
-    font-size: 18px;
+    font-size: 17px;
+  }
+  .scrollhint {
+    bottom: 54px;
   }
   /* card drops to bottom-centre, full readable width */
   .station-layer {
@@ -501,20 +498,6 @@ footer span {
   }
   .station {
     width: min(540px, 92vw);
-  }
-  /* lift the view controls clear of the bottom card + wrapped footer; the drag
-     hint is desktop-only guidance, so drop it on touch layouts */
-  .camnav {
-    right: 16px;
-    bottom: 150px;
-    gap: 8px;
-  }
-  .camnav-btn {
-    width: 38px;
-    height: 38px;
-  }
-  .camhint {
-    display: none;
   }
   footer {
     padding: 18px 20px;
@@ -527,7 +510,8 @@ footer span {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .scrollhint .arrow {
+  .scroll-line::after {
     animation: none;
+    opacity: 0.7;
   }
 }

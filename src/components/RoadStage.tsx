@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { MILESTONES, TRAVEL } from "../data/milestones";
 import {
-  CAM_LIMITS,
   LAT,
   VIEW_DEPTH,
   clamp,
@@ -10,7 +9,6 @@ import {
   getViewProj,
   project,
   roadBedY,
-  setCamOffsets,
   setCamera,
   setLensX,
   smoothstep,
@@ -44,12 +42,6 @@ const SHOW_BOARDS = false;
 const easeInOut = (x: number): number =>
   x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
 
-/** Free-look camera offsets, layered on the scroll-driven base framing. */
-type CamOff = { azim: number; elev: number; zoom: number; panX: number; panZ: number };
-const CAM_NEUTRAL: CamOff = { azim: 0, elev: 0, zoom: 1, panX: 0, panZ: 0 };
-/** Smoothing time-constant (s) for easing the free-look camera to its target. */
-const CAM_TAU = 0.11;
-
 export default function RoadStage() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -59,21 +51,6 @@ export default function RoadStage() {
   const activeRef = useRef(0);
   const [active, setActive] = useState(0);
   const [unsupported, setUnsupported] = useState(false);
-
-  // ---- free-look camera (orbit / zoom / pan) layered on the scroll journey ----
-  const camTarget = useRef<CamOff>({ ...CAM_NEUTRAL }); // where the viewer wants it
-  const camCur = useRef<CamOff>({ ...CAM_NEUTRAL }); // eased current → pushed to GPU
-  const [camMoved, setCamMoved] = useState(false); // drives the recenter affordance
-
-  const recenter = (): void => {
-    camTarget.current = { ...CAM_NEUTRAL };
-    setCamMoved(false);
-  };
-  const nudgeZoom = (factor: number): void => {
-    const t = camTarget.current;
-    t.zoom = clamp(t.zoom * factor, CAM_LIMITS.zoom[0], CAM_LIMITS.zoom[1]);
-    setCamMoved(true);
-  };
 
   useEffect(() => {
     const cvs = canvasRef.current;
@@ -175,10 +152,7 @@ export default function RoadStage() {
         if (idleT) clearTimeout(idleT);
         idleT = window.setTimeout(snapToNearest, 160);
       };
-      const onWheel = (e: WheelEvent) => {
-        if (e.ctrlKey || e.metaKey) return; // ⌘/ctrl-scroll (& pinch) zooms instead
-        onInput(Math.sign(e.deltaY));
-      };
+      const onWheel = (e: WheelEvent) => onInput(Math.sign(e.deltaY));
       const onTouch = () => onInput(0);
       const onKey = (e: KeyboardEvent) => {
         const k = e.key;
@@ -195,92 +169,6 @@ export default function RoadStage() {
         window.removeEventListener("keydown", onKey);
         cancelAnimationFrame(snapRAF);
         if (idleT) clearTimeout(idleT);
-      });
-
-      // ---- free-look: drag to orbit, shift/right-drag to pan, ⌘/ctrl-scroll
-      // (or trackpad pinch) to zoom. Mouse/pen only — touch keeps the one-finger
-      // scroll journey. All inputs feed camTarget; the frame loop eases toward it.
-      let dragging: null | "orbit" | "pan" = null;
-      let sx = 0;
-      let sy = 0;
-      let startOff: CamOff = { ...CAM_NEUTRAL };
-      const AZIM_PER_W = 1.15; // a full-width drag ≈ this many radians of yaw
-      const ELEV_PER_H = 0.95;
-      const PAN_PER_PX = 16; // world units per pixel, scaled by zoom
-
-      const onPointerDown = (e: PointerEvent) => {
-        if (e.pointerType === "touch" || (e.button !== 0 && e.button !== 1)) return;
-        dragging = e.shiftKey || e.button === 1 ? "pan" : "orbit";
-        sx = e.clientX;
-        sy = e.clientY;
-        startOff = { ...camTarget.current };
-        try {
-          cvs.setPointerCapture(e.pointerId);
-        } catch {
-          /* capture is best-effort */
-        }
-        cvs.style.cursor = "grabbing";
-        setCamMoved(true);
-      };
-      const onPointerMove = (e: PointerEvent) => {
-        if (!dragging) return;
-        const dx = e.clientX - sx;
-        const dy = e.clientY - sy;
-        const t = camTarget.current;
-        if (dragging === "orbit") {
-          t.azim = clamp(
-            startOff.azim - (dx / Math.max(W, 1)) * AZIM_PER_W,
-            CAM_LIMITS.azim[0], CAM_LIMITS.azim[1],
-          );
-          t.elev = clamp(
-            startOff.elev + (dy / Math.max(H, 1)) * ELEV_PER_H,
-            CAM_LIMITS.elev[0], CAM_LIMITS.elev[1],
-          );
-        } else {
-          const k = PAN_PER_PX * camCur.current.zoom;
-          t.panX = clamp(startOff.panX - dx * k, CAM_LIMITS.panX[0], CAM_LIMITS.panX[1]);
-          t.panZ = clamp(startOff.panZ + dy * k, CAM_LIMITS.panZ[0], CAM_LIMITS.panZ[1]);
-        }
-      };
-      const onPointerUp = (e: PointerEvent) => {
-        if (!dragging) return;
-        dragging = null;
-        cvs.style.cursor = "grab";
-        try {
-          cvs.releasePointerCapture(e.pointerId);
-        } catch {
-          /* already released */
-        }
-      };
-      const onZoomWheel = (e: WheelEvent) => {
-        if (!(e.ctrlKey || e.metaKey)) return; // plain wheel still drives the journey
-        e.preventDefault();
-        const t = camTarget.current;
-        // pinch-open / scroll-up (deltaY < 0) dollies IN (smaller orbit); pinch-close
-        // / scroll-down dollies OUT — the natural direction for a trackpad pinch
-        t.zoom = clamp(
-          t.zoom * Math.exp(e.deltaY * 0.0016),
-          CAM_LIMITS.zoom[0], CAM_LIMITS.zoom[1],
-        );
-        setCamMoved(true);
-      };
-      const onCtxMenu = (e: Event) => e.preventDefault(); // right-drag pans, no menu
-
-      cvs.addEventListener("pointerdown", onPointerDown);
-      cvs.addEventListener("pointermove", onPointerMove);
-      cvs.addEventListener("pointerup", onPointerUp);
-      cvs.addEventListener("pointercancel", onPointerUp);
-      cvs.addEventListener("wheel", onZoomWheel, { passive: false });
-      cvs.addEventListener("contextmenu", onCtxMenu);
-      cvs.style.cursor = "grab";
-      cvs.style.touchAction = "pan-y"; // let vertical touch-scroll the journey
-      teardown.push(() => {
-        cvs.removeEventListener("pointerdown", onPointerDown);
-        cvs.removeEventListener("pointermove", onPointerMove);
-        cvs.removeEventListener("pointerup", onPointerUp);
-        cvs.removeEventListener("pointercancel", onPointerUp);
-        cvs.removeEventListener("wheel", onZoomWheel);
-        cvs.removeEventListener("contextmenu", onCtxMenu);
       });
 
       let displayed = 0;
@@ -310,18 +198,6 @@ export default function RoadStage() {
         // the diorama. (When boards return, it eases back left on wide viewports.)
         const lensX = SHOW_BOARDS && wide ? 0.43 : 0.5;
         setLensX(lensX);
-
-        // ease the free-look offsets toward the viewer's target, then hand them to
-        // the engine so orbit/zoom/pan ride smoothly on top of the scroll journey
-        const ck = 1 - Math.exp(-dt / CAM_TAU);
-        const cc = camCur.current;
-        const ct = camTarget.current;
-        cc.azim += (ct.azim - cc.azim) * ck;
-        cc.elev += (ct.elev - cc.elev) * ck;
-        cc.zoom += (ct.zoom - cc.zoom) * ck;
-        cc.panX += (ct.panX - cc.panX) * ck;
-        cc.panZ += (ct.panZ - cc.panZ) * ck;
-        setCamOffsets(cc);
 
         const camZ = p * TRAVEL;
         const camX = LAT(camZ);
@@ -477,49 +353,8 @@ export default function RoadStage() {
           )}
 
           <div className="scrollhint" ref={hintRef}>
-            Scroll<span className="arrow">↓</span>
-          </div>
-
-          <div className={`camhint${camMoved ? " is-hidden" : ""}`} aria-hidden="true">
-            Drag to orbit · ⌘/Ctrl-scroll zoom · Shift-drag pan
-          </div>
-
-          <div className="camnav" role="group" aria-label="View controls">
-            <button
-              type="button"
-              className="camnav-btn"
-              onClick={() => nudgeZoom(1 / 1.18)}
-              aria-label="Zoom in"
-              title="Zoom in"
-            >
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M12 5.5v13M5.5 12h13" />
-              </svg>
-            </button>
-            <button
-              type="button"
-              className="camnav-btn"
-              onClick={() => nudgeZoom(1.18)}
-              aria-label="Zoom out"
-              title="Zoom out"
-            >
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M5.5 12h13" />
-              </svg>
-            </button>
-            <button
-              type="button"
-              className={`camnav-btn camnav-reset${camMoved ? " is-active" : ""}`}
-              onClick={recenter}
-              aria-label="Recenter view"
-              title="Recenter view"
-              disabled={!camMoved}
-            >
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <circle cx="12" cy="12" r="3.1" />
-                <path d="M12 2.6v3.5M12 17.9v3.5M2.6 12h3.5M17.9 12h3.5" />
-              </svg>
-            </button>
+            <span className="scroll-label">Scroll</span>
+            <span className="scroll-line" aria-hidden="true" />
           </div>
         </div>
       </div>
