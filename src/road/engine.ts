@@ -137,11 +137,56 @@ const roadFloor = (z: number): number =>
 export const surfaceY = (x: number, z: number): number => {
   const d = Math.abs(x - LAT(z));
   const t = 0.12 + 0.88 * smoothstep(120, 1300, d); // 0.12 near road .. 1 in hills
-  return roadFloor(z) * (1 - t) + organic(x, z) * t;
+  const natural = roadFloor(z) * (1 - t) + organic(x, z) * t;
+  // flatten the organic land into the engineered Stegra terrace (see TERRACE)
+  const m = terraceMask(x, z);
+  return natural * (1 - m) + TERRACE.y * m;
 };
 
 /** The road, stations and camera ride a smooth grade just above the low ground. */
 export const roadBedY = (z: number): number => roadFloor(z) + 25;
+
+/* ---- Stegra site: a graded terrace cut into the hillside ----------------- */
+/**
+ * The gigafactory does not sit on the raw rolling land — it stands on an
+ * engineered platform bulldozed into it (exactly like Stegra/Northvolt in
+ * reality: a vast flat terrace cut-and-filled into forested hills). We carve
+ * that platform straight into the height field so the ground is GENUINELY flat
+ * where the plant stands, with embankment slopes blending back into the organic
+ * hills — the contour iso-lines then wrap those slopes, reading as real graded
+ * earthworks. The factory geometry (factory.ts) stands on this exact `y`, so it
+ * can never float or be pierced by a stray ridge.
+ *
+ * `x,z` centre the terrace beside the road at the Stegra milestone (z≈21080,
+ * road offset −1700). `hw,hd` are the flat-top half-extents, `r` the corner
+ * radius, `emb` the embankment blend width (slope reach). Verified: the road
+ * corridor stays >500u clear, so grading the land here never disturbs it.
+ *
+ * IMPORTANT: these numbers + the maths in `siteGradeY()` MUST stay an exact twin
+ * of the terrace block in the WGSL `terrainH()` (gpu/shaders.ts). The GPU land
+ * and the JS height field (road, factory pad) read the same surface — if the two
+ * drift, the plant floats or the road sinks. Mirror any change in both places.
+ */
+export const TERRACE = {
+  x: -2667,
+  z: 21080,
+  y: 560,
+  hw: 860,
+  hd: 1000,
+  r: 230,
+  emb: 440,
+} as const;
+
+/** Terrace influence at (x,z): 1 on the flat top, easing to 0 past the
+ *  embankment. A rounded-box signed distance keeps the slope width uniform. */
+const terraceMask = (x: number, z: number): number => {
+  const qx = Math.abs(x - TERRACE.x) - (TERRACE.hw - TERRACE.r);
+  const qz = Math.abs(z - TERRACE.z) - (TERRACE.hd - TERRACE.r);
+  const ox = Math.max(qx, 0);
+  const oz = Math.max(qz, 0);
+  const sdf = Math.hypot(ox, oz) + Math.min(Math.max(qx, qz), 0) - TERRACE.r;
+  return 1 - smoothstep(0, TERRACE.emb, sdf);
+};
 
 export interface Projected {
   x: number;

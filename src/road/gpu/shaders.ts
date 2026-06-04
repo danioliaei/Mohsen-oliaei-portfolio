@@ -51,10 +51,29 @@ fn organic(x : f32, z : f32) -> f32 {
 fn roadFloor(z : f32) -> f32 {
   return 520.0 * sin(z * 0.00012 + 0.5) + 240.0 * sin(z * 0.00026 + 2.1);
 }
+// Stegra terrace — EXACT twin of TERRACE + terraceMask() in engine.ts. The plant
+// stands on a flat platform graded into the hills; the contour lines wrap the
+// embankment slopes as engineered earthworks. Mirror any change in engine.ts.
+const TC_X : f32 = -2667.0;
+const TC_Z : f32 = 21080.0;
+const TC_Y : f32 = 560.0;
+const TC_HW : f32 = 860.0;
+const TC_HD : f32 = 1000.0;
+const TC_R : f32 = 230.0;
+const TC_EMB : f32 = 440.0;
+fn terraceMask(x : f32, z : f32) -> f32 {
+  let qx = abs(x - TC_X) - (TC_HW - TC_R);
+  let qz = abs(z - TC_Z) - (TC_HD - TC_R);
+  let o = vec2<f32>(max(qx, 0.0), max(qz, 0.0));
+  let sd = length(o) + min(max(qx, qz), 0.0) - TC_R;
+  return 1.0 - smoothstep(0.0, TC_EMB, sd);
+}
 fn terrainH(x : f32, z : f32) -> f32 {
   let d = abs(x - latz(z));
   let t = 0.12 + 0.88 * smoothstep(120.0, 1300.0, d);
-  return roadFloor(z) * (1.0 - t) + organic(x, z) * t;
+  let natural = roadFloor(z) * (1.0 - t) + organic(x, z) * t;
+  let m = terraceMask(x, z);
+  return natural * (1.0 - m) + TC_Y * m;
 }
 `;
 
@@ -296,13 +315,17 @@ struct VsOut {
   let n = normalize(i.nrm);
   let L = normalize(vec3<f32>(-0.45, 0.80, -0.34));   // key light (matches terrain)
   let diff = clamp(dot(n, L), 0.0, 1.0);
-  let key = vec3<f32>(1.0, 0.84, 0.62);
-  let sky = vec3<f32>(0.24, 0.33, 0.46);              // cool skylight fill from above
-  var lit = i.col * (key * (0.26 + 0.86 * diff) + sky * (0.18 + 0.20 * (0.5 + 0.5 * n.y)));
+  let up = 0.5 + 0.5 * n.y;                            // 1 skyward .. 0 downward
+  let key = vec3<f32>(1.0, 0.82, 0.58);              // warm low sun
+  let sky = vec3<f32>(0.30, 0.36, 0.46);             // cool skylight fill from above
+  let grnd = vec3<f32>(0.42, 0.22, 0.12);            // warm dusk ground-bounce from below
+  // warm key + cool sky from above + warm ground bounce from below → the steel
+  // sits in the dusk light instead of reading as a cold grey cut-out
+  var lit = i.col * (key * (0.30 + 0.85 * diff) + sky * (0.24 * up) + grnd * (0.32 * (1.0 - up)));
   // soft fresnel rim against a fixed view so silhouettes catch the horizon glow
   let Vv = normalize(vec3<f32>(0.0, 0.52, -0.86));
   let rim = pow(1.0 - clamp(dot(n, Vv), 0.0, 1.0), 3.0);
-  lit += i.col * rim * 0.34;
+  lit += mix(i.col, vec3<f32>(1.0, 0.72, 0.42), 0.55) * rim * 0.44; // warm horizon backlight
   lit += i.col * i.emis;                              // emissive windows / lights
   // aerial perspective: dissolve into the dusk with distance, like the contours
   let haze = smoothstep(0.66, 1.0, i.depthT);
