@@ -42,11 +42,17 @@ const KIND_COL: Record<string, [number, number, number]> = {
 };
 
 // ---- terrain sampling region + mesh density (mirrors gl.ts) ----
-const HALF_W = 13000;
-const NEAR_AHEAD = -1600;
+// The mesh is an axis-aligned patch anchored to the camera; under the oblique
+// 45° bird's-eye view it projects to a ROTATED quad, so the footprint must be
+// generously larger than the screen or its straight edges show as hard cuts
+// (an empty wedge in the lower-left, and terrain clipping in/out as you scroll).
+// HALF_W gives lateral overscan; NEAR_AHEAD pushes the near edge well behind the
+// camera so it falls below the frame; the far edge already dissolves via depthT.
+const HALF_W = 17000;
+const NEAR_AHEAD = -8200;
 const VIEW_DEPTH = 13000;
-const NX = 380;
-const NZ = 320;
+const NX = 430;
+const NZ = 416;
 const L_MIN = 0;
 // Vertical spacing (height units) between iso-contour lines. A touch coarser than
 // before so the lines read as elegant, evenly-spaced survey strokes rather than a
