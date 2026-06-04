@@ -477,7 +477,8 @@ export default function RoadStage() {
           )}
 
           <div className="scrollhint" ref={hintRef}>
-            Scroll<span className="arrow">↓</span>
+            <span className="scroll-label">Scroll</span>
+            <span className="scroll-line" aria-hidden="true" />
           </div>
 
           <div className={`camhint${camMoved ? " is-hidden" : ""}`} aria-hidden="true">

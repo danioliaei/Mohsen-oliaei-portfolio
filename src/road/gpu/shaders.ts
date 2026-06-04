@@ -612,8 +612,12 @@ fn focusBlend(uv : vec2<f32>) -> f32 {
   // (the old grade flattened everything into one milky golden wash).
   let luma = dot(col, vec3<f32>(0.2126, 0.7152, 0.0722));
   col = mix(vec3<f32>(luma), col, 1.16);       // gentle colour pop
-  col = (col - 0.5) * 1.06 + 0.5;              // contrast — punchy darks, no haze
+  col = (col - 0.5) * 1.08 + 0.5;              // contrast — a touch more bite
   col = max(col, vec3<f32>(0.0));
+  // black point — draw the very darkest tones down to true black so the dusk
+  // reads rich rather than milky. Rescaled by (1 - bp) so midtones, the bright
+  // contours and the sun glow keep their level; only the haze in the shadows lifts.
+  col = max(col - vec3<f32>(0.011), vec3<f32>(0.0)) / (1.0 - 0.011);
 
   // vignette — elliptical so top/bottom stay open, only corners darken
   let vigC = toC * vec2<f32>(1.0, 0.45);
