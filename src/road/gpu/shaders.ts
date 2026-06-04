@@ -99,6 +99,7 @@ struct VsOut {
   @location(1) depthT : f32,
   @location(2) nrm : vec3<f32>,
   @location(3) world : f32,
+  @location(4) edge : f32,
 };
 @vertex fn vs(@location(0) aUV : vec2<f32>) -> VsOut {
   let halfW = F.geo.w;
@@ -106,7 +107,10 @@ struct VsOut {
   let far = F.geo.z;
   let x = F.cam.x - halfW + 2.0 * halfW * aUV.x;
   let tz = aUV.y;
-  let z = near + (far - near) * (tz * tz * 0.62 + tz * 0.38);
+  // milder near-bias than before: the near edge now sits far behind the camera
+  // (deep blurred foreground), so we don't want it hoarding mesh rows — keep the
+  // density spread toward the sharp focal band rather than piled up at tz=0.
+  let z = near + (far - near) * (tz * tz * 0.40 + tz * 0.60);
   let y = terrainH(x, z);
   var clip = F.vp * vec4<f32>(x, y, z, 1.0);
   clip.x += (F.geo.x - 0.5) * 2.0 * clip.w;       // lateral lens shift
@@ -114,6 +118,11 @@ struct VsOut {
   o.pos = clip;
   o.relief = y;
   o.depthT = clamp((z - F.cam.y) / VIEW_DEPTH, 0.0, 1.0);
+  // soft mesh-boundary mask: dissolve the lateral edges and the near edge into
+  // the dusk so the rotated patch never shows a hard straight cut on-screen. The
+  // far edge keeps its own aerial-perspective fade (depthT), so it's left at 1.
+  let exq = min(aUV.x, 1.0 - aUV.x);
+  o.edge = smoothstep(0.0, 0.055, exq) * smoothstep(0.0, 0.04, aUV.y);
   let e = 7.0;
   let hx = terrainH(x + e, z) - terrainH(x - e, z);
   let hz = terrainH(x, z + e) - terrainH(x, z - e);
@@ -155,14 +164,14 @@ struct VsOut {
   // OPAQUE ground (was a near-transparent 0.16–0.36, which let the bright golden
   // sky flood through the whole lower frame as a milky haze). Only the far reaches
   // fade out, so distant hills melt into the dusk sky as honest aerial perspective.
-  let baseA = (0.88 + 0.12 * diff) * fade;
+  let baseA = (0.88 + 0.12 * diff) * fade * i.edge;
 
   // slow shimmer travelling through the lines — the land reads as alive/digital
   let shimmer = 0.86 + 0.14 * sin(F.cam.z * 0.8 + i.relief * 0.004 + i.world * 0.0003);
   let warm = vec3<f32>(1.0, (253.0 - t * 12.0) / 255.0, (251.0 - t * 34.0) / 255.0);  // near-white, barely warms with depth
   let emis = (0.90 + 0.64 * core) * shimmer;         // thin but crisp & white-bright
   let lineCol = warm * (lit + 0.4 * spec) * emis;
-  let lineA = line * (0.56 + 0.40 * fade) * (0.74 + 0.4 * lit);
+  let lineA = line * (0.56 + 0.40 * fade) * (0.74 + 0.4 * lit) * i.edge;
 
   let col = mix(baseCol, lineCol, line);
   let a = max(baseA, lineA);
