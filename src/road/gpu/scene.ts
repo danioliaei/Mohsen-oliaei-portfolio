@@ -29,6 +29,10 @@ import { LAT, surfaceY } from "../engine";
 import { MILESTONES } from "../../data/milestones";
 
 const EMBER_COUNT = 0;
+/** Floating kind-coloured glints at each milestone. Disabled per request
+ *  ("remove those embers") — the DOM cards + connector line still mark every
+ *  station, so nothing navigational is lost. Flip to true to bring them back. */
+const SHOW_WAYPOINTS = false;
 
 /** Per-kind glint colour (linear-ish RGB), echoing the card accents. */
 const KIND_COL: Record<string, [number, number, number]> = {
@@ -188,8 +192,8 @@ export class WebGPUScene {
     // it sits planted on the ground and is correctly occluded by nearer hills.
     const ZMAX = 38000;
     const DZ = 80;
-    const LIFT = 14;
-    const HALFW = 26;
+    const LIFT = 20;
+    const HALFW = 34;
     const steps = Math.floor(ZMAX / DZ);
     const rv = new Float32Array((steps + 1) * 2 * 5);
     let rp = 0;
@@ -531,9 +535,11 @@ export class WebGPUScene {
     u[16] = s.camX; u[17] = s.camZ; u[18] = s.time; u[19] = s.speed;
     u[20] = this.rw; u[21] = this.rh; u[22] = this.sc; u[23] = s.dpr;
     u[24] = s.lensX; u[25] = s.camZ + NEAR_AHEAD; u[26] = s.camZ + VIEW_DEPTH; u[27] = HALF_W;
-    u[28] = L_MIN; u[29] = L_STEP; u[30] = 0.6; u[31] = 0.13; // focusY, focusH
-    u[32] = 0.34; u[33] = 0.28; u[34] = 0.030; u[35] = 1.03; // feather, vignette, grain, exposure
-    u[36] = s.vpU; u[37] = s.vpV; u[38] = 0.15 + s.speed * 0.16; u[39] = 0.02; // halo glow, r
+    // tilt-shift miniature: a narrow sharp band across the middle, the near (lower)
+    // and far (upper) reaches falling quickly into blur — the core "toy" cue
+    u[28] = L_MIN; u[29] = L_STEP; u[30] = 0.52; u[31] = 0.07; // focusY, focusH
+    u[32] = 0.13; u[33] = 0.16; u[34] = 0.018; u[35] = 1.03; // feather, vignette, grain, exposure
+    u[36] = s.vpU; u[37] = s.vpV; u[38] = 0.04; u[39] = 0.02; // halo glow, r (muted for the diorama)
     u[40] = 0.72; u[41] = 0.0016; u[42] = 1.0; u[43] = s.eyeY; // bloomAmt, caAmt, dofMax, eyeY
     this.g.device.queue.writeBuffer(this.uBuf, 0, u.buffer, 0, 256);
   }
@@ -582,10 +588,12 @@ export class WebGPUScene {
     // drifting embers — instanced, procedural, additive (the "moving" cue)
     pass.setPipeline(this.emberPipe);
     pass.draw(6, EMBER_COUNT);
-    // station waypoint glints
-    pass.setPipeline(this.wpPipe);
-    pass.setBindGroup(0, this.wpBG);
-    pass.draw(6, this.wpCount);
+    // station waypoint glints ("embers") — disabled; see SHOW_WAYPOINTS
+    if (SHOW_WAYPOINTS) {
+      pass.setPipeline(this.wpPipe);
+      pass.setBindGroup(0, this.wpBG);
+      pass.draw(6, this.wpCount);
+    }
     pass.end();
 
     // ---- bloom: bright-pass then two separable blur iterations (→ bloomA) ----

@@ -12,16 +12,25 @@
 // drives both the GPU terrain and the 2-D road/station overlay, so they align.
 export const VIEW_DEPTH = 13000;
 
-/** Vertical field of view (rad) — a fairly normal lens for the travelling view. */
-const FOVY = (40 * Math.PI) / 180;
-/** Camera pitch DOWN from horizontal (rad) — elevated, looking into the valley. */
-const PITCH = (30 * Math.PI) / 180;
-/** Eye→target distance (world units): set back behind, riding above the road. */
-const EYE_DIST = 3000;
-/** How far down the road (world units) the camera aims. */
-const LOOK_AHEAD = 2600;
+// ---- Phase 2: bird's-eye isometric "diorama" camera ----
+// A high, obliquely-angled eye looks down on the land as a tilt-shift miniature.
+// The view azimuth is FIXED in world space (it does not yaw to follow the road),
+// so the route — which travels broadly along +z — reads as a diagonal threading
+// the frame from the LOWER-LEFT to the UPPER-RIGHT, weaving around that diagonal
+// as it winds. A longer lens flattens the perspective toward an isometric model.
+/** Vertical field of view (rad) — a long lens → flat, model-like perspective. */
+const FOVY = (28 * Math.PI) / 180;
+/** World-fixed view azimuth (rad) — yaws the land so the road runs ↗ (BL→TR). */
+const AZIM = (45 * Math.PI) / 180;
+/** Eye elevation above the ground plane (rad) — high & looking down, but oblique
+ *  enough to read the relief as a 3-D model (the classic diorama / iso angle). */
+const ELEV = (44 * Math.PI) / 180;
+/** Eye→target distance (world units) — sets the zoom for the chosen lens. */
+const ORBIT = 7200;
+/** How far along the road (world units) the framed centre sits ahead of the cam. */
+const LOOK_AHEAD = 1600;
 const NEAR = 120;
-const FAR = VIEW_DEPTH * 1.7;
+const FAR = VIEW_DEPTH * 2.4;
 
 /**
  * Horizontal "lens shift" — the screen-space fraction the world's optical axis
@@ -41,11 +50,16 @@ export const setLensX = (v: number): void => {
  * CHANGES DIRECTION as it travels: layered swings of different wavelengths give
  * long sweeping bends with shorter kinks on top, so the road heads left, then
  * right, then back, rather than holding one gentle curve.
+ *
+ * IMPORTANT: this MUST stay an exact twin of `latz()` in the WGSL terrain field
+ * (gpu/shaders.ts). The terrain lowers its corridor along `latz`; the road rides
+ * `LAT`. If the two drift apart the road no longer sits in the trough and appears
+ * to float over / sink into the hills — so any change here must be mirrored there.
  */
 export const LAT = (z: number): number =>
-  960 * Math.sin(z * 0.00014 + 0.4) +
-  500 * Math.sin(z * 0.00040 + 1.6) +
-  200 * Math.sin(z * 0.00075 + 0.5);
+  1180 * Math.sin(z * 0.00017 + 0.4) +
+  680 * Math.sin(z * 0.00049 + 1.6) +
+  320 * Math.sin(z * 0.00094 + 0.5);
 
 /**
  * Organic hill field (domain-warped ridges) — the EXACT JS twin of `organic()`
@@ -155,29 +169,35 @@ let _f = 1;
 const _eye = new Float32Array(3);
 
 /**
- * Build the frame's view-projection matrix for a forward-looking camera riding
- * the road at (camX, camZ). Crucially the camera AIMS AT THE ROAD AHEAD
- * (`LAT(camZ + LOOK_AHEAD)`) rather than straight down the depth axis — so as the
- * route bends the camera yaws to follow it, and the road visibly sweeps left and
- * right through the frame. (Aiming straight ahead made the winding road collapse
- * to a dead-straight vertical streak.) Call once per frame before `project()` /
- * before drawing the GPU terrain.
+ * Build the frame's view-projection matrix for the bird's-eye diorama camera.
+ * The eye looks at a point on the road a little ahead of the current position
+ * (`LAT(camZ + LOOK_AHEAD)`) from a FIXED world-space direction (azimuth AZIM,
+ * elevation ELEV), so scrolling PANS the model diagonally rather than yawing it —
+ * the winding road keeps reading lower-left → upper-right. Call once per frame
+ * before `project()` / before drawing the GPU terrain.  (`_camX` is unused: the
+ * frame is anchored to the road ahead, not the camera's lateral position.)
  */
 export function setCamera(
-  camX: number, camZ: number, W: number, H: number,
+  _camX: number, camZ: number, W: number, H: number,
 ): void {
   _W = W;
   _H = H;
   _f = 1 / Math.tan(FOVY / 2);
-  const cz = camZ + LOOK_AHEAD;
-  const cx = LAT(cz); // aim along the road's heading → bends actually read
-  const cy = roadBedY(cz) + 200; // aim a touch above the road grade ahead
-  const ex = camX;
-  const ey = roadBedY(camZ) + EYE_DIST * Math.sin(PITCH); // eye rides the road grade
-  const ez = camZ - EYE_DIST * Math.cos(PITCH);
+  // framed centre: a point on the road just ahead of the current position
+  const tx = LAT(camZ + LOOK_AHEAD);
+  const ty = roadBedY(camZ + LOOK_AHEAD);
+  const tz = camZ + LOOK_AHEAD;
+  // fixed world-space view direction (down ELEV, yawed by AZIM) → eye sits back
+  // along it; the road's +z travel then projects to the upper-right of the frame
+  const fx = Math.cos(ELEV) * Math.sin(AZIM);
+  const fy = -Math.sin(ELEV);
+  const fz = Math.cos(ELEV) * Math.cos(AZIM);
+  const ex = tx - ORBIT * fx;
+  const ey = ty - ORBIT * fy;
+  const ez = tz - ORBIT * fz;
   _eye[0] = ex; _eye[1] = ey; _eye[2] = ez;
   const proj = mPerspective(FOVY, W / H, NEAR, FAR);
-  const view = mLookAt(ex, ey, ez, cx, cy, cz, 0, 1, 0);
+  const view = mLookAt(ex, ey, ez, tx, ty, tz, 0, 1, 0);
   _vp = mMul(proj, view);
 }
 

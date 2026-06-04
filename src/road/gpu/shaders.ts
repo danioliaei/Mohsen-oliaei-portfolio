@@ -32,10 +32,12 @@ struct Frame {
 /** The terrain height field — identical maths to engine.ts surfaceY(). */
 export const FIELD_WGSL = /* wgsl */ `
 const VIEW_DEPTH : f32 = 13000.0;
+// EXACT twin of LAT() in engine.ts — the terrain corridor is lowered along this
+// line, so the road (which rides LAT) sits in the trough. Keep the two in lockstep.
 fn latz(z : f32) -> f32 {
-  return 620.0 * sin(z * 0.00012 + 0.4)
-       + 300.0 * sin(z * 0.00033 + 1.6)
-       + 120.0 * sin(z * 0.00062 + 0.5);
+  return 1180.0 * sin(z * 0.00017 + 0.4)
+       + 680.0 * sin(z * 0.00049 + 1.6)
+       + 320.0 * sin(z * 0.00094 + 0.5);
 }
 fn organic(x : f32, z : f32) -> f32 {
   let wx = x + 760.0 * sin(z * 0.00042 + 0.3) + 420.0 * sin(z * 0.00097 + 2.1);
@@ -74,10 +76,10 @@ struct VsOut { @builtin(position) pos : vec4<f32>, @location(0) uv : vec2<f32> }
   // ABOVE it, and the land region BELOW falls quickly into a deep warm dusk so
   // the luminous contour lines read against dark ground (the reference look)
   let aboveT = smoothstep(0.0, horizon, uv.y);       // 0 top .. 1 horizon
-  let belowT = smoothstep(horizon, 0.80, uv.y);      // 0 horizon .. 1 lower frame
-  let skyTop = vec3<f32>(0.205, 0.090, 0.045);
-  let gold   = vec3<f32>(1.0, 0.66, 0.27);
-  let valley = vec3<f32>(0.020, 0.014, 0.012);       // deep dusk for the valley
+  let belowT = smoothstep(horizon, 0.96, uv.y);      // 0 horizon .. 1 lower frame
+  let skyTop = vec3<f32>(0.300, 0.158, 0.090);       // lifted, warmer top (less dark)
+  let gold   = vec3<f32>(1.0, 0.68, 0.30);
+  let valley = vec3<f32>(0.090, 0.066, 0.052);       // open dusk floor (less dark)
   var col = mix(skyTop, gold, aboveT);
   col = mix(col, valley, belowT);
   // sun bloom seated behind the vanishing point on the horizon line
@@ -144,15 +146,15 @@ struct VsOut {
 
   let shade = 0.30 + 0.70 * diff;
   // warm in the light, a cool teal-shadow in the troughs → real colour depth
-  let warmBase = vec3<f32>(0.165, 0.105, 0.056);
-  let coolBase = vec3<f32>(0.042, 0.072, 0.090);
-  let baseCol = mix(coolBase, warmBase, shade) * (0.6 + 1.2 * shade);
-  let baseA = (0.13 + 0.22 * diff) * fade;
+  let warmBase = vec3<f32>(0.180, 0.122, 0.074);
+  let coolBase = vec3<f32>(0.064, 0.094, 0.110);     // lifted troughs → softer contrast
+  let baseCol = mix(coolBase, warmBase, shade) * (0.7 + 1.05 * shade);
+  let baseA = (0.16 + 0.20 * diff) * fade;
 
   // slow shimmer travelling through the lines — the land reads as alive/digital
   let shimmer = 0.86 + 0.14 * sin(F.cam.z * 0.8 + i.relief * 0.004 + i.world * 0.0003);
   let warm = vec3<f32>(1.0, (250.0 - t * 30.0) / 255.0, (242.0 - t * 78.0) / 255.0);
-  let emis = (1.12 + 1.5 * core) * shimmer;          // HDR core feeds the bloom
+  let emis = (0.92 + 1.12 * core) * shimmer;         // gentler HDR core → less harsh
   let lineCol = warm * (lit + 0.5 * spec) * emis;
   let lineA = line * (0.55 + 0.45 * fade) * (0.7 + 0.42 * lit);
 
@@ -186,22 +188,26 @@ struct VsOut {
   return o;
 }
 @fragment fn fs(i : VsOut) -> @location(0) vec4<f32> {
-  let edge = 1.0 - abs(i.side);              // 1 centre .. 0 rim
-  let core = smoothstep(0.20, 1.0, edge);    // sharper, brighter hot filament
-  let body = pow(max(edge, 0.0), 0.55);      // wider soft body
-  // a bright blob of light travelling along the fibre toward the horizon
-  let ph = i.arc * 0.00085 - F.cam.z * 1.7;
-  let pulse = exp(-pow(fract(ph) - 0.5, 2.0) * 18.0);  // softer pulse spread
-  let flow = 0.5 + 0.5 * sin(i.arc * 0.02 - F.cam.z * 5.0);
+  let edge = 1.0 - abs(i.side);                 // 1 centre .. 0 rim
+  let body = smoothstep(0.0, 0.5, edge);        // clean, soft-edged body
+  let core = smoothstep(0.42, 1.0, edge);       // luminous inner core
+  let seam = smoothstep(0.88, 1.0, edge);       // crisp bright centre seam
+  // a gentle band of light gliding toward the horizon — calm, not blinking
+  let ph = i.arc * 0.00055 - F.cam.z * 1.0;
+  let pulse = exp(-pow(fract(ph) - 0.5, 2.0) * 8.0);
+  let flow = 0.6 + 0.4 * sin(i.arc * 0.011 - F.cam.z * 2.0);
   let t = clamp((i.wz - F.cam.y) / VIEW_DEPTH, 0.0, 1.0);
-  let fade = 1.0 - smoothstep(0.72, 1.0, t);
-  let warm = vec3<f32>(1.0, 0.52, 0.16);     // deeper amber base
-  let hot  = vec3<f32>(1.0, 0.97, 0.85);     // near-white hot core
-  var col = mix(warm, hot, core) * (0.9 + 2.6 * core);
-  col += hot * pulse * 2.2;
-  col *= (0.78 + 0.22 * flow);
+  let fade = 1.0 - smoothstep(0.74, 1.0, t);
+  let amber = vec3<f32>(1.0, 0.55, 0.20);       // refined amber rim
+  let gold  = vec3<f32>(1.0, 0.80, 0.48);       // warm gold mid
+  let white = vec3<f32>(1.0, 0.98, 0.92);       // near-white seam
+  var col = mix(amber, gold, core);
+  col = mix(col, white, seam);
+  col *= (0.85 + 1.7 * core + 1.5 * seam);      // HDR core feeds the bloom
+  col += gold * pulse * (0.35 + 0.55 * core);   // soft travelling glow
+  col *= (0.88 + 0.12 * flow);
   let a = body * fade;
-  return vec4<f32>(col * a, a);               // additive emission
+  return vec4<f32>(col * a, a);                 // additive emission
 }
 `;
 
@@ -462,10 +468,12 @@ fn focusBlend(uv : vec2<f32>) -> f32 {
   // exposure + tone-map
   col = aces(col * F.post.w);
 
-  // colour grade — saturation lift + gentle contrast (the old CSS filter, on GPU)
+  // colour grade — gentle saturation + softened contrast, with the blacks lifted
+  // a touch so the frame reads calmer (less harsh than the old high-contrast grade)
   let luma = dot(col, vec3<f32>(0.2126, 0.7152, 0.0722));
-  col = mix(vec3<f32>(luma), col, 1.06);
-  col = (col - 0.5) * 0.90 + 0.5;
+  col = mix(vec3<f32>(luma), col, 1.15);       // toy-model colour pop
+  col = (col - 0.5) * 0.82 + 0.5;              // softened contrast
+  col = col + 0.014 * (1.0 - col);            // gentle lift of the deepest blacks
   col = max(col, vec3<f32>(0.0));
 
   // vignette — elliptical so top/bottom stay open, only corners darken
