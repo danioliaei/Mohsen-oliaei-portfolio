@@ -533,6 +533,12 @@ canvas#ridge {
   width: 100%;
   height: 100%;
   display: block;
+  cursor: grab;
+  /* let a pointer-drag orbit the camera instead of scrolling / pinch-zooming */
+  touch-action: none;
+}
+canvas#ridge:active {
+  cursor: grabbing;
 }
 .ridge-notice {
   display: flex;

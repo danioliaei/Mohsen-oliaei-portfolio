@@ -180,10 +180,9 @@ const TWO_PI : f32 = 6.28318530718;
 export const RIDGE_TERRAIN_WGSL = RIDGE_FRAME_WGSL + RIDGE_FIELD_WGSL + /* wgsl */ `
 struct VsOut {
   @builtin(position) pos : vec4<f32>,
-  @location(0) wz  : f32,        // world depth → drives the scan-lines
-  @location(1) wy  : f32,        // world height → snow / tone
-  @location(2) nrm : vec3<f32>,
-  @location(3) wpos : vec3<f32>,
+  @location(0) wy  : f32,        // world height → snow / tone
+  @location(1) nrm : vec3<f32>,
+  @location(2) wpos : vec3<f32>, // world position → terrain-locked scan-lines + shading
 };
 @vertex fn vs(@location(0) uv : vec2<f32>) -> VsOut {
   let x = -XW + 2.0 * XW * uv.x;
@@ -192,7 +191,6 @@ struct VsOut {
   let world = vec3<f32>(x, y, z);
   var o : VsOut;
   o.pos = F.vp * vec4<f32>(world, 1.0);
-  o.wz = z;
   o.wy = y;
   let e = 16.0;
   let hx = heightAt(x + e, z) - heightAt(x - e, z);
@@ -203,8 +201,12 @@ struct VsOut {
 }
 @fragment fn fs(i : VsOut) -> @location(0) vec4<f32> {
   // ---- constant-depth iso-lines: the stacked horizontal profiles -----------
+  // Keyed to world Z — a FIXED plane in the terrain — so every line is painted
+  // onto the surface and stays glued to the same ground as the camera orbits,
+  // instead of sliding across it. Head-on they read as the signature stacked
+  // horizontal profiles; from the flank you see those same bands obliquely.
   let Z_STEP = 66.0;                          // world units between scan-lines
-  let f = i.wz / Z_STEP;
+  let f = i.wpos.z / Z_STEP;
   let dist = 0.5 - abs(fract(f) - 0.5);       // 0 on a line, 0.5 between
   let aa = max(fwidth(f), 1e-5);
   var line = 1.0 - smoothstep(0.0, aa * 1.25, dist);

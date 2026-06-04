@@ -47,13 +47,44 @@ const WORLD_H_MAX = 5000; // height that normalises to "full snow" in the shader
 const NX = 760;
 const NZ = 420;
 
-/** Per-frame inputs from the stage (camera drift + pointer parallax + clock). */
+/** Per-frame inputs from the stage (orbit offsets + clock). */
 export interface RidgeFrame {
   time: number;
-  /** Pointer parallax, each in roughly [-1, 1]; 0 at rest. */
-  px: number;
-  py: number;
+  /** Orbit YAW offset about the summit (radians); 0 = the authored rest framing.
+   *  Unbounded — the viewer can spin a full turn (and beyond) around the peak. */
+  yaw: number;
+  /** Orbit PITCH offset (radians); 0 = rest. The scene clamps the ABSOLUTE
+   *  elevation to ELEV_RANGE so the eye never dips under the dunes nor tips past
+   *  a high survey angle. */
+  pitch: number;
 }
+
+/* ---- orbit camera: drag to spin a full turn around the summit -------------
+   The authored EYE→TGT framing is re-expressed as spherical coordinates about
+   the summit pivot (TGT). At yaw = pitch = 0 the eye lands back on EYE exactly —
+   the rest composition is untouched — and the stage then layers a free YAW (a
+   full 360°) and a clamped PITCH from the viewer's pointer drag on top. */
+export const ORBIT = (() => {
+  const rx = EYE[0] - TGT[0];
+  const ry = EYE[1] - TGT[1];
+  const rz = EYE[2] - TGT[2];
+  const radius = Math.hypot(rx, ry, rz);
+  return {
+    radius,
+    azim: Math.atan2(rx, rz), // yaw about +y; rest looks down the dune field
+    elev: Math.asin(ry / radius), // the rest framing's gentle up-tilt
+  };
+})();
+
+/** Absolute elevation clamp (rad): the floor keeps the eye above the dune plain
+ *  when tilting up under the peak; the ceiling stops shy of a top-down survey so
+ *  the silhouette never flattens out. The stage maps these to pitch-offset walls. */
+export const ELEV_RANGE: readonly [number, number] = [-0.12, 1.0];
+
+/** The ELEV_RANGE clamp expressed as pitch-OFFSET walls (since pitch is added to
+ *  ORBIT.elev). Exported so the stage's inertia stops dead at the same walls. */
+export const PITCH_LO = ELEV_RANGE[0] - ORBIT.elev;
+export const PITCH_HI = ELEV_RANGE[1] - ORBIT.elev;
 
 /* ---- tiny column-major mat4 helpers (dependency-free) ------------------- */
 type Mat4 = Float32Array;
@@ -378,10 +409,17 @@ export class RidgelineScene {
 
   private writeUniforms(s: RidgeFrame): void {
     const aspect = this.rw / this.rh;
-    // gentle camera breathing + pointer parallax (kept subtle → meditative)
-    const ex = EYE[0] + Math.sin(s.time * 0.05) * 150 + s.px * 300;
-    const ey = EYE[1] + Math.sin(s.time * 0.037) * 55 - s.py * 110;
-    const ez = EYE[2];
+    // orbit about the summit: rest framing + the viewer's drag (yaw/pitch), plus
+    // a whisper of breathing so an untouched mountain still feels alive — view-
+    // relative and sub-degree, so it never fights the drag.
+    const azim = ORBIT.azim + s.yaw + Math.sin(s.time * 0.05) * 0.0045;
+    const pitch = Math.min(Math.max(s.pitch, PITCH_LO), PITCH_HI);
+    const elev = ORBIT.elev + pitch + Math.sin(s.time * 0.037) * 0.0035;
+    const ce = Math.cos(elev);
+    const se = Math.sin(elev);
+    const ex = TGT[0] + ORBIT.radius * ce * Math.sin(azim);
+    const ey = TGT[1] + ORBIT.radius * se;
+    const ez = TGT[2] + ORBIT.radius * ce * Math.cos(azim);
     const proj = persp(FOVY, aspect, NEAR, FAR);
     const view = lookAt(ex, ey, ez, TGT[0], TGT[1], TGT[2], 0, 1, 0);
     const vp = mul(proj, view);
