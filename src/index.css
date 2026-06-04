@@ -595,3 +595,137 @@ canvas#ridge:active {
   text-shadow: 0 0 12px rgba(0, 0, 0, 0.7);
   will-change: transform, opacity;
 }
+
+/* ---- "drag to rotate" affordance (ridgeline) --------------------------------
+   A minimal pill that teaches the orbit gesture: a curved double-arrow that rocks
+   to imply rotation, tracked small-caps to match the survey callouts. It fades in
+   after a beat, breathes softly, and retires itself (.is-hidden) the first time the
+   viewer orbits — or when the click-demo flicks the mountain into a short turn. */
+.ridge-hint {
+  position: absolute;
+  left: 50%;
+  bottom: clamp(40px, 7vh, 78px);
+  transform: translateX(-50%);
+  z-index: 6;
+  display: inline-flex;
+  align-items: center;
+  gap: 11px;
+  padding: 11px 20px 11px 16px;
+  border: 1px solid rgba(244, 241, 234, 0.18);
+  border-radius: 999px;
+  background: rgba(8, 9, 12, 0.32);
+  -webkit-backdrop-filter: blur(7px);
+  backdrop-filter: blur(7px);
+  color: rgba(244, 241, 234, 0.74);
+  font-family: var(--sans);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  line-height: 1;
+  cursor: pointer;
+  text-shadow: 0 0 12px rgba(0, 0, 0, 0.7);
+  box-shadow:
+    0 8px 30px rgba(0, 0, 0, 0.34),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  opacity: 0;
+  /* entrance touches ONLY opacity; breath touches ONLY box-shadow — so transform
+     stays free for :active and .is-hidden, and the two never fight the fades */
+  animation:
+    ridge-hint-in 0.9s 0.7s ease both,
+    ridge-hint-breath 4.8s 1.7s ease-in-out infinite;
+  transition:
+    opacity 0.55s ease,
+    transform 0.55s cubic-bezier(0.22, 1, 0.36, 1),
+    color 0.3s ease,
+    border-color 0.3s ease,
+    background 0.3s ease;
+  will-change: opacity, transform;
+}
+.ridge-hint:hover {
+  color: var(--ink);
+  border-color: rgba(244, 241, 234, 0.4);
+  background: rgba(20, 22, 28, 0.46);
+}
+.ridge-hint:active {
+  transform: translateX(-50%) scale(0.97);
+}
+.ridge-hint.is-hidden {
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(-50%) translateY(12px);
+  animation: none;
+}
+.ridge-hint-label {
+  display: inline-block;
+  padding-top: 1px; /* optical centring against the icon */
+}
+.ridge-hint-icon {
+  width: 19px;
+  height: 19px;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  overflow: visible;
+  transform-origin: 50% 56%;
+  animation: ridge-hint-rock 3.6s ease-in-out infinite;
+}
+
+@keyframes ridge-hint-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+/* a soft glow breath on the box only — never opacity (owned by entrance / hide) */
+@keyframes ridge-hint-breath {
+  0%,
+  100% {
+    box-shadow:
+      0 8px 30px rgba(0, 0, 0, 0.34),
+      inset 0 1px 0 rgba(255, 255, 255, 0.06),
+      0 0 0 0 rgba(244, 241, 234, 0);
+  }
+  50% {
+    box-shadow:
+      0 8px 30px rgba(0, 0, 0, 0.34),
+      inset 0 1px 0 rgba(255, 255, 255, 0.06),
+      0 0 18px 1px rgba(244, 241, 234, 0.07);
+  }
+}
+/* the curved arrow rocks left↔right — the very rotation it is inviting */
+@keyframes ridge-hint-rock {
+  0%,
+  100% {
+    transform: rotate(-26deg);
+  }
+  50% {
+    transform: rotate(26deg);
+  }
+}
+
+@media (max-width: 760px) {
+  .ridge-hint {
+    bottom: 30px;
+    gap: 9px;
+    padding: 10px 16px 10px 13px;
+    font-size: 10px;
+    letter-spacing: 0.18em;
+  }
+  .ridge-hint-icon {
+    width: 17px;
+    height: 17px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ridge-hint {
+    animation: ridge-hint-in 0.6s ease both;
+  }
+  .ridge-hint-icon {
+    animation: none;
+  }
+}

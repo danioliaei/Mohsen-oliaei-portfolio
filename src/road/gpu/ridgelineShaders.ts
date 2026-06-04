@@ -24,6 +24,7 @@ struct Frame {
   b    : vec4<f32>,   // x zNear, y zFar, z worldHeightMax, w haloSpin
   post : vec4<f32>,   // x bloomAmt, y vignette, z grain, w exposure
   eye  : vec4<f32>,   // xyz camera eye (world), w unused
+  hov  : vec4<f32>,   // x hovered slice index (-1 none), y pulse 0..1, zw unused
 };
 @group(0) @binding(0) var<uniform> F : Frame;
 `;
@@ -242,13 +243,14 @@ struct VsOut {
   var moat = 0.0;
   for (var k = 0; k < 7; k = k + 1) {
     let dPix = abs(rw - RINGS[k]) / aaR;                  // distance to this ring, in px
-    ring = max(ring, 1.0 - smoothstep(1.6, 3.2, dPix));   // ~3 px bold survey stroke
-    moat = max(moat, 1.0 - smoothstep(3.2, 10.0, dPix));  // its flanking dark band
+    ring = max(ring, 1.0 - smoothstep(1.3, 3.0, dPix));   // a quieter ~2.5 px stroke
+    moat = max(moat, 1.0 - smoothstep(3.0, 8.5, dPix));   // a narrower flanking band
   }
-  // each ring clears a dark band of breathing room out of the hairline weave on its
-  // flanks (the survey "moat"), so the bright cut is bracketed by black and can't be
-  // mistaken for one more hairline — the contrast that lets it read as a ring
-  hair = hair * (1.0 - 0.9 * clamp(moat - ring, 0.0, 1.0));
+  // each ring clears a band of breathing room out of the hairline weave on its
+  // flanks (the survey "moat") so the cut still reads as a ring — but gently now,
+  // a soft dimming rather than a black trench, so the slice borders feel surveyed
+  // onto the slope instead of carved through it
+  hair = hair * (1.0 - 0.5 * clamp(moat - ring, 0.0, 1.0));
 
   // ---- monochrome shading: form from a soft key light, snow from elevation --
   let n = normalize(i.nrm);
@@ -272,13 +274,31 @@ struct VsOut {
   let snowFill = snow * snow * (0.24 + 0.46 * diff);
   var c = lum + snowFill;                          // the base surface
 
-  // ---- the seven SURVEY RINGS as a bold high-contrast cut ------------------
-  // luminous on the dark rock / dune (riding above the bloom line so it glows) and
-  // an incised DARK line where it crosses the bright snow — so each contour reads
-  // on every part of the massif instead of dissolving into a matching tone. This
-  // is the same dark-on-snow / bright-on-rock inversion the weave already uses.
-  let ringTone = mix(2.05, 0.02, snow);
-  c = mix(c, ringTone, ring);
+  // ---- the seven SURVEY RINGS as a quiet contour ---------------------------
+  // a soft off-white on the dark rock / dune (no longer riding hot above the bloom
+  // line) and a muted grey where it crosses the snow — the same bright-on-rock /
+  // dark-on-snow inversion the weave uses, but pulled WAY back so the slice borders
+  // read as gentle surveyed contours dividing the massif, not stark cuts slicing it
+  // apart. Blended partially (ring * 0.68) so even the stroke peak stays restrained.
+  let ringTone = mix(1.16, 0.20, snow);
+  c = mix(c, ringTone, ring * 0.68);
+
+  // ---- hover wash: when the pointer rests on a career callout, ITS slice of the
+  // massif lifts in a soft, breathing pulse (amplitude driven from RidgelineStage).
+  // Centred on the hovered ring's plan radius and feathered across the whole band,
+  // it is additive so the dark rock glows up, and eased back on snow so the summit
+  // slice brightens without flattening to white. hov = (slice | -1, pulse, _, _). --
+  if (F.hov.x >= 0.0 && F.hov.y > 0.0001) {
+    let hbi = clamp(i32(F.hov.x), 0, 6);
+    let hc = RINGS[hbi];
+    let dn = abs(rw - hc) / 660.0;                  // 0 at the slice centre → 1 at edges
+    let prof = 1.0 - smoothstep(0.0, 1.0, dn);      // a smooth bump across the band
+    // additive wash, sculpted by the key light so the lit slice keeps its form;
+    // eased back on snow so the summit slices brighten without flattening to white,
+    // and the hovered ring's own contour stroke flares a touch to anchor the eye
+    let wash = prof * F.hov.y * (0.27 + 0.50 * lit) * (1.0 - 0.34 * snow);
+    c = c + wash + ring * prof * F.hov.y * 0.5;
+  }
   return vec4<f32>(vec3<f32>(c), 1.0);                     // opaque → writes depth, occludes
 }
 `;
