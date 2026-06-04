@@ -77,16 +77,16 @@ struct VsOut { @builtin(position) pos : vec4<f32>, @location(0) uv : vec2<f32> }
   // the luminous contour lines read against dark ground (the reference look)
   let aboveT = smoothstep(0.0, horizon, uv.y);       // 0 top .. 1 horizon
   let belowT = smoothstep(horizon, 0.96, uv.y);      // 0 horizon .. 1 lower frame
-  let skyTop = vec3<f32>(0.300, 0.158, 0.090);       // lifted, warmer top (less dark)
-  let gold   = vec3<f32>(1.0, 0.68, 0.30);
-  let valley = vec3<f32>(0.090, 0.066, 0.052);       // open dusk floor (less dark)
+  let skyTop = vec3<f32>(0.250, 0.128, 0.072);       // deeper, richer dusk top
+  let gold   = vec3<f32>(0.94, 0.61, 0.27);          // warm horizon band, less blown
+  let valley = vec3<f32>(0.072, 0.052, 0.042);       // deeper warm floor
   var col = mix(skyTop, gold, aboveT);
   col = mix(col, valley, belowT);
-  // sun bloom seated behind the vanishing point on the horizon line
+  // sun bloom seated behind the vanishing point — a focused glow, not a broad wash
   let sun = vec2<f32>(F.vp2.x, horizon);
-  let dd = (uv - sun) * vec2<f32>(1.0, 1.9);
-  let glow = exp(-dot(dd, dd) * 7.0);
-  col += vec3<f32>(1.0, 0.74, 0.38) * glow * 0.9;
+  let dd = (uv - sun) * vec2<f32>(1.0, 1.7);
+  let glow = exp(-dot(dd, dd) * 9.0);
+  col += vec3<f32>(1.0, 0.72, 0.36) * glow * 0.55;
   return vec4<f32>(col, 1.0);
 }
 `;
@@ -147,18 +147,22 @@ struct VsOut {
   let spec = pow(clamp(dot(nrm, Hh), 0.0, 1.0), 9.0);
 
   let shade = 0.30 + 0.70 * diff;
-  // warm in the light, a cool teal-shadow in the troughs → real colour depth
-  let warmBase = vec3<f32>(0.180, 0.122, 0.074);
-  let coolBase = vec3<f32>(0.064, 0.094, 0.110);     // lifted troughs → softer contrast
-  let baseCol = mix(coolBase, warmBase, shade) * (0.7 + 1.05 * shade);
-  let baseA = (0.16 + 0.20 * diff) * fade;
+  // warm sunlit slopes, a deep clean blue-teal in the shadowed troughs → real
+  // colour depth and a genuinely DARK ground for the contour lines to glow on.
+  let warmBase = vec3<f32>(0.150, 0.099, 0.058);
+  let coolBase = vec3<f32>(0.028, 0.042, 0.055);
+  let baseCol = mix(coolBase, warmBase, shade) * (0.58 + 1.05 * shade);
+  // OPAQUE ground (was a near-transparent 0.16–0.36, which let the bright golden
+  // sky flood through the whole lower frame as a milky haze). Only the far reaches
+  // fade out, so distant hills melt into the dusk sky as honest aerial perspective.
+  let baseA = (0.88 + 0.12 * diff) * fade;
 
   // slow shimmer travelling through the lines — the land reads as alive/digital
   let shimmer = 0.86 + 0.14 * sin(F.cam.z * 0.8 + i.relief * 0.004 + i.world * 0.0003);
   let warm = vec3<f32>(1.0, (253.0 - t * 12.0) / 255.0, (251.0 - t * 34.0) / 255.0);  // near-white, barely warms with depth
   let emis = (0.90 + 0.64 * core) * shimmer;         // thin but crisp & white-bright
   let lineCol = warm * (lit + 0.4 * spec) * emis;
-  let lineA = line * (0.46 + 0.40 * fade) * (0.72 + 0.4 * lit);
+  let lineA = line * (0.56 + 0.40 * fade) * (0.74 + 0.4 * lit);
 
   let col = mix(baseCol, lineCol, line);
   let a = max(baseA, lineA);
@@ -470,12 +474,12 @@ fn focusBlend(uv : vec2<f32>) -> f32 {
   // exposure + tone-map
   col = aces(col * F.post.w);
 
-  // colour grade — gentle saturation + softened contrast, with the blacks lifted
-  // a touch so the frame reads calmer (less harsh than the old high-contrast grade)
+  // colour grade — gentle saturation lift + restored contrast so the luminous
+  // contours and fibre road read crisply against a deep, honest dusk ground
+  // (the old grade flattened everything into one milky golden wash).
   let luma = dot(col, vec3<f32>(0.2126, 0.7152, 0.0722));
-  col = mix(vec3<f32>(luma), col, 1.15);       // toy-model colour pop
-  col = (col - 0.5) * 0.82 + 0.5;              // softened contrast
-  col = col + 0.014 * (1.0 - col);            // gentle lift of the deepest blacks
+  col = mix(vec3<f32>(luma), col, 1.16);       // gentle colour pop
+  col = (col - 0.5) * 1.06 + 0.5;              // contrast — punchy darks, no haze
   col = max(col, vec3<f32>(0.0));
 
   // vignette — elliptical so top/bottom stay open, only corners darken
