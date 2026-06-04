@@ -54,10 +54,11 @@ const VIEW_DEPTH = 13000;
 const NX = 430;
 const NZ = 416;
 const L_MIN = 0;
-// Vertical spacing (height units) between iso-contour lines. A touch coarser than
-// before so the lines read as elegant, evenly-spaced survey strokes rather than a
-// moiré-dense tangle on the steep slopes.
-const L_STEP = 60;
+// Vertical spacing (height units) between iso-contour lines. Widened markedly so
+// the land reads as a calm set of evenly-spaced survey strokes instead of a dense,
+// heavy tangle — fewer lines is the biggest lever on the "busy" feel. Depth now
+// leans on shading + aerial perspective (see TERRAIN_WGSL) rather than line count.
+const L_STEP = 85;
 
 /** Dynamic per-frame inputs handed in by RoadStage (which owns engine.ts). */
 export interface FrameState {
@@ -474,6 +475,12 @@ export class WebGPUScene {
     // supersample the HDR scene a touch above the display buffer → cleaner
     // contour/silhouette edges once the DoF blit downsamples it
     this.sc = Math.min(dpr * 1.4, 2);
+    // …but never let the supersampled target exceed the device's 2-D texture limit.
+    // On a large 4K/5K/ultrawide canvas the target (W * sc) could otherwise blow past
+    // maxTextureDimension2D and fail allocation, leaving a blank scene — so cap the
+    // supersample to fit, with a small margin. (No effect at 4K and below.)
+    const fit = (d.limits.maxTextureDimension2D - 16) / Math.max(W, H, 1);
+    this.sc = Math.max(1, Math.min(this.sc, fit));
     this.rw = Math.max(1, Math.round(W * this.sc));
     this.rh = Math.max(1, Math.round(H * this.sc));
 

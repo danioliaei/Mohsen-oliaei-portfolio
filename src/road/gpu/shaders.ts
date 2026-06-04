@@ -137,15 +137,15 @@ struct VsOut {
   let d = 0.5 - abs(fract(f) - 0.5);
   let w = max(fwidth(f), 1e-4);
   let dpx = d / w;
-  // thin, delicate iso-lines: a crisp narrow core with only a whisper of halo,
-  // so the contours read as fine graceful pen-strokes rather than heavy ribbons
-  let core = 1.0 - smoothstep(0.0, 0.58, dpx);
-  let halo = exp(-dpx * dpx / 4.0);
-  var line = clamp(core + halo * 0.12, 0.0, 1.0);
-  line = line * (1.0 - smoothstep(0.40, 1.05, w));  // de-alias over-packed lines
+  // delicate hairline iso-lines: a thin core with only the faintest halo, so the
+  // contours read as quiet survey strokes rather than a dense, bright tangle
+  let core = 1.0 - smoothstep(0.0, 0.55, dpx);
+  let halo = exp(-dpx * dpx / 3.0);
+  var line = clamp(core + halo * 0.08, 0.0, 1.0);
+  line = line * (1.0 - smoothstep(0.34, 0.95, w));  // de-alias over-packed lines sooner
 
   var fade = 1.0;
-  if (t >= 0.74) { fade = max(0.0, 1.0 - (t - 0.74) / 0.26); }
+  if (t >= 0.70) { fade = max(0.0, 1.0 - (t - 0.70) / 0.30); }
 
   let nrm = normalize(i.nrm);
   let L = normalize(vec3<f32>(-0.45, 0.80, -0.34));
@@ -155,25 +155,29 @@ struct VsOut {
   let Hh = normalize(L + V);
   let spec = pow(clamp(dot(nrm, Hh), 0.0, 1.0), 9.0);
 
+  // aerial perspective: linework thins and fades into the distance so the far land
+  // melts into soft tonal hills. Depth is carried by FORM (light/shade) + haze, not
+  // by line density — which lets the contours stay subtle while the scene reads deep.
+  let near = 1.0 - smoothstep(0.04, 0.60, t);        // 1 near .. 0 far
+  line = line * (0.34 + 0.66 * near);
+
   let shade = 0.30 + 0.70 * diff;
-  // warm sunlit slopes, a deep clean blue-teal in the shadowed troughs → real
-  // colour depth and a genuinely DARK ground for the contour lines to glow on.
-  let warmBase = vec3<f32>(0.150, 0.099, 0.058);
-  let coolBase = vec3<f32>(0.028, 0.042, 0.055);
-  let baseCol = mix(coolBase, warmBase, shade) * (0.58 + 1.05 * shade);
-  // OPAQUE ground (was a near-transparent 0.16–0.36, which let the bright golden
-  // sky flood through the whole lower frame as a milky haze). Only the far reaches
-  // fade out, so distant hills melt into the dusk sky as honest aerial perspective.
-  let baseA = (0.88 + 0.12 * diff) * fade * i.edge;
+  // warm sunlit slopes → a deep clean blue-teal in the shadowed troughs. A touch
+  // more tonal range than before so the relief itself carries the depth read.
+  let warmBase = vec3<f32>(0.158, 0.103, 0.060);
+  let coolBase = vec3<f32>(0.025, 0.039, 0.053);
+  let baseCol = mix(coolBase, warmBase, shade) * (0.56 + 1.10 * shade);
+  // opaque ground; only the far reaches fade out as honest aerial perspective
+  let baseA = (0.90 + 0.10 * diff) * fade * i.edge;
 
-  // slow shimmer travelling through the lines — the land reads as alive/digital
-  let shimmer = 0.86 + 0.14 * sin(F.cam.z * 0.8 + i.relief * 0.004 + i.world * 0.0003);
-  let warm = vec3<f32>(1.0, (253.0 - t * 12.0) / 255.0, (251.0 - t * 34.0) / 255.0);  // near-white, barely warms with depth
-  let emis = (0.90 + 0.64 * core) * shimmer;         // thin but crisp & white-bright
-  let lineCol = warm * (lit + 0.4 * spec) * emis;
-  let lineA = line * (0.56 + 0.40 * fade) * (0.74 + 0.4 * lit) * i.edge;
+  // a slow living shimmer, but the lines are now soft warm strokes — not white wires
+  let shimmer = 0.90 + 0.10 * sin(F.cam.z * 0.7 + i.relief * 0.004 + i.world * 0.0003);
+  let warm = vec3<f32>(0.95, (232.0 - t * 24.0) / 255.0, (206.0 - t * 40.0) / 255.0);  // softly warm, not stark white
+  let emis = (0.52 + 0.40 * core) * shimmer;         // dimmer: subtle, no glare
+  let lineCol = warm * (lit + 0.3 * spec) * emis;
+  let lineA = line * (0.40 + 0.32 * fade) * (0.72 + 0.4 * lit) * i.edge;
 
-  let col = mix(baseCol, lineCol, line);
+  let col = mix(baseCol, lineCol, line * 0.9);
   let a = max(baseA, lineA);
   return vec4<f32>(col, a);
 }
@@ -207,22 +211,42 @@ struct VsOut {
   let body = smoothstep(0.0, 0.5, edge);        // clean, soft-edged body
   let core = smoothstep(0.42, 1.0, edge);       // luminous inner core
   let seam = smoothstep(0.88, 1.0, edge);       // crisp bright centre seam
-  // a gentle band of light gliding toward the horizon — calm, not blinking
-  let ph = i.arc * 0.00055 - F.cam.z * 1.0;
-  let pulse = exp(-pow(fract(ph) - 0.5, 2.0) * 8.0);
-  let flow = 0.6 + 0.4 * sin(i.arc * 0.011 - F.cam.z * 2.0);
   let t = clamp((i.wz - F.cam.y) / VIEW_DEPTH, 0.0, 1.0);
-  let fade = 1.0 - smoothstep(0.74, 1.0, t);
+  let fade = 1.0 - smoothstep(0.82, 1.0, t);    // ribbon dissolves near the horizon
+
+  // ---- luminous data packets gliding up the fibre and INTO the horizon glare --
+  // Each packet's centre sweeps depth 0→1 on a smooth eased loop, tightening and
+  // burning toward white as it climbs — so it reads as light being drawn up the
+  // road and through the sun-glow. Two staggered packets keep the fibre alive.
+  var packet = 0.0;
+  for (var n = 0; n < 2; n = n + 1) {
+    let tr = fract(F.cam.z * 0.26 + f32(n) * 0.5);
+    let h = tr * tr * (3.0 - 2.0 * tr);         // ease-in-out travel 0..1
+    let pd = t - h;
+    let sharp = 150.0 - 96.0 * h;               // packet tightens near the top
+    packet += exp(-pd * pd * sharp) * (0.45 + 1.7 * h);  // & brightens as it climbs
+  }
+  // the packet keeps burning right up to the horizon even as the ribbon fades out,
+  // so it visibly passes THROUGH the glare instead of dimming away beforehand
+  let glareFade = 1.0 - smoothstep(0.95, 1.04, t);
+  let burn = clamp(packet, 0.0, 3.0) * glareFade;
+  // a calm ambient flow underneath so the fibre feels alive between packets
+  let flow = 0.6 + 0.4 * sin(i.arc * 0.010 - F.cam.z * 1.6);
+
   let amber = vec3<f32>(1.0, 0.55, 0.20);       // refined amber rim
   let gold  = vec3<f32>(1.0, 0.80, 0.48);       // warm gold mid
   let white = vec3<f32>(1.0, 0.98, 0.92);       // near-white seam
   var col = mix(amber, gold, core);
   col = mix(col, white, seam);
   col *= (0.85 + 1.7 * core + 1.5 * seam);      // HDR core feeds the bloom
-  col += gold * pulse * (0.35 + 0.55 * core);   // soft travelling glow
-  col *= (0.88 + 0.12 * flow);
-  let a = body * fade;
-  return vec4<f32>(col * a, a);                 // additive emission
+  col *= (0.90 + 0.10 * flow);
+  let bodyGlow = col * (body * fade);
+  // packet burns along the seam/core, warming to white-hot at its peak
+  let packetCol = mix(gold, white, clamp(burn * 0.5, 0.0, 1.0));
+  let packetGlow = packetCol * burn * (0.30 + 0.70 * core) * body;
+  let rgb = bodyGlow + packetGlow;
+  let a = body * max(fade, burn * 0.5);
+  return vec4<f32>(rgb, a);                      // additive emission
 }
 `;
 
@@ -475,10 +499,18 @@ fn focusBlend(uv : vec2<f32>) -> f32 {
   // additive bloom
   col += textureSample(bloomTex, samp, uv).rgb * F.misc.x;
 
-  // god-ray halo seated at the vanishing point (the destination glow)
+  // god-ray halo seated at the vanishing point (the destination glow). It gently
+  // flares as each road packet is drawn up into it — the pulse passing THROUGH the
+  // glare — using the same clock/phase as the road shader so the two stay in sync.
   let vp = vec2<f32>(F.vp2.x, F.vp2.y);
   let dvp = (uv - vp) * vec2<f32>(F.res.x / F.res.y, 1.0);
-  col += vec3<f32>(1.0, 0.74, 0.40) * F.vp2.z * exp(-dot(dvp, dvp) / max(1e-4, F.vp2.w));
+  var flare = 0.0;
+  for (var n = 0; n < 2; n = n + 1) {
+    let tr = fract(F.cam.z * 0.26 + f32(n) * 0.5);
+    flare += exp(-pow(tr - 0.82, 2.0) * 70.0);  // peaks as the packet meets the VP
+  }
+  let halo = F.vp2.z + flare * 0.055;
+  col += vec3<f32>(1.0, 0.76, 0.44) * halo * exp(-dot(dvp, dvp) / max(1e-4, F.vp2.w));
 
   // exposure + tone-map
   col = aces(col * F.post.w);

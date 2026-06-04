@@ -33,6 +33,12 @@ const KIND_RGB_N: Record<string, [number, number, number]> = {
 /** Scroll-Y for each station's resting camera position. */
 const SNAP_Z = MILESTONES.map((m) => clamp(m.z - ARRIVE_DZ, 0, TRAVEL));
 
+/** Experience boards — the floating milestone read-outs and the connector line
+ *  that ties each to its waypoint — are hidden for now. The camera still journeys
+ *  through every station (scroll-snapping is unchanged); only the cards are gone.
+ *  Flip to true to bring the read-outs back. */
+const SHOW_BOARDS = false;
+
 const easeInOut = (x: number): number =>
   x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
 
@@ -187,9 +193,10 @@ export default function RoadStage() {
         const speed = clamp(vel * 9, 0, 1); // 0..1 motion energy
 
         const wide = W >= 760;
-        // road biases a little left of centre on wide viewports so the weaving
-        // route and the right-hand card share the frame; centred when narrow
-        const lensX = wide ? 0.43 : 0.5;
+        // With the experience boards hidden, the road no longer yields the right
+        // of the frame to a card — centre it so the winding route sits balanced in
+        // the diorama. (When boards return, it eases back left on wide viewports.)
+        const lensX = SHOW_BOARDS && wide ? 0.43 : 0.5;
         setLensX(lensX);
 
         const camZ = p * TRAVEL;
@@ -217,7 +224,7 @@ export default function RoadStage() {
         let connector: Float32Array | null = null;
         const am = MILESTONES[activeRef.current];
         const card = cardRef.current;
-        if (wide && card && am.z - camZ > 60) {
+        if (SHOW_BOARDS && wide && card && am.z - camZ > 60) {
           const pr = project(LAT(am.z), am.z, surfaceY(LAT(am.z), am.z) + 40);
           if (pr) {
             const settle =
@@ -313,35 +320,37 @@ export default function RoadStage() {
         <div className="stage" id="home">
           <canvas id="road" ref={canvasRef} />
 
-          <div className="station-layer">
-            <AnimatePresence mode="wait">
-              <motion.div
-                key={active}
-                className="station"
-                initial={{ opacity: 0, x: 26, filter: "blur(6px)" }}
-                animate={{ opacity: 1, x: 0, filter: "blur(0px)" }}
-                exit={{ opacity: 0, x: 18, filter: "blur(6px)" }}
-                transition={{ duration: 0.5, ease }}
-              >
-                <div className={`station-card ${m.kind}`} ref={cardRef}>
-                  <div className="station-head">
-                    <span className="station-index">
-                      {idx}<i>/{total}</i>
-                    </span>
-                    <span className="station-kind">{m.kind}</span>
+          {SHOW_BOARDS && (
+            <div className="station-layer">
+              <AnimatePresence mode="wait">
+                <motion.div
+                  key={active}
+                  className="station"
+                  initial={{ opacity: 0, x: 26, filter: "blur(6px)" }}
+                  animate={{ opacity: 1, x: 0, filter: "blur(0px)" }}
+                  exit={{ opacity: 0, x: 18, filter: "blur(6px)" }}
+                  transition={{ duration: 0.5, ease }}
+                >
+                  <div className={`station-card ${m.kind}`} ref={cardRef}>
+                    <div className="station-head">
+                      <span className="station-index">
+                        {idx}<i>/{total}</i>
+                      </span>
+                      <span className="station-kind">{m.kind}</span>
+                    </div>
+                    <div className="station-tag">{m.tag}</div>
+                    <h2 className="station-title">{m.title}</h2>
+                    <p className="station-summary">{m.summary}</p>
+                    <div className="station-points">
+                      {m.sub.map((s) => (
+                        <span key={s}>{s}</span>
+                      ))}
+                    </div>
                   </div>
-                  <div className="station-tag">{m.tag}</div>
-                  <h2 className="station-title">{m.title}</h2>
-                  <p className="station-summary">{m.summary}</p>
-                  <div className="station-points">
-                    {m.sub.map((s) => (
-                      <span key={s}>{s}</span>
-                    ))}
-                  </div>
-                </div>
-              </motion.div>
-            </AnimatePresence>
-          </div>
+                </motion.div>
+              </AnimatePresence>
+            </div>
+          )}
 
           <div className="scrollhint" ref={hintRef}>
             Scroll<span className="arrow">↓</span>
