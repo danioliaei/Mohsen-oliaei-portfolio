@@ -57,6 +57,12 @@ export interface RidgeFrame {
    *  elevation to ELEV_RANGE so the eye never dips under the dunes nor tips past
    *  a high survey angle. */
   pitch: number;
+  /** Hovered career slice index (0 = the tight summit ring … 6 = the wide dune
+   *  ring), or -1 when the pointer rests on no callout. Lights that slice's band. */
+  hoverBand?: number;
+  /** Hover pulse amplitude 0..1 (eased on enter, gently breathing, eased out on
+   *  leave); 0 leaves every slice at rest. */
+  hoverGlow?: number;
 }
 
 /* ---- orbit camera: drag to spin a full turn around the summit -------------
@@ -491,6 +497,7 @@ export class RidgelineScene {
     u[20] = NEAR; u[21] = FAR; u[22] = WORLD_H_MAX; u[23] = s.time * 0.012; // haloSpin
     u[24] = 0.34; u[25] = 0.34; u[26] = 0.03; u[27] = 1.0; // bloomAmt, vignette, grain, exposure
     u[28] = ex; u[29] = ey; u[30] = ez; u[31] = 0;
+    u[32] = s.hoverBand ?? -1; u[33] = s.hoverGlow ?? 0; u[34] = 0; u[35] = 0; // hov
     this.g.device.queue.writeBuffer(this.uBuf, 0, u.buffer, 0, 256);
   }
 

@@ -62,6 +62,8 @@ const angDelta = (a: number, b: number) => {
 export default function RidgelineStage() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
+  const hintRef = useRef<HTMLButtonElement>(null);
+  const demoRef = useRef<(() => void) | null>(null);
   const [unsupported, setUnsupported] = useState(false);
 
   useEffect(() => {
@@ -113,6 +115,19 @@ export default function RidgelineStage() {
       let lastX = 0, lastY = 0, lastT = 0;
       const clampPitch = (p: number) => Math.min(Math.max(p, PITCH_LO), PITCH_HI);
 
+      // ---- hover state: the career SLICE the pointer is resting on, and the eased,
+      // breathing pulse amplitude that lights it. hx/hy track the mouse in canvas
+      // pixels (mouse only — touch has no hover); the rAF loop eases hoverAmt toward
+      // the hovered slice and holds lastHoverBand through the fade-out so the right
+      // band stays lit while it dims. ------------------------------------------------
+      let hx = -1, hy = -1; // pointer in canvas px, or -1 when off-canvas
+      let hoverBand = -1; // slice under the pointer THIS frame (set in updateSurvey)
+      let lastHoverBand = -1; // held through the fade so the dimming slice is the right one
+      let hoverAmt = 0; // eased presence 0..1
+      const reduceMotion =
+        typeof matchMedia === "function" &&
+        matchMedia("(prefers-reduced-motion: reduce)").matches;
+
       // ---- haptics: the Vibration API (Android/Chrome) plus the iOS-Safari
       // trick — toggling a hidden <input switch> plays the system "tock". Kept
       // off-screen (not display:none, which would mute it) and clicked from
@@ -142,9 +157,28 @@ export default function RidgelineStage() {
       };
       let lastNotch = 0;
 
+      // ---- the "drag to rotate" affordance: a hint that retires itself the moment
+      // the viewer first orbits (drag, arrow keys, or the demo), and a one-shot demo
+      // flick so a click on the hint SHOWS the mountain turning — same gentle path a
+      // release-flick takes, eased out by the inertia loop below. --------------------
+      let hinted = true;
+      const hideHint = () => {
+        if (!hinted) return;
+        hinted = false;
+        hintRef.current?.classList.add("is-hidden");
+      };
+      demoRef.current = () => {
+        dragging = false;
+        velYaw = -1.5; // a calm leftward drift; the inertia loop settles it
+        velPitch = 0;
+        haptic(8, performance.now());
+        hideHint();
+      };
+
       const onDown = (e: PointerEvent) => {
         if (e.pointerType === "mouse" && e.button !== 0) return; // left only
         dragging = true;
+        hideHint();
         pid = e.pointerId;
         lastX = e.clientX;
         lastY = e.clientY;
@@ -206,23 +240,42 @@ export default function RidgelineStage() {
         else if (e.key === "ArrowUp") tPitch = clampPitch(tPitch - step);
         else if (e.key === "ArrowDown") tPitch = clampPitch(tPitch + step);
         else return;
+        hideHint();
         velYaw = 0;
         velPitch = 0;
         haptic(8, e.timeStamp);
         e.preventDefault();
       };
 
+      // ---- hover tracking: record the mouse in canvas pixels so updateSurvey can
+      // test it against the revealed callout (and its anchor on the slope). Touch
+      // never fires this, so the slice-glow stays a pointer-device delight. ----------
+      const onHover = (e: PointerEvent) => {
+        if (e.pointerType !== "mouse") return;
+        const r = cvs.getBoundingClientRect();
+        hx = e.clientX - r.left;
+        hy = e.clientY - r.top;
+      };
+      const onHoverOut = (e: PointerEvent) => {
+        if (!e.relatedTarget) { hx = -1; hy = -1; } // pointer left the window
+      };
+
       cvs.addEventListener("pointerdown", onDown);
       window.addEventListener("pointermove", onMove);
+      window.addEventListener("pointermove", onHover);
+      window.addEventListener("pointerout", onHoverOut);
       window.addEventListener("pointerup", onUp);
       window.addEventListener("pointercancel", onUp);
       window.addEventListener("keydown", onKey);
       teardown.push(() => {
         cvs.removeEventListener("pointerdown", onDown);
         window.removeEventListener("pointermove", onMove);
+        window.removeEventListener("pointermove", onHover);
+        window.removeEventListener("pointerout", onHoverOut);
         window.removeEventListener("pointerup", onUp);
         window.removeEventListener("pointercancel", onUp);
         window.removeEventListener("keydown", onKey);
+        demoRef.current = null;
         if (iosTick?.parentNode) iosTick.parentNode.removeChild(iosTick);
       });
 
@@ -267,6 +320,10 @@ export default function RidgelineStage() {
         if (phi > Math.PI) phi -= TWO_PI;
         if (phi < -Math.PI) phi += TWO_PI;
         const aphi = Math.abs(phi);
+
+        // which slice the pointer is resting on this frame (only the clearly-revealed
+        // leader is hoverable, and never mid-drag); resolved after the loop
+        let foundHover = -1;
 
         for (let k = 0; k < STATIONS.length; k++) {
           const label = labels[k];
@@ -315,7 +372,20 @@ export default function RidgelineStage() {
           const lx = toLeft ? ex - labelW[k] : ex;
           label.style.transform = `translate(${lx.toFixed(1)}px, ${(ey - 14).toFixed(1)}px)`;
           label.style.opacity = op.toFixed(3);
+
+          // pointer hover → light THIS slice. A generous disc around the anchor on
+          // the slope (where the leader meets the mountain) and the label box itself
+          // both count, so the eye can rest on the words or on the band they point to.
+          if (!dragging && hx >= 0 && op > 0.5) {
+            const dxh = hx - a.x;
+            const dyh = hy - a.y;
+            const nearAnchor = dxh * dxh + dyh * dyh < 132 * 132;
+            const inLabel =
+              hx >= lx - 14 && hx <= lx + labelW[k] + 14 && hy >= ey - 32 && hy <= ey + 8;
+            if (nearAnchor || inLabel) foundHover = k;
+          }
         }
+        hoverBand = foundHover;
       };
 
       let raf = 0;
@@ -344,7 +414,20 @@ export default function RidgelineStage() {
         yaw += (tYaw - yaw) * k;
         pitch += (tPitch - pitch) * k;
 
-        gpu.render({ time: t, yaw, pitch });
+        // hover pulse: ease presence toward the slice under the pointer, hold the
+        // band index through the fade-out, and breathe the amplitude so the lit slice
+        // feels alive rather than flat-on. (updateSurvey set hoverBand last frame.)
+        if (hoverBand >= 0) lastHoverBand = hoverBand;
+        const hoverTarget = hoverBand >= 0 ? 1 : 0;
+        hoverAmt += (hoverTarget - hoverAmt) * (1 - Math.exp(-dt / 0.16));
+        if (hoverTarget === 0 && hoverAmt < 0.003) {
+          hoverAmt = 0;
+          lastHoverBand = -1;
+        }
+        const breath = reduceMotion ? 0.66 : 0.64 + 0.22 * Math.sin(t * 2.2);
+        const hoverGlow = hoverAmt * breath;
+
+        gpu.render({ time: t, yaw, pitch, hoverBand: lastHoverBand, hoverGlow });
         updateSurvey(yaw, pitch, t);
         raf = requestAnimationFrame(frame);
       };
@@ -392,6 +475,25 @@ export default function RidgelineStage() {
           ))}
         </ul>
       </div>
+
+      {/* "drag to rotate" affordance — a curved arrow that rocks back and forth so
+          the gesture reads at a glance. Clicking it flicks the mountain into a short
+          demo orbit; it retires itself the first time the viewer orbits. */}
+      <button
+        type="button"
+        className="ridge-hint"
+        ref={hintRef}
+        aria-label="Drag the mountain to rotate the view"
+        onClick={() => demoRef.current?.()}
+      >
+        <svg className="ridge-hint-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          {/* a circular rotation arrow: ~300° ring with a crisp filled head, the
+              universal "you can spin this" cue */}
+          <path d="M18.7 7.4A7.4 7.4 0 1 0 20.2 12" />
+          <path d="M18.4 3.1L19.4 7.9L14.6 8.2Z" fill="currentColor" stroke="none" />
+        </svg>
+        <span className="ridge-hint-label">Drag to rotate</span>
+      </button>
     </div>
   );
 }
