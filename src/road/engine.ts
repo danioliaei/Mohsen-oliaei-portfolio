@@ -25,8 +25,11 @@ const AZIM = (45 * Math.PI) / 180;
 /** Eye elevation above the ground plane (rad) — high & looking down, but oblique
  *  enough to read the relief as a 3-D model (the classic diorama / iso angle). */
 const ELEV = (44 * Math.PI) / 180;
-/** Eye→target distance (world units) — sets the zoom for the chosen lens. */
-const ORBIT = 7200;
+/** Eye→target distance (world units) — sets the zoom for the chosen lens.
+ *  Pulled well back to a high, wide bird's-eye framing: the whole winding land
+ *  reads as a distant diorama, with a long reach of the road threading across it
+ *  and more of the surrounding hills and contour detail in view. */
+const ORBIT = 25200;
 /** How far along the road (world units) the framed centre sits ahead of the cam. */
 const LOOK_AHEAD = 1600;
 const NEAR = 120;

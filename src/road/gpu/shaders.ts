@@ -128,10 +128,12 @@ struct VsOut {
   let d = 0.5 - abs(fract(f) - 0.5);
   let w = max(fwidth(f), 1e-4);
   let dpx = d / w;
-  let core = 1.0 - smoothstep(0.0, 1.4, dpx);
-  let halo = exp(-dpx * dpx / 9.0);
-  var line = clamp(core + halo * 0.4, 0.0, 1.0);
-  line = line * (1.0 - smoothstep(0.45, 1.15, w));  // de-alias over-packed lines
+  // thin, delicate iso-lines: a crisp narrow core with only a whisper of halo,
+  // so the contours read as fine graceful pen-strokes rather than heavy ribbons
+  let core = 1.0 - smoothstep(0.0, 0.58, dpx);
+  let halo = exp(-dpx * dpx / 4.0);
+  var line = clamp(core + halo * 0.12, 0.0, 1.0);
+  line = line * (1.0 - smoothstep(0.40, 1.05, w));  // de-alias over-packed lines
 
   var fade = 1.0;
   if (t >= 0.74) { fade = max(0.0, 1.0 - (t - 0.74) / 0.26); }
@@ -153,10 +155,10 @@ struct VsOut {
 
   // slow shimmer travelling through the lines — the land reads as alive/digital
   let shimmer = 0.86 + 0.14 * sin(F.cam.z * 0.8 + i.relief * 0.004 + i.world * 0.0003);
-  let warm = vec3<f32>(1.0, (250.0 - t * 30.0) / 255.0, (242.0 - t * 78.0) / 255.0);
-  let emis = (0.92 + 1.12 * core) * shimmer;         // gentler HDR core → less harsh
-  let lineCol = warm * (lit + 0.5 * spec) * emis;
-  let lineA = line * (0.55 + 0.45 * fade) * (0.7 + 0.42 * lit);
+  let warm = vec3<f32>(1.0, (253.0 - t * 12.0) / 255.0, (251.0 - t * 34.0) / 255.0);  // near-white, barely warms with depth
+  let emis = (0.90 + 0.64 * core) * shimmer;         // thin but crisp & white-bright
+  let lineCol = warm * (lit + 0.4 * spec) * emis;
+  let lineA = line * (0.46 + 0.40 * fade) * (0.72 + 0.4 * lit);
 
   let col = mix(baseCol, lineCol, line);
   let a = max(baseA, lineA);
