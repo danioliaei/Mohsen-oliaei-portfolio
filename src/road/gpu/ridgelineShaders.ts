@@ -83,33 +83,40 @@ fn heightAt(x : f32, z : f32) -> f32 {
   // anisotropic radius from the summit axis — a touch wider in depth so the
   // mountain has a planted base rather than reading as a spike
   let rad = sqrt(dx * dx * 1.05 + dz * dz * 0.58) / 3300.0;
-  let cone   = exp(-rad * rad * 1.15);             // broad base flare / shoulders
-  let sharp  = max(0.0, 1.0 - rad * 1.35);         // straight-sided SHARP apex
-  // a sharp, clearly dominant triangular summit (cone) seated on a broad base
-  var h = PEAK_H * (0.30 * cone + 1.00 * sharp);
-  // ridged striations clad the faces AND texture the snow with fine erosion
-  // gullies — kept moderate so the sharp apex always wins the silhouette, and
-  // hugged to the massif so the foreground reads as calm flowing dunes
-  let gate = smoothstep(0.06, 0.42, cone);
-  let rg  = ridged(vec2<f32>(x * 0.00190, z * 0.00160) + vec2<f32>(13.0, 7.0));
-  h = h + rg * 950.0 * gate;
-  let rg2 = ridged(vec2<f32>(x * 0.00420, z * 0.00370) + vec2<f32>(29.0, 4.0));
-  h = h + rg2 * 360.0 * gate;                      // fine snow / rock micro-texture
-  let sh = fbm(vec2<f32>(x * 0.00045, z * 0.00050) + 3.0);
-  h = h + (sh - 0.5) * 700.0 * gate;
-  // a smooth, low, flowing dune plain flanking the peak (two soft octaves) — well
-  // beneath the summit so black sky opens above and to the sides
-  let plain  = fbm(vec2<f32>(x * 0.00050, z * 0.00060) + 21.0);
-  let plain2 = fbm(vec2<f32>(x * 0.00026, z * 0.00030) + 81.0);
-  h = h + plain * 240.0 + plain2 * 290.0;
-  // two low, soft secondary ridges for natural company beside the main peak
-  let s1 = exp(-((x + 5100.0) * (x + 5100.0) * 1.0 + (z - 6200.0) * (z - 6200.0) * 0.7) / 5.4e6);
-  let s2 = exp(-((x - 5800.0) * (x - 5800.0) * 1.0 + (z - 11800.0) * (z - 11800.0) * 0.7) / 6.4e6);
-  h = h + s1 * 620.0 + s2 * 560.0;
-  // fine foreground ripples for the flowing near weave (gentle → calm dunes)
-  let near = 1.0 - smoothstep(ZN, 5600.0, z);
-  h = h + sin(x * 0.00130 + z * 0.00100) * 44.0 * near;
-  h = h + fbm(vec2<f32>(x * 0.0017, z * 0.0020) + 5.0) * 60.0 * near;
+  // --- elegant dominant form: a sharp straight-sided cone on a broad base ---
+  let sharp  = max(0.0, 1.0 - rad * 1.30);         // straight-sided SHARP apex
+  let coneB  = exp(-rad * rad * 0.95);             // broad base flare / shoulders
+  var h = PEAK_H * (0.34 * coneB + 1.00 * sharp);
+  // the rocky relief lives on the massif, fading to a calm plain outside it
+  let gate = smoothstep(0.05, 0.46, coneB);
+
+  // a few LARGE smooth spurs descending the peak → elegant flowing shoulders
+  // (low frequency, so a handful of big ridges instead of chaotic small bumps)
+  let spur = ridged(vec2<f32>(x * 0.00072, z * 0.00060) + vec2<f32>(13.0, 7.0));
+  h = h + (spur - 0.35) * 1450.0 * gate;
+
+  // VERTICAL erosion gullies — anisotropic (high frequency across x, lower along
+  // z) so the horizontal contour lines weave as they cross them: the reference's
+  // woven snow/rock texture, achieved without tall competing peaks
+  let gully = ridged(vec2<f32>(x * 0.00300, z * 0.00118) + vec2<f32>(41.0, 9.0));
+  h = h + gully * 520.0 * gate;
+  let gully2 = ridged(vec2<f32>(x * 0.00680, z * 0.00250) + vec2<f32>(5.0, 23.0));
+  h = h + gully2 * 195.0 * gate;                   // finer micro-texture
+
+  // a smooth, low, flowing dune plain everywhere (calm flanks + foreground)
+  let plain  = fbm(vec2<f32>(x * 0.00042, z * 0.00052) + 21.0);
+  let plain2 = fbm(vec2<f32>(x * 0.00022, z * 0.00026) + 81.0);
+  h = h + plain * 220.0 + plain2 * 300.0;
+
+  // two very low, soft secondary rises for company beside the peak (no spikes)
+  let s1 = exp(-((x + 5400.0) * (x + 5400.0) + (z - 6000.0) * (z - 6000.0) * 0.7) / 6.0e6);
+  let s2 = exp(-((x - 6000.0) * (x - 6000.0) + (z - 12200.0) * (z - 12200.0) * 0.7) / 7.0e6);
+  h = h + s1 * 600.0 + s2 * 520.0;
+
+  // gentle fine ripples in the near sand → the dense flowing foreground weave
+  let near = 1.0 - smoothstep(ZN, 6000.0, z);
+  h = h + sin(x * 0.00120 + z * 0.00094) * 38.0 * near;
+  h = h + fbm(vec2<f32>(x * 0.00150, z * 0.00175) + 5.0) * 50.0 * near;
   return h;
 }
 `;
