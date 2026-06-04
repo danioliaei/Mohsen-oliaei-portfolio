@@ -200,46 +200,55 @@ struct VsOut {
   return o;
 }
 @fragment fn fs(i : VsOut) -> @location(0) vec4<f32> {
-  // ---- constant-depth iso-lines: the stacked horizontal profiles -----------
-  // Keyed to world Z — a FIXED plane in the terrain — so every line is painted
-  // onto the surface and stays glued to the same ground as the camera orbits,
-  // instead of sliding across it. Head-on they read as the signature stacked
-  // horizontal profiles; from the flank you see those same bands obliquely.
+  // ---- base hairlines: constant-DEPTH iso-lines (the stacked horizontal weave) -
+  // UNCHANGED in direction — keyed to world Z, a FIXED plane in the terrain, so the
+  // signature stacked profiles stay painted on the surface and glued to the same
+  // ground as the camera orbits. These are the quiet texture the survey RINGS are
+  // cut across (head-on they read as horizontal bands; from the flank, obliquely).
   let Z_STEP = 66.0;                          // world units between scan-lines
   let f = i.wpos.z / Z_STEP;
   let dist = 0.5 - abs(fract(f) - 0.5);       // 0 on a line, 0.5 between
   let aa = max(fwidth(f), 1e-5);
+  var hair = 1.0 - smoothstep(0.0, aa * 1.25, dist);
+  // dissolve where the projected lines pack tighter than the pixel grid so far /
+  // steep faces read as smooth tone instead of a buzzing moiré
+  hair = hair * (1.0 - smoothstep(0.48, 1.10, aa));
 
-  // ---- INDEX CONTOURS: the career as a surveyed timeline --------------------
-  // Seven iso-lines — the contour bands nearest each career station, marching
-  // from the near dune approach (2014) up to just below the summit (now) — are
-  // promoted to bolder, brighter "index contours", exactly as a topographic
-  // survey thickens its key elevations. At rest the mountain still reads as one
-  // clean monochrome peak; these seven strata are its quiet biography. The band
-  // index is round(worldZ / Z_STEP), so each lands exactly on a real contour
-  // (never floating between two). Even-spaced for now — trivial to retune to the
-  // true per-year depths once the look is approved.
-  var STATIONS = array<f32, 7>(23.0, 38.0, 53.0, 68.0, 83.0, 98.0, 114.0);
-  let band = round(f);
-  var nearIdx = 999.0;
+  // ---- INDEX CONTOURS as concentric SURVEYED RINGS -------------------------
+  // The career — no longer seven straight planar cuts but seven iso-RADIUS rings
+  // wrapping the massif like a topographic survey: oldest is the wide ring sweeping
+  // the near dunes (2014); newest is the tight ring hugging the summit (now). The
+  // plan radius about the summit axis is domain-warped by low-frequency noise, so
+  // each ring wanders like a real cut-line carved into the slope rather than a
+  // compass-drawn circle — yet, being level-sets of one single field, the rings
+  // bend and pinch but never cross. Keep RINGS in sync with RING_RADII (ridgeline.ts).
+  let dxp = i.wpos.x - PEAK_X;
+  let dzp = i.wpos.z - PEAK_Z;
+  // the height field's own anisotropy (a touch wider in depth) so the rings are the
+  // mountain's planted ellipses, not perfect circles laid on top
+  let baseR = sqrt(dxp * dxp * 1.05 + dzp * dzp * 0.58);
+  let warp = (fbm(vec2<f32>(i.wpos.x * 0.00026, i.wpos.z * 0.00023) + 47.0) - 0.5) * 980.0
+           + (fbm(vec2<f32>(i.wpos.x * 0.00090, i.wpos.z * 0.00078) + 12.0) - 0.5) * 210.0;
+  let rw = baseR + warp;
+  // screen-space line AA: the distance to each ring is measured in PIXELS (world
+  // delta ÷ per-pixel gradient), with the gradient clamped so a near-silhouette fold
+  // fades the line out cleanly instead of smearing it into a fat blur. With only
+  // seven well-separated rings there is no moiré to fight, so — unlike the dense
+  // hairlines — the rings are NEVER dissolved: each stays a continuous unbroken loop
+  // wrapping the massif, thinning only where its slope turns edge-on to the eye.
+  let aaR = clamp(fwidth(rw), 1e-4, 100.0);
+  var RINGS = array<f32, 7>(720.0, 1300.0, 1980.0, 2750.0, 3600.0, 4550.0, 5600.0);
+  var ring = 0.0;
+  var moat = 0.0;
   for (var k = 0; k < 7; k = k + 1) {
-    nearIdx = min(nearIdx, abs(band - STATIONS[k]));
+    let dPix = abs(rw - RINGS[k]) / aaR;                  // distance to this ring, in px
+    ring = max(ring, 1.0 - smoothstep(1.6, 3.2, dPix));   // ~3 px bold survey stroke
+    moat = max(moat, 1.0 - smoothstep(3.2, 10.0, dPix));  // its flanking dark band
   }
-  let isIndex = 1.0 - step(0.5, nearIdx);                  // this band IS a station
-  let isMoat  = step(0.5, nearIdx) * (1.0 - step(1.5, nearIdx)); // exactly 1 band off
-
-  // index strokes are bolder + brighter, and each is framed by a one-contour dark
-  // "moat" (its two nearest hairline neighbours are dimmed) so the seven milestone
-  // strata read as distinct surveyed bands instead of dissolving into the weave
-  let widthAA = mix(1.25, 3.6, isIndex);
-  var line = 1.0 - smoothstep(0.0, aa * widthAA, dist);
-  // where the projected lines pack tighter than the pixel grid, dissolve them so
-  // far/steep faces read as smooth tone instead of a buzzing moiré (eased so the
-  // dense snowy summit keeps most of its strokes; index lines hold on a touch
-  // longer so the milestones stay legible where the hairlines have faded)
-  let dissolve = mix(1.10, 1.6, isIndex);
-  line = line * (1.0 - smoothstep(0.48, dissolve, aa));
-  line = line * (1.0 - isMoat * 0.82);                     // breathing room
+  // each ring clears a dark band of breathing room out of the hairline weave on its
+  // flanks (the survey "moat"), so the bright cut is bracketed by black and can't be
+  // mistaken for one more hairline — the contrast that lets it read as a ring
+  hair = hair * (1.0 - 0.9 * clamp(moat - ring, 0.0, 1.0));
 
   // ---- monochrome shading: form from a soft key light, snow from elevation --
   let n = normalize(i.nrm);
@@ -253,20 +262,24 @@ struct VsOut {
   let snow = smoothstep(0.36, 0.76, hN);
   // bright contour strokes: mid-grey on rock/dune, near-white on the snowy summit
   let rockBright = 0.42 + 0.22 * lit;
-  let lineLum = mix(rockBright, 1.02, snow);
-  // index contours lift above the bloom threshold so they read as the brightest
-  // strokes on the slope and pick up a faint snow-glow (still pure greyscale)
-  let indexLum = mix(1.18, 1.62, snow);
-  let strokeLum = mix(lineLum, indexLum, isIndex);
-  var lum = strokeLum * line + rim * 0.50;       // + luminous ridge silhouettes
+  let hairLum = mix(rockBright, 1.02, snow);
+  var lum = hairLum * hair + rim * 0.50;         // hairline weave + ridge silhouettes
 
   // a luminous snowFIELD wash so the summit reads as a bright solid mass that the
   // fine darker striations sit on — the inverse of the dark-rock / bright-line
   // lower slopes, exactly as in the reference still (kept under full white so the
   // erosion texture still reads on the snow rather than blowing out)
   let snowFill = snow * snow * (0.24 + 0.46 * diff);
-  let c = vec3<f32>(lum + snowFill);
-  return vec4<f32>(c, 1.0);                     // opaque → writes depth, occludes
+  var c = lum + snowFill;                          // the base surface
+
+  // ---- the seven SURVEY RINGS as a bold high-contrast cut ------------------
+  // luminous on the dark rock / dune (riding above the bloom line so it glows) and
+  // an incised DARK line where it crosses the bright snow — so each contour reads
+  // on every part of the massif instead of dissolving into a matching tone. This
+  // is the same dark-on-snow / bright-on-rock inversion the weave already uses.
+  let ringTone = mix(2.05, 0.02, snow);
+  c = mix(c, ringTone, ring);
+  return vec4<f32>(vec3<f32>(c), 1.0);                     // opaque → writes depth, occludes
 }
 `;
 

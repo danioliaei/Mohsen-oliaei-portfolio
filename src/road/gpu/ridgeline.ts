@@ -131,14 +131,15 @@ function mul(a: Mat4, b: Mat4): Mat4 {
 }
 
 /* ---- survey stations (B1): the seven index contours as career callouts ------
-   Mirror the shader's index-contour bands (STATIONS in ridgelineShaders.ts) and
-   the dominant height field, so the DOM survey labels in RidgelineStage can pin a
-   world anchor onto each bright band and track it as the camera orbits. Keep
-   STATION_BANDS and Z_STEP in sync with ridgelineShaders.ts. */
-export const Z_STEP = 66; // world units between contour lines (mirrors the shader)
-export const STATION_BANDS = [23, 38, 53, 68, 83, 98, 114] as const; // oldest → newest
+   The index contours are now concentric RINGS (the RINGS array in
+   ridgelineShaders.ts), so each career station is the plan RADIUS of one surveyed
+   ring about the summit axis, oldest (widest, near the dunes) → newest (the tight
+   summit ring). RidgelineStage pins a DOM callout to where each ring crosses the
+   mountain's near, camera-facing face. Keep RING_RADII in sync with the shader. */
+export const RING_RADII = [5600, 4550, 3600, 2750, 1980, 1300, 720] as const; // oldest → newest
 const PEAK_Z = 8200; // summit depth (mirrors TGT.z and the shader's PEAK_Z)
 const PEAK_H = 3300; // summit height (mirrors the shader's PEAK_H)
+const RING_ANISO_Z = Math.sqrt(0.58); // on x = 0, baseR = |dz|·√0.58 (shader anisotropy)
 
 /** Dominant ridge height on the central axis (x = 0) at depth z — the smooth cone
  *  part of heightAt(); the painted index contour sits ~here. The small ridged /
@@ -149,6 +150,15 @@ export function ridgeCrestHeight(z: number): number {
   const sharp = Math.max(0, 1 - rad * 1.3);
   const coneB = Math.exp(-rad * rad * 0.95);
   return PEAK_H * (0.34 * coneB + sharp) + 300;
+}
+
+/** World anchor for a ring's callout: the point where the ring of plan radius R
+ *  crosses the mountain's near, camera-facing face on the central axis (x = 0).
+ *  There the plan radius reduces to |dz|·√0.58, so dz = −R/√0.58; the leader tip
+ *  then grazes the lit ring on the slope that faces the viewer at the rest pose. */
+export function ringAnchor(radius: number): { x: number; y: number; z: number } {
+  const z = Math.max(700, PEAK_Z - radius / RING_ANISO_Z);
+  return { x: 0, y: ridgeCrestHeight(z), z };
 }
 
 /** The exact eye + view-projection the scene renders for a given orbit, re-exposed
