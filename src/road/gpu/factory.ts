@@ -10,8 +10,7 @@
    once on the CPU and drawn by the SOLID pass in scene.ts, depth-tested against
    the terrain so nearer hills occlude it like any other world geometry.
    ========================================================================= */
-import { LAT, surfaceY } from "../engine";
-import { MILESTONES } from "../../data/milestones";
+import { LAT, surfaceY, TERRACE } from "../engine";
 
 export const FACTORY_FLOATS_PER_VERT = 10; // pos(3) nrm(3) col(3) emis(1)
 
@@ -68,6 +67,21 @@ class Mesh {
     this.tri([x1, y, z1], rB, [x0, y, z1], [0, 0, 1], col, 0);
   }
 
+  /** A solid ramp: top slopes from (x0,y0) to (x1,y1) along x, width sz in z
+   *  centred on cz, walls dropping to yFloor (set below grade so it never floats).
+   *  Used for the access causeway linking the road up to the plant terrace. */
+  ramp(x0: number, x1: number, cz: number, sz: number, y0: number, y1: number, yFloor: number, col: V3, emis = 0): void {
+    const z0 = cz - sz / 2, z1 = cz + sz / 2;
+    const A: V3 = [x0, y0, z0], B: V3 = [x0, y0, z1], C: V3 = [x1, y1, z1], D: V3 = [x1, y1, z0];
+    this.quad(A, B, C, D, norm([-(y1 - y0), x1 - x0, 0]), col, emis); // sloped top
+    const Af: V3 = [x0, yFloor, z0], Bf: V3 = [x0, yFloor, z1];
+    const Cf: V3 = [x1, yFloor, z1], Df: V3 = [x1, yFloor, z0];
+    this.quad(A, D, Df, Af, [0, 0, -1], col, emis); // z0 wall
+    this.quad(C, B, Bf, Cf, [0, 0, 1], col, emis); // z1 wall
+    this.quad(B, A, Af, Bf, [-1, 0, 0], col, emis); // pad-end cap
+    this.quad(D, C, Cf, Df, [1, 0, 0], col, emis); // road-end cap
+  }
+
   /** Upright cylinder (tank / silo / stack): base at y, height h. */
   cyl(cx: number, y: number, cz: number, r: number, h: number, segs: number, col: V3, emis = 0, dome = false): void {
     const y0 = y, y1 = y + h;
@@ -87,19 +101,28 @@ class Mesh {
   }
 }
 
-/** Linear-ish dusk palette for the plant — cool steel + a few warm/teal lights. */
-const STEEL: V3 = [0.40, 0.42, 0.45];
-const STEEL_DK: V3 = [0.20, 0.22, 0.26];
-const CLAD: V3 = [0.52, 0.47, 0.40]; // warm metal cladding
-const CONCRETE: V3 = [0.34, 0.31, 0.28];
+/** Warm dusk palette — metal that catches the low key light, with a muted
+ *  "green-steel" accent and the emissive lights that feed the bloom. */
+const STEEL: V3 = [0.37, 0.38, 0.39];
+const STEEL_DK: V3 = [0.17, 0.18, 0.20];
+const CLAD: V3 = [0.48, 0.43, 0.36]; // warm zinc cladding
+const ROOF: V3 = [0.26, 0.31, 0.31]; // standing-seam roof, faint green-steel cast
+const GREEN: V3 = [0.26, 0.50, 0.44]; // green-steel accent band (lit)
+const CONCRETE: V3 = [0.30, 0.27, 0.24];
+const CONCRETE_DK: V3 = [0.19, 0.17, 0.15];
+const GRAVEL: V3 = [0.20, 0.17, 0.15]; // dark graded service yard
+const ASPHALT: V3 = [0.14, 0.13, 0.13];
 const WARM_LIGHT: V3 = [1.0, 0.66, 0.32]; // window / interior glow
 const TEAL: V3 = [0.40, 0.92, 0.86]; // Stegra accent (echoes the station colour)
 const RED_TIP: V3 = [1.0, 0.36, 0.26]; // stack warning light
+const FLAME: V3 = [1.0, 0.55, 0.2];
 
 /**
- * Build the plant geometry, sited beside the road at the Stegra milestone.
- * Returns the interleaved vertex array + vertex count, plus the world centre &
- * radius so the renderer can cull/skip it when far from view if needed.
+ * Build the plant geometry. The land beneath it is already graded flat to
+ * `TERRACE.y` by the height field (engine.ts / terrainH), so the plant simply
+ * stands on that platform — laid out as a linear green-steel works that fits
+ * inside the terrace footprint, with an access causeway ramping down to the
+ * road. Nothing floats and no ridge pierces it, because the ground IS flat here.
  */
 export function buildFactory(): {
   verts: Float32Array<ArrayBuffer>;
@@ -107,98 +130,117 @@ export function buildFactory(): {
   center: V3;
   z: number;
 } {
-  const stegra = MILESTONES.find((m) => m.title.includes("Stegra")) ?? MILESTONES[MILESTONES.length - 1];
-  const zF = stegra.z;
-  // sit the plant off to the camera-facing (−x) side of the road, on its own pad
-  const SIDE = -1450;
-  const xC = LAT(zF) + SIDE;
-  const padY = surfaceY(xC, zF);
+  const xC = TERRACE.x;
+  const zF = TERRACE.z;
+  const ground = TERRACE.y; // the flat terrace top (carved into the terrain)
 
   const m = new Mesh();
 
-  // ---- graded site pad (a flat platform so nothing floats on the hillside) ----
-  const padW = 2600, padD = 1900, padT = 34;
-  m.box(xC, padY - padT, zF, padW, padT, padD, CONCRETE, 0);
-  const base = padY; // everything else stands on the pad top
-  m.box(xC, base, zF, padW - 60, 6, padD - 60, [0.30, 0.28, 0.25], 0); // apron slab
+  // ---- graded service yard on the platform (dark, so the lit buildings read
+  // against it; a low kerb seats it into the terrace and the contour ground
+  // shows around the inset edge) ----
+  const apW = (TERRACE.hw - 96) * 2, apD = (TERRACE.hd - 96) * 2;
+  m.box(xC, ground - 34, zF, apW + 36, 46, apD + 36, CONCRETE_DK, 0); // kerb/footing into grade
+  m.box(xC, ground - 4, zF, apW, 16, apD, GRAVEL, 0); // dark graded yard
+  const base = ground + 12; // deck top — everything stands here
+  // a paved concrete apron by the road-side gate & tank farm (a little variation)
+  m.box(xC + 380, base + 1, zF - 420, 480, 4, 560, CONCRETE, 0);
 
-  // ---- main production halls: a row of long, tall sheds along z ----
-  const hallW = 470; // across (x)
-  const hallH = 360;
+  // ---- main production halls: long sheds running along z (the works' spine) --
+  const hallW = 320;
+  const hallH = 330;
   const halls: Array<[number, number, number]> = [
-    [xC - 520, zF - 130, 1180], // [centre x, centre z, length(z)]
-    [xC, zF + 40, 1500],
-    [xC + 540, zF - 80, 1240],
+    [xC - 430, zF - 40, 1500], // [centre x, centre z, length(z)] — back (hill side)
+    [xC - 70, zF + 30, 1640], // middle
+    [xC + 300, zF - 90, 1380], // front (road side)
   ];
   for (const [hx, hz, hl] of halls) {
     m.box(hx, base, hz, hallW, hallH, hl, CLAD, 0);
-    m.gable(hx, base + hallH, hz, hallW, 120, hl, STEEL);
-    // emissive clerestory window bands down both long sides
-    m.box(hx - hallW / 2 - 1, base + hallH * 0.62, hz, 4, 40, hl * 0.92, WARM_LIGHT, 1.1);
-    m.box(hx + hallW / 2 + 1, base + hallH * 0.62, hz, 4, 40, hl * 0.92, WARM_LIGHT, 1.1);
-    // roof vents / monitors
+    m.gable(hx, base + hallH, hz, hallW, 110, hl, ROOF);
+    // lit clerestory window strip + a green-steel brand band above it, both flanks
+    for (const s of [-1, 1]) {
+      const wx = hx + s * (hallW / 2 + 1);
+      m.box(wx, base + hallH * 0.5, hz, 3, 32, hl * 0.9, WARM_LIGHT, 1.25); // windows
+      m.box(wx, base + hallH - 46, hz, 3, 20, hl * 0.84, GREEN, 0.55); // brand band
+    }
+    // roof monitors / vents
     for (let k = -1; k <= 1; k++) {
-      m.box(hx, base + hallH + 110, hz + k * hl * 0.28, hallW * 0.5, 26, hl * 0.12, STEEL_DK, 0);
+      m.box(hx, base + hallH + 96, hz + k * hl * 0.28, hallW * 0.5, 24, hl * 0.12, STEEL_DK, 0);
     }
   }
 
-  // ---- the DRI shaft tower: the tall slender centrepiece ----
-  const tx = xC - 980, tz = zF + 560;
-  m.box(tx, base, tz, 250, 250, 250, STEEL_DK, 0); // base plinth
-  m.box(tx, base + 250, tz, 170, 560, 170, STEEL, 0); // shaft
-  m.box(tx, base + 250 + 560, tz, 220, 90, 220, STEEL_DK, 0); // top works
-  m.box(tx, base + 250 + 560 + 90, tz, 80, 70, 80, CLAD, 0); // cap house
-  // a few emissive process bands up the shaft
+  // ---- the DRI shaft tower: the tall slender landmark (far road-side corner) --
+  const tx = xC + 560, tz = zF + 760;
+  m.box(tx, base, tz, 230, 230, 230, STEEL_DK, 0); // base plinth
+  m.box(tx, base + 230, tz, 158, 560, 158, STEEL, 0); // shaft
+  m.box(tx, base + 230 + 560, tz, 206, 86, 206, STEEL_DK, 0); // top works
+  m.box(tx, base + 230 + 560 + 86, tz, 78, 66, 78, TEAL, 0.7); // lit cap beacon
+  m.box(tx, base + 230 + 560 + 86 + 66, tz, 18, 16, 18, RED_TIP, 1.3); // aviation light
   for (let b = 0; b < 3; b++) {
-    m.box(tx, base + 330 + b * 170, tz, 174, 12, 174, TEAL, 0.9);
+    m.box(tx, base + 300 + b * 160, tz, 162, 11, 162, TEAL, 0.9); // process bands
   }
 
-  // ---- hydrogen / gas storage: domed cylinders in a cluster ----
+  // ---- hydrogen / gas storage: domed cylinders, front-near corner ----
   const tanks: Array<[number, number, number, number]> = [
-    [xC + 1020, zF + 540, 150, 300], // [x, z, r, h]
-    [xC + 1180, zF + 250, 120, 250],
-    [xC + 980, zF + 230, 95, 210],
-    [xC + 1200, zF + 760, 110, 230],
+    [xC + 560, zF - 560, 140, 280], // [x, z, r, h]
+    [xC + 620, zF - 320, 110, 230],
+    [xC + 470, zF - 720, 96, 200],
+    [xC + 690, zF - 640, 86, 188],
   ];
   for (const [px, pz, r, h] of tanks) {
     m.cyl(px, base, pz, r, h, 22, STEEL, 0, true);
     m.box(px, base + h * 0.5, pz - r, r * 0.5, 8, 8, TEAL, 0.8); // gauge strip
   }
 
-  // ---- slender stacks / flare with warning-light tips ----
+  // ---- slender stacks (back, hill side) with warning-light tips ----
   const stacks: Array<[number, number, number, number]> = [
-    [xC - 1180, zF - 360, 26, 720],
-    [xC - 1050, zF - 460, 20, 600],
-    [xC + 760, zF - 560, 22, 660],
+    [xC - 670, zF - 540, 24, 700],
+    [xC - 730, zF - 660, 19, 560],
+    [xC - 690, zF + 300, 22, 620],
   ];
   for (const [px, pz, r, h] of stacks) {
     m.cyl(px, base, pz, r, h, 14, STEEL_DK, 0);
-    m.cyl(px, base + h, pz, r * 0.7, 24, 12, RED_TIP, 1.4); // glowing tip
+    m.cyl(px, base + h, pz, r * 0.7, 22, 12, RED_TIP, 1.4); // glowing tip
   }
   // a flare stack with a small emissive flame
-  const fx = xC + 980, fz = zF - 360;
-  m.cyl(fx, base, fz, 24, 560, 14, STEEL_DK, 0);
-  m.cyl(fx, base + 560, fz, 18, 70, 10, [1.0, 0.55, 0.2], 1.8);
+  const fx = xC - 720, fz = zF - 360;
+  m.cyl(fx, base, fz, 22, 540, 14, STEEL_DK, 0);
+  m.cyl(fx, base + 540, fz, 16, 64, 10, FLAME, 1.8);
 
   // ---- low pipe-racks / conveyors linking the halls (thin long boxes) ----
-  m.box(xC - 250, base + 70, zF - 700, 1500, 26, 40, STEEL_DK, 0);
-  m.box(xC + 120, base + 90, zF + 760, 1700, 26, 40, STEEL_DK, 0);
-  m.box(xC - 760, base + 60, zF + 200, 40, 26, 900, STEEL_DK, 0);
+  m.box(xC - 250, base + 64, zF - 720, 760, 22, 36, STEEL_DK, 0);
+  m.box(xC + 30, base + 84, zF + 800, 700, 22, 36, STEEL_DK, 0);
+  m.box(xC - 180, base + 56, zF + 120, 36, 22, 760, STEEL_DK, 0);
 
-  // ---- a scatter of warm site lights along the perimeter ----
-  const lamps = 8;
+  // ---- warm site lights ringing the apron ----
+  const lamps = 9;
   for (let i = 0; i < lamps; i++) {
     const a = (i / lamps) * Math.PI * 2;
-    const lx = xC + Math.cos(a) * 1150;
-    const lz = zF + Math.sin(a) * 820;
-    m.box(lx, base, lz, 10, 150, 10, STEEL_DK, 0);
-    m.box(lx, base + 150, lz, 26, 10, 26, WARM_LIGHT, 1.5);
+    const lx = xC + Math.cos(a) * (TERRACE.hw - 130);
+    const lz = zF + Math.sin(a) * (TERRACE.hd - 130);
+    m.box(lx, base, lz, 9, 140, 9, STEEL_DK, 0);
+    m.box(lx, base + 140, lz, 24, 9, 24, WARM_LIGHT, 1.5);
   }
+
+  // ---- access causeway: a graded ramp from the road up onto the terrace ----
+  // Starts at the front rim of the platform and descends to road level; built as
+  // a filled embankment (walls dropping below grade) so it reads as a real spur
+  // road rather than a floating strip. A faint warm centreline echoes the fibre.
+  const gz = zF - 280; // gate position along the front edge
+  const rimX = xC + TERRACE.hw; // platform front rim
+  const roadX = LAT(gz) + 70; // stop just short of the road centreline
+  const padTopY = base; // deck height
+  const roadTopY = surfaceY(roadX, gz) + 26; // meet the road surface
+  m.ramp(rimX + 20, roadX, gz, 150, padTopY, roadTopY, ground - 360, ASPHALT, 0);
+  m.ramp(rimX + 20, roadX, gz, 22, padTopY + 3, roadTopY + 3, roadTopY - 40, WARM_LIGHT, 0.5); // centreline
+  // small gate posts where the ramp meets the platform
+  m.box(rimX + 6, base, gz - 96, 26, 96, 26, STEEL_DK, 0);
+  m.box(rimX + 6, base, gz + 96, 26, 96, 26, STEEL_DK, 0);
 
   return {
     verts: new Float32Array(m.data),
     count: m.data.length / FACTORY_FLOATS_PER_VERT,
-    center: [xC, padY, zF],
+    center: [xC, ground, zF],
     z: zF,
   };
 }
