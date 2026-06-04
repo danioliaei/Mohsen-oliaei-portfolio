@@ -24,9 +24,11 @@ import {
   EMBER_WGSL,
   WAYPOINT_WGSL,
   CONNECTOR_WGSL,
+  SOLID_WGSL,
 } from "./shaders";
 import { LAT, surfaceY } from "../engine";
 import { MILESTONES } from "../../data/milestones";
+import { buildFactory, buildArrowTemplate } from "./factory";
 
 const EMBER_COUNT = 0;
 /** Floating kind-coloured glints at each milestone. Disabled per request
@@ -48,11 +50,17 @@ const KIND_COL: Record<string, [number, number, number]> = {
 // (an empty wedge in the lower-left, and terrain clipping in/out as you scroll).
 // HALF_W gives lateral overscan; NEAR_AHEAD pushes the near edge well behind the
 // camera so it falls below the frame; the far edge already dissolves via depthT.
-const HALF_W = 17000;
-const NEAR_AHEAD = -8200;
+// A wider, denser plan than strictly needed to fill the default frame: the extra
+// lateral reach (and a touch more depth behind the near edge) only shows once the
+// viewer dollies OUT with the free-look camera, where the terrain then reads as a
+// large finite survey sheet whose edges dissolve into unrendered dusk — the
+// "bigger plan with unrendered areas" the brief asks for. NX/NZ rise with the
+// footprint so the contour density per visible area stays the same.
+const HALF_W = 20500;
+const NEAR_AHEAD = -9400;
 const VIEW_DEPTH = 13000;
-const NX = 430;
-const NZ = 416;
+const NX = 496;
+const NZ = 452;
 const L_MIN = 0;
 // Vertical spacing (height units) between iso-contour lines. Widened markedly so
 // the land reads as a calm set of evenly-spaced survey strokes instead of a dense,
@@ -116,6 +124,8 @@ export class WebGPUScene {
   private brightU!: GPUBuffer;
   private blurHU!: GPUBuffer;
   private blurVU!: GPUBuffer;
+  private dofHU!: GPUBuffer; // wider-spread blur, dedicated to the tilt-shift DoF
+  private dofVU!: GPUBuffer;
   private bgBright!: GPUBindGroup;
   private bgBloomH!: GPUBindGroup;
   private bgBloomV!: GPUBindGroup;
@@ -130,6 +140,14 @@ export class WebGPUScene {
   private roadPipe!: GPURenderPipeline;
   private roadVBO: GPUBuffer;
   private roadCount = 0;
+  private solidPipe!: GPURenderPipeline; // lit solids (Stegra plant + nav arrow)
+  private factoryVBO: GPUBuffer;
+  private factoryCount = 0;
+  // "you are here" arrow — a unit template transformed to world space each frame
+  private arrowTpl: Float32Array;
+  private arrowN = 0;
+  private arrowWorld: Float32Array; // per-frame pos/nrm/col/emis (solid format)
+  private arrowVBO: GPUBuffer;
   private emberPipe!: GPURenderPipeline;
   private wpPipe!: GPURenderPipeline;
   private wpBuf: GPUBuffer;
@@ -158,6 +176,8 @@ export class WebGPUScene {
     this.brightU = passBuf();
     this.blurHU = passBuf();
     this.blurVU = passBuf();
+    this.dofHU = passBuf();
+    this.dofVU = passBuf();
     this.samp = d.createSampler({
       magFilter: "linear",
       minFilter: "linear",
@@ -237,6 +257,25 @@ export class WebGPUScene {
     });
     d.queue.writeBuffer(this.roadVBO, 0, rv);
 
+    // ---- Stegra plant geometry (lit solids), built once on the CPU ----
+    const fac = buildFactory();
+    this.factoryCount = fac.count;
+    this.factoryVBO = d.createBuffer({
+      size: fac.verts.byteLength,
+      usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
+    });
+    d.queue.writeBuffer(this.factoryVBO, 0, fac.verts);
+
+    // ---- navigation arrow template (pos+nrm); world verts are rebuilt per frame
+    const arrow = buildArrowTemplate();
+    this.arrowTpl = arrow.verts;
+    this.arrowN = arrow.count;
+    this.arrowWorld = new Float32Array(this.arrowN * 10); // solid vertex format
+    this.arrowVBO = d.createBuffer({
+      size: this.arrowWorld.byteLength,
+      usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
+    });
+
     // ---- static waypoint instances (one glint per career station) ----
     this.wpCount = MILESTONES.length;
     const wp = new Float32Array(this.wpCount * 8);
@@ -293,11 +332,12 @@ export class WebGPUScene {
       console.error("[webgpu] uncaptured:", (ev as GPUUncapturedErrorEvent).error.message);
     });
 
-    const [sky, terrain, road, ember, waypoint, connector, composite, bright, blur] =
+    const [sky, terrain, road, solid, ember, waypoint, connector, composite, bright, blur] =
       await Promise.all([
         compileModule(d, "sky", SKY_WGSL),
         compileModule(d, "terrain", TERRAIN_WGSL),
         compileModule(d, "road", ROAD_WGSL),
+        compileModule(d, "solid", SOLID_WGSL),
         compileModule(d, "ember", EMBER_WGSL),
         compileModule(d, "waypoint", WAYPOINT_WGSL),
         compileModule(d, "connector", CONNECTOR_WGSL),
@@ -385,6 +425,33 @@ export class WebGPUScene {
       fragment: { module: road, entryPoint: "fs", targets: [{ format: HDR, blend: addBlend }] },
       primitive: { topology: "triangle-strip", cullMode: "none" },
       depthStencil: { format: "depth24plus", depthWriteEnabled: false, depthCompare: "less" },
+    });
+
+    // lit solid geometry (Stegra plant + nav arrow): opaque, writes depth so the
+    // buildings occlude one another and the road behind them, and are themselves
+    // occluded by nearer terrain. Back-faces culled.
+    this.solidPipe = await d.createRenderPipelineAsync({
+      layout: framePL,
+      vertex: {
+        module: solid,
+        entryPoint: "vs",
+        buffers: [
+          {
+            arrayStride: 40, // pos(12) + nrm(12) + col(12) + emis(4)
+            attributes: [
+              { shaderLocation: 0, offset: 0, format: "float32x3" },
+              { shaderLocation: 1, offset: 12, format: "float32x3" },
+              { shaderLocation: 2, offset: 24, format: "float32x3" },
+              { shaderLocation: 3, offset: 36, format: "float32" },
+            ],
+          },
+        ],
+      },
+      fragment: { module: solid, entryPoint: "fs", targets: [{ format: HDR }] },
+      // cull nothing: the hand-wound volumes are convex, so depth testing resolves
+      // the silhouette correctly without relying on a consistent winding order
+      primitive: { topology: "triangle-list", cullMode: "none" },
+      depthStencil: { format: "depth24plus", depthWriteEnabled: true, depthCompare: "less" },
     });
 
     this.emberPipe = await d.createRenderPipelineAsync({
@@ -516,6 +583,10 @@ export class WebGPUScene {
     const tx = 1 / hw;
     const ty = 1 / hh;
     const SPREAD = 2.1;
+    // a markedly wider spread for the tilt-shift DoF only, so the out-of-focus top
+    // and bottom melt into a deep, creamy blur (the "miniature" look) while bloom
+    // keeps its tighter halo. Kept on its own buffers so the two don't interfere.
+    const SPREAD_DOF = 3.6;
     // bloom threshold raised well above 1.0 so ONLY the genuinely hot features
     // (the road seam/core + the brightest contour cores) bloom into a soft halo,
     // instead of the whole emissive terrain flooding the frame with golden haze.
@@ -523,6 +594,8 @@ export class WebGPUScene {
     d.queue.writeBuffer(this.brightU, 0, new Float32Array([tx, ty, 0, 0, BLOOM_THRESH, 0, 0, 0]));
     d.queue.writeBuffer(this.blurHU, 0, new Float32Array([tx, ty, 1, 0, SPREAD, 0, 0, 0]));
     d.queue.writeBuffer(this.blurVU, 0, new Float32Array([tx, ty, 0, 1, SPREAD, 0, 0, 0]));
+    d.queue.writeBuffer(this.dofHU, 0, new Float32Array([tx, ty, 1, 0, SPREAD_DOF, 0, 0, 0]));
+    d.queue.writeBuffer(this.dofVU, 0, new Float32Array([tx, ty, 0, 1, SPREAD_DOF, 0, 0, 0]));
 
     const post = (passU: GPUBuffer, view: GPUTextureView): GPUBindGroup =>
       d.createBindGroup({
@@ -536,9 +609,9 @@ export class WebGPUScene {
     this.bgBright = post(this.brightU, this.sceneView);
     this.bgBloomH = post(this.blurHU, this.bloomAV);
     this.bgBloomV = post(this.blurVU, this.bloomBV);
-    this.bgDofH0 = post(this.blurHU, this.sceneView);
-    this.bgDofV = post(this.blurVU, this.dofBV);
-    this.bgDofH = post(this.blurHU, this.dofAV);
+    this.bgDofH0 = post(this.dofHU, this.sceneView);
+    this.bgDofV = post(this.dofVU, this.dofBV);
+    this.bgDofH = post(this.dofHU, this.dofAV);
 
     this.compositeBG = d.createBindGroup({
       layout: this.compositePipe.getBindGroupLayout(0),
@@ -560,16 +633,59 @@ export class WebGPUScene {
     u[24] = s.lensX; u[25] = s.camZ + NEAR_AHEAD; u[26] = s.camZ + VIEW_DEPTH; u[27] = HALF_W;
     // tilt-shift miniature: a narrow sharp band across the middle, the near (lower)
     // and far (upper) reaches falling quickly into blur — the core "toy" cue
-    u[28] = L_MIN; u[29] = L_STEP; u[30] = 0.54; u[31] = 0.12; // focusY, focusH (wider sharp band)
-    u[32] = 0.18; u[33] = 0.22; u[34] = 0.014; u[35] = 1.16; // feather, vignette, grain, exposure
+    u[28] = L_MIN; u[29] = L_STEP; u[30] = 0.52; u[31] = 0.12; // focusY, focusH (sharp band)
+    u[32] = 0.20; u[33] = 0.22; u[34] = 0.014; u[35] = 1.16; // feather, vignette, grain, exposure
     u[36] = s.vpU; u[37] = s.vpV; u[38] = 0.05; u[39] = 0.02; // halo glow, r (muted for the diorama)
     u[40] = 0.50; u[41] = 0.0016; u[42] = 1.0; u[43] = s.eyeY; // bloomAmt, caAmt, dofMax, eyeY
     this.g.device.queue.writeBuffer(this.uBuf, 0, u.buffer, 0, 256);
   }
 
+  /** Rebuild the navigation-arrow world geometry for this frame: placed on the
+   *  road just ahead of the current position, oriented down the route, hovering
+   *  with a gentle bob and a pulsing teal glow so it clearly reads "you are here". */
+  private updateArrow(s: FrameState): void {
+    // sit the marker near the framed focal point on the road (inside the sharp
+    // tilt-shift band, not the blurred foreground) so it stays crisp and reads
+    // as "you are here, heading this way" as the journey advances
+    const mz = s.camZ + 1350;
+    const mx = LAT(mz);
+    const my = surfaceY(mx, mz) + 150 + Math.sin(s.time * 1.8) * 30;
+    // road tangent → forward; orthonormal basis (right, up, forward), up = world Y
+    const ah = LAT(mz + 70) - LAT(mz - 70);
+    let fx = ah, fy = 0, fz = 140;
+    const fl = Math.hypot(fx, fy, fz) || 1;
+    fx /= fl; fy /= fl; fz /= fl;
+    let rx = fz, ry = 0, rz = -fx; // up × fwd, up=(0,1,0)
+    const rl = Math.hypot(rx, ry, rz) || 1;
+    rx /= rl; ry /= rl; rz /= rl;
+    const ux = fy * rz - fz * ry; // fwd × right
+    const uy = fz * rx - fx * rz;
+    const uz = fx * ry - fy * rx;
+    const S = 360; // arrow scale (world units) — large enough to read from the bird's-eye
+    const emis = 1.15 + 0.5 * (0.5 + 0.5 * Math.sin(s.time * 3.0)); // pulsing glow
+    const cr = 0.42, cg = 0.95, cb = 0.9; // bright teal "here" marker
+    const tpl = this.arrowTpl;
+    const out = this.arrowWorld;
+    for (let i = 0; i < this.arrowN; i++) {
+      const o = i * 6;
+      const px = tpl[o], py = tpl[o + 1], pz = tpl[o + 2];
+      const nx = tpl[o + 3], ny = tpl[o + 4], nz = tpl[o + 5];
+      const q = i * 10;
+      out[q] = mx + S * (px * rx + py * ux + pz * fx);
+      out[q + 1] = my + S * (px * ry + py * uy + pz * fy);
+      out[q + 2] = mz + S * (px * rz + py * uz + pz * fz);
+      out[q + 3] = nx * rx + ny * ux + nz * fx;
+      out[q + 4] = nx * ry + ny * uy + nz * fy;
+      out[q + 5] = nx * rz + ny * uz + nz * fz;
+      out[q + 6] = cr; out[q + 7] = cg; out[q + 8] = cb; out[q + 9] = emis;
+    }
+    this.g.device.queue.writeBuffer(this.arrowVBO, 0, out.buffer as ArrayBuffer, 0, out.byteLength);
+  }
+
   render(s: FrameState): void {
     const d = this.g.device;
     this.writeUniforms(s);
+    this.updateArrow(s);
     if (s.connector && s.connector[7] > 0.004) {
       const c = s.connector;
       const a = this.connArr;
@@ -604,10 +720,19 @@ export class WebGPUScene {
     pass.setVertexBuffer(0, this.gridVBO);
     pass.setIndexBuffer(this.gridIBO, "uint32");
     pass.drawIndexed(this.indexCount);
+    // Stegra plant — lit solids on the terrain, drawn before the additive road so
+    // its depth correctly hides any road stretch passing behind the buildings
+    pass.setPipeline(this.solidPipe);
+    pass.setVertexBuffer(0, this.factoryVBO);
+    pass.draw(this.factoryCount);
     // road fibre — additive, depth-tested so nearer hills occlude far stretches
     pass.setPipeline(this.roadPipe);
     pass.setVertexBuffer(0, this.roadVBO);
     pass.draw(this.roadCount);
+    // "you are here" navigation arrow — lit solid, drawn over the road
+    pass.setPipeline(this.solidPipe);
+    pass.setVertexBuffer(0, this.arrowVBO);
+    pass.draw(this.arrowN);
     // drifting embers — instanced, procedural, additive (the "moving" cue)
     pass.setPipeline(this.emberPipe);
     pass.draw(6, EMBER_COUNT);
@@ -686,9 +811,13 @@ export class WebGPUScene {
     this.brightU.destroy();
     this.blurHU.destroy();
     this.blurVU.destroy();
+    this.dofHU.destroy();
+    this.dofVU.destroy();
     this.gridVBO.destroy();
     this.gridIBO.destroy();
     this.roadVBO.destroy();
+    this.factoryVBO.destroy();
+    this.arrowVBO.destroy();
     this.wpBuf.destroy();
     this.connU.destroy();
     this.g.device.destroy();

@@ -48,6 +48,44 @@ export const setLensX = (v: number): void => {
   LENS_X = v;
 };
 
+/* ---- user free-look camera offsets (orbit / zoom / pan) ------------------ */
+// The scroll journey drives the BASE framing (azimuth AZIM, elevation ELEV,
+// distance ORBIT, looking at the road ahead). On top of that the viewer can
+// orbit, dolly and pan within bounds to inspect the diorama from any angle —
+// then a "recenter" control eases these back to zero. All five are world-fixed
+// offsets so the winding road keeps reading lower-left → upper-right at rest.
+interface CamOffsets {
+  azim: number; // yaw offset (rad)
+  elev: number; // pitch offset (rad)
+  zoom: number; // distance multiplier (1 = default)
+  panX: number; // screen-right pan of the framed centre (world units)
+  panZ: number; // screen-forward pan of the framed centre (world units)
+}
+const _off: CamOffsets = { azim: 0, elev: 0, zoom: 1, panX: 0, panZ: 0 };
+
+/** Hard travel limits for the free-look camera — generous enough to roam the
+ *  plan and drop to a near-top-down "survey" view, tight enough that the scene
+ *  always stays composed and you can never fly under the ground or behind it. */
+export const CAM_LIMITS = {
+  azim: [-0.95, 0.95] as const, // ≈ ±54°
+  elev: [-0.42, 0.66] as const, // base 44° → ≈ 20°..82° absolute
+  zoom: [0.52, 1.75] as const, // dolly in to inspect, out to the wide finite plan
+  panX: [-7000, 7000] as const,
+  panZ: [-7000, 7000] as const,
+} as const;
+
+/** Push the current free-look offsets (already eased + clamped by the caller). */
+export const setCamOffsets = (o: CamOffsets): void => {
+  _off.azim = o.azim;
+  _off.elev = o.elev;
+  _off.zoom = o.zoom;
+  _off.panX = o.panX;
+  _off.panZ = o.panZ;
+};
+
+/** The neutral offsets — the "default mode" the recenter button returns to. */
+export const CAM_DEFAULT: CamOffsets = { azim: 0, elev: 0, zoom: 1, panX: 0, panZ: 0 };
+
 /**
  * Lateral position of the road centreline at depth z — a route that genuinely
  * CHANGES DIRECTION as it travels: layered swings of different wavelengths give
@@ -186,20 +224,35 @@ export function setCamera(
   _W = W;
   _H = H;
   _f = 1 / Math.tan(FOVY / 2);
-  // framed centre: a point on the road just ahead of the current position
-  const tx = LAT(camZ + LOOK_AHEAD);
-  const ty = roadBedY(camZ + LOOK_AHEAD);
-  const tz = camZ + LOOK_AHEAD;
-  // fixed world-space view direction (down ELEV, yawed by AZIM) → eye sits back
+  // base framing + the user's free-look offsets (yaw, pitch, dolly, pan)
+  const azim = AZIM + _off.azim;
+  const elev = clamp(ELEV + _off.elev, 0.32, 1.5);
+  const orbit = ORBIT * _off.zoom;
+  // pan slides the framed centre along the SCREEN axes projected onto the ground,
+  // so dragging moves the model the way it looks like it should regardless of yaw
+  const rightX = Math.cos(azim);
+  const rightZ = -Math.sin(azim);
+  const fwdX = Math.sin(azim);
+  const fwdZ = Math.cos(azim);
+  // framed centre: a point on the road just ahead of the current position, panned
+  const baseZ = camZ + LOOK_AHEAD;
+  const tx = LAT(baseZ) + _off.panX * rightX + _off.panZ * fwdX;
+  const tz = baseZ + _off.panX * rightZ + _off.panZ * fwdZ;
+  const ty = roadBedY(baseZ);
+  // fixed world-space view direction (down elev, yawed by azim) → eye sits back
   // along it; the road's +z travel then projects to the upper-right of the frame
-  const fx = Math.cos(ELEV) * Math.sin(AZIM);
-  const fy = -Math.sin(ELEV);
-  const fz = Math.cos(ELEV) * Math.cos(AZIM);
-  const ex = tx - ORBIT * fx;
-  const ey = ty - ORBIT * fy;
-  const ez = tz - ORBIT * fz;
+  const fx = Math.cos(elev) * Math.sin(azim);
+  const fy = -Math.sin(elev);
+  const fz = Math.cos(elev) * Math.cos(azim);
+  const ex = tx - orbit * fx;
+  const ey = ty - orbit * fy;
+  const ez = tz - orbit * fz;
   _eye[0] = ex; _eye[1] = ey; _eye[2] = ez;
-  const proj = mPerspective(FOVY, W / H, NEAR, FAR);
+  // The far plane must clear the scene at ANY dolly distance: when the viewer
+  // zooms out (orbit grows) the whole plan would otherwise fall behind a fixed
+  // far plane and vanish. Pad the eye→target distance by the scene's own depth.
+  const far = orbit + FAR;
+  const proj = mPerspective(FOVY, W / H, NEAR, far);
   const view = mLookAt(ex, ey, ez, tx, ty, tz, 0, 1, 0);
   _vp = mMul(proj, view);
 }
