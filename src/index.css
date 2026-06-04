@@ -446,96 +446,6 @@ canvas#road {
   }
 }
 
-/* ---------------- free-look view controls ---------------- */
-.camnav {
-  position: absolute;
-  z-index: 30;
-  right: 30px;
-  bottom: 104px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-.camnav-btn {
-  width: 42px;
-  height: 42px;
-  display: grid;
-  place-items: center;
-  border-radius: 50%;
-  border: 1px solid rgba(244, 241, 234, 0.18);
-  background: rgba(28, 16, 7, 0.42);
-  -webkit-backdrop-filter: blur(7px);
-  backdrop-filter: blur(7px);
-  color: rgba(244, 241, 234, 0.82);
-  cursor: pointer;
-  box-shadow: 0 4px 18px rgba(10, 4, 1, 0.35);
-  transition:
-    background 0.25s ease,
-    border-color 0.25s ease,
-    color 0.25s ease,
-    transform 0.18s ease,
-    opacity 0.3s ease,
-    box-shadow 0.3s ease;
-}
-.camnav-btn svg {
-  width: 19px;
-  height: 19px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.8;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-.camnav-btn:hover {
-  background: rgba(48, 28, 12, 0.62);
-  border-color: rgba(255, 196, 92, 0.55);
-  color: #fff;
-  transform: translateY(-1px);
-}
-.camnav-btn:active {
-  transform: translateY(0) scale(0.95);
-}
-.camnav-btn:disabled {
-  cursor: default;
-}
-/* recenter sits quiet until the camera has actually been moved, then lights up */
-.camnav-reset {
-  margin-top: 3px;
-  opacity: 0.38;
-}
-.camnav-reset.is-active {
-  opacity: 1;
-  border-color: rgba(255, 180, 90, 0.5);
-  color: var(--c-education);
-  box-shadow:
-    0 0 0 1px rgba(255, 180, 90, 0.18),
-    0 0 18px rgba(255, 160, 70, 0.28);
-}
-.camnav-reset.is-active:hover {
-  background: rgba(70, 40, 14, 0.72);
-  color: #fff;
-}
-.camhint {
-  position: absolute;
-  z-index: 30;
-  right: 30px;
-  bottom: 252px;
-  max-width: 208px;
-  text-align: right;
-  font-size: 10px;
-  font-weight: 500;
-  letter-spacing: 1.4px;
-  line-height: 1.55;
-  text-transform: uppercase;
-  color: rgba(244, 241, 234, 0.46);
-  pointer-events: none;
-  text-shadow: 0 1px 12px rgba(20, 8, 2, 0.6);
-  transition: opacity 0.5s ease;
-}
-.camhint.is-hidden {
-  opacity: 0;
-}
-
 /* ---------------- footer ---------------- */
 footer {
   position: fixed;
@@ -588,20 +498,6 @@ footer span:hover {
   }
   .station {
     width: min(540px, 92vw);
-  }
-  /* lift the view controls clear of the bottom card + wrapped footer; the drag
-     hint is desktop-only guidance, so drop it on touch layouts */
-  .camnav {
-    right: 16px;
-    bottom: 150px;
-    gap: 8px;
-  }
-  .camnav-btn {
-    width: 38px;
-    height: 38px;
-  }
-  .camhint {
-    display: none;
   }
   footer {
     padding: 18px 20px;

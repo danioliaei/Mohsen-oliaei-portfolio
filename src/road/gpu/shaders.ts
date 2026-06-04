@@ -155,21 +155,6 @@ struct VsOut {
   let Hh = normalize(L + V);
   let spec = pow(clamp(dot(nrm, Hh), 0.0, 1.0), 9.0);
 
-  // ---- pulses of light travelling THROUGH the land, near→far (screen bottom→top)
-  // Instead of a static lit/textured surface, the terrain is read as moving energy:
-  // several soft bands sweep up the depth axis on a smooth eased loop, and where a
-  // band passes the contours flare and the ground itself breathes light. A small
-  // elevation term tips each band so it climbs the relief as well as the distance.
-  let flowAxis = t * 0.86 + (i.relief - F.cont.x) / F.cont.y * 0.003;
-  var pulse = 0.0;
-  for (var n = 0; n < 3; n = n + 1) {
-    let tr = fract(F.cam.z * 0.075 + f32(n) / 3.0);
-    let h = tr * tr * (3.0 - 2.0 * tr);              // ease-in-out travel 0..1
-    let pd = flowAxis - h;
-    pulse += exp(-pd * pd * 72.0) * (0.6 + 0.9 * h); // tight crest, brightening toward the horizon
-  }
-  pulse = pulse * (0.5 + 0.5 * (1.0 - smoothstep(0.45, 1.0, t))); // calmer in the far haze
-
   // aerial perspective: linework thins and fades into the distance so the far land
   // melts into soft tonal hills. Depth is carried by FORM (light/shade) + haze, not
   // by line density — which lets the contours stay subtle while the scene reads deep.
@@ -185,22 +170,14 @@ struct VsOut {
   // opaque ground; only the far reaches fade out as honest aerial perspective
   let baseA = (0.90 + 0.10 * diff) * fade * i.edge;
 
-  // a slow living shimmer; the iso-lines burn from warm amber toward white at a
-  // pulse's crest, so the light visibly travels along them as the band sweeps past
+  // a slow living shimmer, but the lines are now soft warm strokes — not white wires
   let shimmer = 0.90 + 0.10 * sin(F.cam.z * 0.7 + i.relief * 0.004 + i.world * 0.0003);
   let warm = vec3<f32>(0.95, (232.0 - t * 24.0) / 255.0, (206.0 - t * 40.0) / 255.0);  // softly warm, not stark white
-  let hot  = vec3<f32>(1.0, 0.95, 0.86);             // near-white pulse crest
-  let lineHue = mix(warm, hot, clamp(pulse * 0.8, 0.0, 1.0));
-  let emis = (0.38 + 0.30 * core) * shimmer * (1.0 + pulse * 4.2); // dim at rest, flaring under a pulse
-  let lineCol = lineHue * (lit + 0.3 * spec) * emis;
+  let emis = (0.52 + 0.40 * core) * shimmer;         // dimmer: subtle, no glare
+  let lineCol = warm * (lit + 0.3 * spec) * emis;
   let lineA = line * (0.40 + 0.32 * fade) * (0.72 + 0.4 * lit) * i.edge;
 
-  // the ground itself glows softly where a band of light is passing through it —
-  // a warm emissive fill that fades with the relief shading, not a flat wash
-  let glowCol = vec3<f32>(1.0, 0.66, 0.36);
-  let groundGlow = glowCol * pulse * 0.34 * (0.45 + 0.55 * diff) * i.edge;
-
-  let col = mix(baseCol, lineCol, line * 0.9) + groundGlow;
+  let col = mix(baseCol, lineCol, line * 0.9);
   let a = max(baseA, lineA);
   return vec4<f32>(col, a);
 }
