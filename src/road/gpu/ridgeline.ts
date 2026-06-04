@@ -130,6 +130,65 @@ function mul(a: Mat4, b: Mat4): Mat4 {
   return o;
 }
 
+/* ---- survey stations (B1): the seven index contours as career callouts ------
+   Mirror the shader's index-contour bands (STATIONS in ridgelineShaders.ts) and
+   the dominant height field, so the DOM survey labels in RidgelineStage can pin a
+   world anchor onto each bright band and track it as the camera orbits. Keep
+   STATION_BANDS and Z_STEP in sync with ridgelineShaders.ts. */
+export const Z_STEP = 66; // world units between contour lines (mirrors the shader)
+export const STATION_BANDS = [23, 38, 53, 68, 83, 98, 114] as const; // oldest → newest
+const PEAK_Z = 8200; // summit depth (mirrors TGT.z and the shader's PEAK_Z)
+const PEAK_H = 3300; // summit height (mirrors the shader's PEAK_H)
+
+/** Dominant ridge height on the central axis (x = 0) at depth z — the smooth cone
+ *  part of heightAt(); the painted index contour sits ~here. The small ridged /
+ *  fbm relief is folded in as a mean lift so the leader tip grazes the lit band. */
+export function ridgeCrestHeight(z: number): number {
+  const dz = z - PEAK_Z;
+  const rad = Math.sqrt(dz * dz * 0.58) / 3300;
+  const sharp = Math.max(0, 1 - rad * 1.3);
+  const coneB = Math.exp(-rad * rad * 0.95);
+  return PEAK_H * (0.34 * coneB + sharp) + 300;
+}
+
+/** The exact eye + view-projection the scene renders for a given orbit, re-exposed
+ *  so the stage can project survey anchors to screen in lock-step with the GPU
+ *  (breathing included, so the labels never drift off the mountain). */
+export function ridgeCamera(
+  yaw: number,
+  pitch: number,
+  aspect: number,
+  time = 0,
+): { vp: Float32Array; eye: [number, number, number] } {
+  const azim = ORBIT.azim + yaw + Math.sin(time * 0.05) * 0.0045;
+  const p = Math.min(Math.max(pitch, PITCH_LO), PITCH_HI);
+  const elev = ORBIT.elev + p + Math.sin(time * 0.037) * 0.0035;
+  const ce = Math.cos(elev);
+  const se = Math.sin(elev);
+  const ex = TGT[0] + ORBIT.radius * ce * Math.sin(azim);
+  const ey = TGT[1] + ORBIT.radius * se;
+  const ez = TGT[2] + ORBIT.radius * ce * Math.cos(azim);
+  const view = lookAt(ex, ey, ez, TGT[0], TGT[1], TGT[2], 0, 1, 0);
+  return { vp: mul(persp(FOVY, aspect, NEAR, FAR), view), eye: [ex, ey, ez] };
+}
+
+/** Project a world point through `vp` to CSS-pixel screen coords. `visible` is
+ *  false only when the point is behind the camera (no terrain-occlusion test). */
+export function projectToScreen(
+  vp: Float32Array,
+  x: number,
+  y: number,
+  z: number,
+  W: number,
+  H: number,
+): { x: number; y: number; visible: boolean } {
+  const cx = vp[0] * x + vp[4] * y + vp[8] * z + vp[12];
+  const cy = vp[1] * x + vp[5] * y + vp[9] * z + vp[13];
+  const cw = vp[3] * x + vp[7] * y + vp[11] * z + vp[15];
+  if (cw <= 1e-6) return { x: 0, y: 0, visible: false };
+  return { x: ((cx / cw) * 0.5 + 0.5) * W, y: (1 - ((cy / cw) * 0.5 + 0.5)) * H, visible: true };
+}
+
 export class RidgelineScene {
   private g: GPUCtx;
   private canvas: HTMLCanvasElement;
@@ -409,20 +468,12 @@ export class RidgelineScene {
 
   private writeUniforms(s: RidgeFrame): void {
     const aspect = this.rw / this.rh;
-    // orbit about the summit: rest framing + the viewer's drag (yaw/pitch), plus
-    // a whisper of breathing so an untouched mountain still feels alive — view-
-    // relative and sub-degree, so it never fights the drag.
-    const azim = ORBIT.azim + s.yaw + Math.sin(s.time * 0.05) * 0.0045;
-    const pitch = Math.min(Math.max(s.pitch, PITCH_LO), PITCH_HI);
-    const elev = ORBIT.elev + pitch + Math.sin(s.time * 0.037) * 0.0035;
-    const ce = Math.cos(elev);
-    const se = Math.sin(elev);
-    const ex = TGT[0] + ORBIT.radius * ce * Math.sin(azim);
-    const ey = TGT[1] + ORBIT.radius * se;
-    const ez = TGT[2] + ORBIT.radius * ce * Math.cos(azim);
-    const proj = persp(FOVY, aspect, NEAR, FAR);
-    const view = lookAt(ex, ey, ez, TGT[0], TGT[1], TGT[2], 0, 1, 0);
-    const vp = mul(proj, view);
+    // orbit about the summit, derived through ridgeCamera() so the survey overlay
+    // in RidgelineStage projects its anchors from the exact same eye — the labels
+    // stay welded to the mountain as it spins. (Breathing lives inside the helper:
+    // a whisper of sub-degree drift so an untouched mountain still feels alive.)
+    const { vp, eye } = ridgeCamera(s.yaw, s.pitch, aspect, s.time);
+    const [ex, ey, ez] = eye;
 
     const u = this.uArr;
     u.set(vp, 0);

@@ -547,3 +547,51 @@ canvas#ridge:active {
   text-align: center;
   padding: 0 24px;
 }
+
+/* ---- B1: surveyor callouts on orbit (DOM overlay over the WebGPU canvas) ----
+   Real text, so the wordless hero stays screen-readable; pointer-events:none so a
+   drag still orbits the canvas underneath. Positions + opacity are written
+   imperatively each frame from the projected world anchors (RidgelineStage). */
+.ridge-survey {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 2;
+  overflow: hidden;
+}
+.ridge-survey-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+.survey-leader {
+  fill: none;
+  stroke: rgba(244, 241, 234, 0.5);
+  stroke-width: 1;
+  opacity: 0;
+}
+.survey-list {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.survey-callout {
+  position: absolute;
+  top: 0;
+  left: 0;
+  opacity: 0;
+  white-space: nowrap;
+  font-family: var(--sans);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: rgba(244, 241, 234, 0.88);
+  text-shadow: 0 0 12px rgba(0, 0, 0, 0.7);
+  will-change: transform, opacity;
+}
