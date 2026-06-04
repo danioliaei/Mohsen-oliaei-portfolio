@@ -515,3 +515,29 @@ footer span:hover {
     opacity: 0.7;
   }
 }
+
+/* ---------------- EXPERIMENT: monochrome ridgeline study ----------------
+   A pure-black full-screen stage for the ridgeline mountain (branch
+   experiment/ridgeline-mono). No warm scrims, no scroll wrap — the WebGPU
+   canvas owns the whole frame and the header floats over it. */
+.ridge-stage {
+  position: fixed;
+  inset: 0;
+  background: #000;
+  overflow: hidden;
+  z-index: 0;
+}
+canvas#ridge {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.ridge-notice {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 0 24px;
+}
