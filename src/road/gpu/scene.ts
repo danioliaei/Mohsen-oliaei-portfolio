@@ -28,7 +28,7 @@ import {
 import { LAT, surfaceY } from "../engine";
 import { MILESTONES } from "../../data/milestones";
 
-const EMBER_COUNT = 240;
+const EMBER_COUNT = 0;
 
 /** Per-kind glint colour (linear-ish RGB), echoing the card accents. */
 const KIND_COL: Record<string, [number, number, number]> = {
@@ -532,7 +532,7 @@ export class WebGPUScene {
     u[20] = this.rw; u[21] = this.rh; u[22] = this.sc; u[23] = s.dpr;
     u[24] = s.lensX; u[25] = s.camZ + NEAR_AHEAD; u[26] = s.camZ + VIEW_DEPTH; u[27] = HALF_W;
     u[28] = L_MIN; u[29] = L_STEP; u[30] = 0.6; u[31] = 0.13; // focusY, focusH
-    u[32] = 0.34; u[33] = 0.46; u[34] = 0.045; u[35] = 1.03; // feather, vignette, grain, exposure
+    u[32] = 0.34; u[33] = 0.28; u[34] = 0.030; u[35] = 1.03; // feather, vignette, grain, exposure
     u[36] = s.vpU; u[37] = s.vpV; u[38] = 0.15 + s.speed * 0.16; u[39] = 0.02; // halo glow, r
     u[40] = 0.72; u[41] = 0.0016; u[42] = 1.0; u[43] = s.eyeY; // bloomAmt, caAmt, dofMax, eyeY
     this.g.device.queue.writeBuffer(this.uBuf, 0, u.buffer, 0, 256);

@@ -187,19 +187,19 @@ struct VsOut {
 }
 @fragment fn fs(i : VsOut) -> @location(0) vec4<f32> {
   let edge = 1.0 - abs(i.side);              // 1 centre .. 0 rim
-  let core = smoothstep(0.35, 1.0, edge);    // hot filament down the middle
-  let body = pow(max(edge, 0.0), 0.7);
+  let core = smoothstep(0.20, 1.0, edge);    // sharper, brighter hot filament
+  let body = pow(max(edge, 0.0), 0.55);      // wider soft body
   // a bright blob of light travelling along the fibre toward the horizon
   let ph = i.arc * 0.00085 - F.cam.z * 1.7;
-  let pulse = exp(-pow(fract(ph) - 0.5, 2.0) * 24.0);
+  let pulse = exp(-pow(fract(ph) - 0.5, 2.0) * 18.0);  // softer pulse spread
   let flow = 0.5 + 0.5 * sin(i.arc * 0.02 - F.cam.z * 5.0);
   let t = clamp((i.wz - F.cam.y) / VIEW_DEPTH, 0.0, 1.0);
-  let fade = 1.0 - smoothstep(0.72, 1.0, t); // dissolve into the vanishing point
-  let warm = vec3<f32>(1.0, 0.60, 0.22);
-  let hot  = vec3<f32>(1.0, 0.92, 0.72);
-  var col = mix(warm, hot, core) * (0.7 + 2.0 * core);
-  col += hot * pulse * 1.7;
-  col *= (0.74 + 0.26 * flow);
+  let fade = 1.0 - smoothstep(0.72, 1.0, t);
+  let warm = vec3<f32>(1.0, 0.52, 0.16);     // deeper amber base
+  let hot  = vec3<f32>(1.0, 0.97, 0.85);     // near-white hot core
+  var col = mix(warm, hot, core) * (0.9 + 2.6 * core);
+  col += hot * pulse * 2.2;
+  col *= (0.78 + 0.22 * flow);
   let a = body * fade;
   return vec4<f32>(col * a, a);               // additive emission
 }
@@ -464,12 +464,14 @@ fn focusBlend(uv : vec2<f32>) -> f32 {
 
   // colour grade — saturation lift + gentle contrast (the old CSS filter, on GPU)
   let luma = dot(col, vec3<f32>(0.2126, 0.7152, 0.0722));
-  col = mix(vec3<f32>(luma), col, 1.16);
-  col = (col - 0.5) * 1.10 + 0.5;
+  col = mix(vec3<f32>(luma), col, 1.06);
+  col = (col - 0.5) * 0.90 + 0.5;
   col = max(col, vec3<f32>(0.0));
 
-  // vignette
-  col *= 1.0 - F.post.y * smoothstep(0.25, 1.25, r2 * 2.2);
+  // vignette — elliptical so top/bottom stay open, only corners darken
+  let vigC = toC * vec2<f32>(1.0, 0.45);
+  let vigR = dot(vigC, vigC);
+  col *= 1.0 - F.post.y * smoothstep(0.25, 1.25, vigR * 2.2);
 
   // animated film grain (kept very subtle)
   let g = hash12(uv * F.res.xy + fract(F.cam.z) * 311.0) - 0.5;
