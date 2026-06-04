@@ -155,6 +155,21 @@ struct VsOut {
   let Hh = normalize(L + V);
   let spec = pow(clamp(dot(nrm, Hh), 0.0, 1.0), 9.0);
 
+  // ---- pulses of light travelling THROUGH the land, near→far (screen bottom→top)
+  // Instead of a static lit/textured surface, the terrain is read as moving energy:
+  // several soft bands sweep up the depth axis on a smooth eased loop, and where a
+  // band passes the contours flare and the ground itself breathes light. A small
+  // elevation term tips each band so it climbs the relief as well as the distance.
+  let flowAxis = t * 0.86 + (i.relief - F.cont.x) / F.cont.y * 0.003;
+  var pulse = 0.0;
+  for (var n = 0; n < 3; n = n + 1) {
+    let tr = fract(F.cam.z * 0.075 + f32(n) / 3.0);
+    let h = tr * tr * (3.0 - 2.0 * tr);              // ease-in-out travel 0..1
+    let pd = flowAxis - h;
+    pulse += exp(-pd * pd * 72.0) * (0.6 + 0.9 * h); // tight crest, brightening toward the horizon
+  }
+  pulse = pulse * (0.5 + 0.5 * (1.0 - smoothstep(0.45, 1.0, t))); // calmer in the far haze
+
   // aerial perspective: linework thins and fades into the distance so the far land
   // melts into soft tonal hills. Depth is carried by FORM (light/shade) + haze, not
   // by line density — which lets the contours stay subtle while the scene reads deep.
@@ -170,14 +185,22 @@ struct VsOut {
   // opaque ground; only the far reaches fade out as honest aerial perspective
   let baseA = (0.90 + 0.10 * diff) * fade * i.edge;
 
-  // a slow living shimmer, but the lines are now soft warm strokes — not white wires
+  // a slow living shimmer; the iso-lines burn from warm amber toward white at a
+  // pulse's crest, so the light visibly travels along them as the band sweeps past
   let shimmer = 0.90 + 0.10 * sin(F.cam.z * 0.7 + i.relief * 0.004 + i.world * 0.0003);
   let warm = vec3<f32>(0.95, (232.0 - t * 24.0) / 255.0, (206.0 - t * 40.0) / 255.0);  // softly warm, not stark white
-  let emis = (0.52 + 0.40 * core) * shimmer;         // dimmer: subtle, no glare
-  let lineCol = warm * (lit + 0.3 * spec) * emis;
+  let hot  = vec3<f32>(1.0, 0.95, 0.86);             // near-white pulse crest
+  let lineHue = mix(warm, hot, clamp(pulse * 0.8, 0.0, 1.0));
+  let emis = (0.38 + 0.30 * core) * shimmer * (1.0 + pulse * 4.2); // dim at rest, flaring under a pulse
+  let lineCol = lineHue * (lit + 0.3 * spec) * emis;
   let lineA = line * (0.40 + 0.32 * fade) * (0.72 + 0.4 * lit) * i.edge;
 
-  let col = mix(baseCol, lineCol, line * 0.9);
+  // the ground itself glows softly where a band of light is passing through it —
+  // a warm emissive fill that fades with the relief shading, not a flat wash
+  let glowCol = vec3<f32>(1.0, 0.66, 0.36);
+  let groundGlow = glowCol * pulse * 0.34 * (0.45 + 0.55 * diff) * i.edge;
+
+  let col = mix(baseCol, lineCol, line * 0.9) + groundGlow;
   let a = max(baseA, lineA);
   return vec4<f32>(col, a);
 }
@@ -195,6 +218,7 @@ struct VsOut {
   @location(0) side : f32,
   @location(1) arc : f32,
   @location(2) wz : f32,
+  @location(3) wx : f32,
 };
 @vertex fn vs(@location(0) p : vec3<f32>, @location(1) sa : vec2<f32>) -> VsOut {
   var clip = F.vp * vec4<f32>(p, 1.0);
@@ -204,6 +228,7 @@ struct VsOut {
   o.side = sa.x;
   o.arc = sa.y;
   o.wz = p.z;
+  o.wx = p.x;
   return o;
 }
 @fragment fn fs(i : VsOut) -> @location(0) vec4<f32> {
@@ -213,6 +238,15 @@ struct VsOut {
   let seam = smoothstep(0.88, 1.0, edge);       // crisp bright centre seam
   let t = clamp((i.wz - F.cam.y) / VIEW_DEPTH, 0.0, 1.0);
   let fade = 1.0 - smoothstep(0.82, 1.0, t);    // ribbon dissolves near the horizon
+
+  // ---- footprint mask: dissolve the fibre exactly where the terrain plan is NOT
+  // rendered, so the road never floats as a bright streak over the bare sky (e.g.
+  // the top-right past the contours). Mirrors the terrain's lateral + far edge fade.
+  let lat = (i.wx - F.cam.x) / F.geo.w;         // -1..1 across the plan width
+  let uvx = 0.5 + 0.5 * lat;
+  let latMask = smoothstep(0.0, 0.06, min(uvx, 1.0 - uvx));
+  let farMask = 1.0 - smoothstep(0.70, 0.99, t); // gone by the terrain's far edge
+  let footprint = clamp(latMask * farMask, 0.0, 1.0);
 
   // ---- luminous data packets gliding up the fibre and INTO the horizon glare --
   // Each packet's centre sweeps depth 0→1 on a smooth eased loop, tightening and
@@ -244,9 +278,60 @@ struct VsOut {
   // packet burns along the seam/core, warming to white-hot at its peak
   let packetCol = mix(gold, white, clamp(burn * 0.5, 0.0, 1.0));
   let packetGlow = packetCol * burn * (0.30 + 0.70 * core) * body;
-  let rgb = bodyGlow + packetGlow;
-  let a = body * max(fade, burn * 0.5);
+  let rgb = (bodyGlow + packetGlow) * footprint;
+  let a = body * max(fade, burn * 0.5) * footprint;
   return vec4<f32>(rgb, a);                      // additive emission
+}
+`;
+
+/* --------------------------------------------------------- SOLID MESH ----- */
+/* Lit, flat-shaded solid geometry (the Stegra plant + the navigation arrow).
+   Interleaved pos/normal/colour/emissive verts, lit with the SAME warm key +
+   cool sky fill as the dusk terrain so the buildings sit in the world, with an
+   aerial-perspective fade into the distance and emissive windows/lights that
+   feed the bloom. Depth-tested so nearer hills occlude it. */
+export const SOLID_WGSL = FRAME_WGSL + /* wgsl */ `
+const VIEW_DEPTH : f32 = 13000.0;
+struct VsOut {
+  @builtin(position) pos : vec4<f32>,
+  @location(0) nrm : vec3<f32>,
+  @location(1) col : vec3<f32>,
+  @location(2) emis : f32,
+  @location(3) depthT : f32,
+};
+@vertex fn vs(
+  @location(0) p : vec3<f32>,
+  @location(1) n : vec3<f32>,
+  @location(2) c : vec3<f32>,
+  @location(3) e : f32,
+) -> VsOut {
+  var clip = F.vp * vec4<f32>(p, 1.0);
+  clip.x += (F.geo.x - 0.5) * 2.0 * clip.w;
+  var o : VsOut;
+  o.pos = clip;
+  o.nrm = n;
+  o.col = c;
+  o.emis = e;
+  o.depthT = clamp((p.z - F.cam.y) / VIEW_DEPTH, 0.0, 1.0);
+  return o;
+}
+@fragment fn fs(i : VsOut) -> @location(0) vec4<f32> {
+  let n = normalize(i.nrm);
+  let L = normalize(vec3<f32>(-0.45, 0.80, -0.34));   // key light (matches terrain)
+  let diff = clamp(dot(n, L), 0.0, 1.0);
+  let key = vec3<f32>(1.0, 0.84, 0.62);
+  let sky = vec3<f32>(0.24, 0.33, 0.46);              // cool skylight fill from above
+  var lit = i.col * (key * (0.26 + 0.86 * diff) + sky * (0.18 + 0.20 * (0.5 + 0.5 * n.y)));
+  // soft fresnel rim against a fixed view so silhouettes catch the horizon glow
+  let Vv = normalize(vec3<f32>(0.0, 0.52, -0.86));
+  let rim = pow(1.0 - clamp(dot(n, Vv), 0.0, 1.0), 3.0);
+  lit += i.col * rim * 0.34;
+  lit += i.col * i.emis;                              // emissive windows / lights
+  // aerial perspective: dissolve into the dusk with distance, like the contours
+  let haze = smoothstep(0.66, 1.0, i.depthT);
+  let dusk = vec3<f32>(0.14, 0.10, 0.066);
+  let col = mix(lit, dusk, haze * 0.92);
+  return vec4<f32>(col, 1.0);
 }
 `;
 
@@ -472,12 +557,19 @@ fn hash12(p : vec2<f32>) -> f32 {
 }
 
 fn focusBlend(uv : vec2<f32>) -> f32 {
-  // tilt-shift: 0 sharp in the focal band, 1 fully blurred above & below
+  // tilt-shift: 0 sharp in the focal band, 1 fully blurred above & below. The ramp
+  // is run through smoothstep TWICE (≈ smootherstep) so the onset out of the sharp
+  // band has no hard shoulder — the defocus creeps in gradually, the way a real
+  // large-aperture lens rolls off, then deepens to a full creamy blur at the
+  // extreme top & bottom. Near/far use slightly different reaches: the lower
+  // foreground falls out of focus a touch sooner than the high distance.
   let cy = F.cont.z;
   let core = F.cont.w;
   let fth = max(0.001, F.post.x);
-  let dy = abs(uv.y - cy);
-  return smoothstep(core, core + fth, dy);
+  let dy = uv.y - cy;
+  let reach = select(fth, fth * 0.86, dy < 0.0);   // nearer foreground blurs sooner
+  let e = smoothstep(core, core + reach, abs(dy));
+  return e * e * (3.0 - 2.0 * e);                  // smootherstep shoulders
 }
 
 @fragment fn fs(i : VsOut) -> @location(0) vec4<f32> {
