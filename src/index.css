@@ -59,6 +59,11 @@ header {
   align-items: center;
   justify-content: space-between;
   padding: 28px 34px;
+  /* keep the wordmark + nav legible where the bright horizon glow rises behind
+     them on wide/short viewports — a soft warm-dark halo, no visible box */
+  text-shadow:
+    0 1px 22px rgba(24, 10, 2, 0.55),
+    0 1px 3px rgba(24, 10, 2, 0.45);
 }
 .wordmark {
   font-family: var(--sans);
