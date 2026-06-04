@@ -3,10 +3,9 @@ import {
   RidgelineScene,
   PITCH_LO,
   PITCH_HI,
-  Z_STEP,
   ridgeCamera,
   projectToScreen,
-  ridgeCrestHeight,
+  ringAnchor,
 } from "../road/gpu/ridgeline";
 
 /* =========================================================================
@@ -20,21 +19,22 @@ import {
    on browsers without WebGPU.
    ========================================================================= */
 
-/* ---- B1 survey callouts: one per index contour ----------------------------
+/* ---- B1 survey callouts: one per index-contour RING -----------------------
    Listed in REVEAL order — the order you meet them as you orbit away from the
-   silent rest pose — newest (summit) first, so a single orbit walks the career
-   DOWN the mountain, present → past. Each `band` is the contour index it pins to
-   and mirrors STATION_BANDS in ridgeline.ts (114 = nearest the summit … 23 = the
-   near dunes). The labels are the only words in the piece: tracked small-caps
-   surveyor annotations — ORG · CITY · YEAR — never more than one on screen. */
+   silent rest pose — newest (the tight summit ring) first, so a single orbit
+   walks the career DOWN the mountain, present → past. Each `radius` is the plan
+   radius of the ring it pins to and mirrors RING_RADII in ridgeline.ts (720 =
+   hugging the summit … 5600 = the wide ring sweeping the near dunes). The labels
+   are the only words in the piece: tracked small-caps surveyor annotations —
+   ORG · CITY · YEAR — never more than one on screen. */
 const STATIONS = [
-  { band: 114, label: "STEGRA · STOCKHOLM · 2025" },
-  { band: 98, label: "NEOBUILT · GOTHENBURG · 2025" },
-  { band: 83, label: "NORTHVOLT · SKELLEFTEÅ · 2023" },
-  { band: 68, label: "COLLECTIVE ARCHITECTURE · LOS ANGELES · 2023" },
-  { band: 53, label: "WHITE ARKITEKTER · GOTHENBURG · 2022" },
-  { band: 38, label: "CHALMERS · GOTHENBURG · 2020" },
-  { band: 23, label: "SHAHID BEHESHTI · TEHRAN · 2014" },
+  { radius: 720, label: "STEGRA · STOCKHOLM · 2025" },
+  { radius: 1300, label: "NEOBUILT · GOTHENBURG · 2025" },
+  { radius: 1980, label: "NORTHVOLT · SKELLEFTEÅ · 2023" },
+  { radius: 2750, label: "COLLECTIVE ARCHITECTURE · LOS ANGELES · 2023" },
+  { radius: 3600, label: "WHITE ARKITEKTER · GOTHENBURG · 2022" },
+  { radius: 4550, label: "CHALMERS · GOTHENBURG · 2020" },
+  { radius: 5600, label: "SHAHID BEHESHTI · TEHRAN · 2014" },
 ] as const;
 
 // where each station sits on the orbit (wrapped yaw, radians) and how wide its
@@ -276,9 +276,9 @@ export default function RidgelineStage() {
           const theta = REVEAL_BASE + k * REVEAL_STEP;
           let op = 1 - smooth(REVEAL_HALF * 0.4, REVEAL_HALF, angDelta(aphi, theta));
 
-          // project the anchor on this contour's central crest
-          const z = STATIONS[k].band * Z_STEP;
-          const a = projectToScreen(vp, 0, ridgeCrestHeight(z), z, W, H);
+          // project the anchor where this ring crosses the mountain's near face
+          const anc = ringAnchor(STATIONS[k].radius);
+          const a = projectToScreen(vp, anc.x, anc.y, anc.z, W, H);
           if (!a.visible || a.x < -60 || a.x > W + 60 || a.y < -60 || a.y > H + 60) op = 0;
 
           if (op <= 0.004 || !measured) {
@@ -381,7 +381,7 @@ export default function RidgelineStage() {
       <div className="ridge-survey" ref={overlayRef} aria-label="Career stations">
         <svg className="ridge-survey-svg" aria-hidden="true">
           {STATIONS.map((s, k) => (
-            <polyline className="survey-leader" key={`leader-${k}`} points="" data-band={s.band} />
+            <polyline className="survey-leader" key={`leader-${k}`} points="" data-radius={s.radius} />
           ))}
         </svg>
         <ul className="survey-list">
