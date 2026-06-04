@@ -45,8 +45,8 @@ const KIND_COL: Record<string, [number, number, number]> = {
 const HALF_W = 13000;
 const NEAR_AHEAD = -1600;
 const VIEW_DEPTH = 13000;
-const NX = 360;
-const NZ = 300;
+const NX = 380;
+const NZ = 320;
 const L_MIN = 0;
 const L_STEP = 42;
 
