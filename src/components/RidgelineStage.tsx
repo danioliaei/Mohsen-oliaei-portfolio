@@ -7,7 +7,7 @@ import {
   projectToScreen,
   ringAnchor,
   pickBand,
-} from "../road/gpu/ridgeline";
+} from "../gpu/ridgeline";
 
 /* =========================================================================
    RidgelineStage — mounts the monochrome ridgeline experiment.
@@ -23,8 +23,9 @@ import {
 /* ---- B1 survey callouts: one per index-contour RING -----------------------
    Listed newest (the tight summit ring) first → oldest (the wide ring sweeping the
    near dunes), so the column reads present → past down the mountain. Each `radius`
-   is the plan radius of the ring it pins to and mirrors RING_RADII in ridgeline.ts
-   (720 = hugging the summit … 5600 = the wide ring sweeping the near dunes). The
+   is the plan radius of the ring it pins to — the source of truth for the seven
+   radii, kept in sync with the RINGS arrays in ridgeline.ts (pickBand) and
+   ridgelineShaders.ts (720 = hugging the summit … 5600 = the wide near dunes). The
    labels are the only words in the piece: tracked small-caps surveyor annotations —
    ORG · CITY · YEAR — all of them held on the camera-facing flank at once, the one
    under the pointer lit while the rest recede. */
