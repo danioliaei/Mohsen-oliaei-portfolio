@@ -238,6 +238,32 @@ canvas#ridge:active {
   text-shadow: 0 0 12px rgba(0, 0, 0, 0.7);
   will-change: transform, opacity;
 }
+/* full ORG · CITY · YEAR on desktop; the compact ORG 'YY appears only on the
+   narrow mobile flank (toggled in the media query below). Exactly one is ever
+   laid out, so the leader-width measurement reads the visible one. */
+.survey-short {
+  display: none;
+}
+@media (max-width: 760px) {
+  .survey-full {
+    display: none;
+  }
+  .survey-short {
+    display: inline;
+  }
+  /* compact + a tighter, darker halo so the short label stays crisp over the
+     dense contour weave on the zoomed-out mobile flank */
+  .survey-callout {
+    font-size: 9.5px;
+    letter-spacing: 0.14em;
+    text-shadow:
+      0 0 8px rgba(0, 0, 0, 0.92),
+      0 1px 3px rgba(0, 0, 0, 0.95);
+  }
+  .survey-leader {
+    stroke: rgba(244, 241, 234, 0.42);
+  }
+}
 
 /* ---- "drag to rotate" affordance (ridgeline) --------------------------------
    A minimal pill that teaches the orbit gesture: a curved double-arrow that rocks
