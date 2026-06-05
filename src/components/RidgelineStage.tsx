@@ -30,14 +30,17 @@ import {
    labels are the only words in the piece: tracked small-caps surveyor annotations —
    ORG · CITY · YEAR — all of them held on the camera-facing flank at once, the one
    under the pointer lit while the rest recede. */
-// Each station carries both the floating callout `label` (the eyebrow, kept in the
-// surveyor voice) and the copy that fills the focused panel when its slice is
-// clicked: a short `role` title, a one-breath `body`, a tracked `meta` line, and a
-// `cta` label for the liquid button (its action comes later). `radius` stays the
-// source of truth for the seven ring radii (see the header note above).
+// Each station carries the floating callout `label` (the full ORG · CITY · YEAR
+// surveyor line, used on desktop and as the panel eyebrow), a `short` ORG 'YY form
+// shown on the narrow mobile flank so the seven labels stay tidy and unclipped, and
+// the copy that fills the focused panel when its slice is clicked: a `role` title, a
+// one-breath `body`, a tracked `meta` line, and the `cta` label for the liquid button
+// (its action comes later). `radius` stays the source of truth for the seven ring
+// radii (see the header note above).
 type Station = {
   radius: number;
   label: string;
+  short: string;
   role: string;
   body: string;
   meta: string;
@@ -47,6 +50,7 @@ const STATIONS: Station[] = [
   {
     radius: 720,
     label: "STEGRA · STOCKHOLM · 2025",
+    short: "STEGRA '25",
     role: "BIM Specialist",
     body: "Shaping BIM strategy and building the Power BI dashboards that keep the project legible. Trains stakeholders and supports the coordination team.",
     meta: "Now · BIM strategy, Power BI",
@@ -55,6 +59,7 @@ const STATIONS: Station[] = [
   {
     radius: 1300,
     label: "NEOBUILT · GOTHENBURG · 2025",
+    short: "NEOBUILT '25",
     role: "BIM Developer · Founder",
     body: "Founded a practice building bespoke tooling on the Revit and Navisworks APIs, turning repetitive modelling work into automation.",
     meta: "Now · C#/.NET, Python, Revit API",
@@ -63,6 +68,7 @@ const STATIONS: Station[] = [
   {
     radius: 1980,
     label: "NORTHVOLT · SKELLEFTEÅ · 2023",
+    short: "NORTHVOLT '23",
     role: "BIM Coordinator",
     body: "Ran ISO 19650 information management and clash coordination across disciplines, with heavy emphasis on mentoring and training the wider team.",
     meta: "2023–2024 · ISO 19650, Navisworks",
@@ -71,6 +77,7 @@ const STATIONS: Station[] = [
   {
     radius: 2750,
     label: "COLLECTIVE ARCHITECTURE · LOS ANGELES · 2023",
+    short: "COLLECTIVE '23",
     role: "BIM Modeler",
     body: "Drove energy and daylight studies in Rhino and Grasshopper, feeding the analysis back into the architectural model.",
     meta: "2023 · Rhino, Grasshopper",
@@ -79,6 +86,7 @@ const STATIONS: Station[] = [
   {
     radius: 3600,
     label: "WHITE ARKITEKTER · GOTHENBURG · 2022",
+    short: "WHITE ARK. '22",
     role: "BIM Modeler",
     body: "Modelled Revit healthcare projects and prepared the IFC deliveries the wider design team relied on.",
     meta: "2022 · Revit, IFC",
@@ -87,6 +95,7 @@ const STATIONS: Station[] = [
   {
     radius: 4550,
     label: "CHALMERS · GOTHENBURG · 2020",
+    short: "CHALMERS '20",
     role: "M.Sc. Architectural Engineering",
     body: "A master's grounded in computational design, exploring geometry and performance through Rhino and Grasshopper.",
     meta: "2020–2023 · Computational design, Rhino",
@@ -95,6 +104,7 @@ const STATIONS: Station[] = [
   {
     radius: 5600,
     label: "SHAHID BEHESHTI · TEHRAN · 2014",
+    short: "SHAHID B. '14",
     role: "B.Sc. Architectural Engineering",
     body: "Where it began — undergraduate studies alongside the first BIM modelling at Boomshahr Paydar, the start of the whole climb.",
     meta: "2014–2019 · ArchiCAD, first BIM",
@@ -513,6 +523,13 @@ export default function RidgelineStage() {
       // snaps; the lit slice rises and its neighbours recede over a beat.
       const dispOp = new Array<number>(STATIONS.length).fill(0);
 
+      // re-measure label widths on a viewport change — crossing the mobile breakpoint
+      // swaps the full ORG·CITY·YEAR label for the compact ORG 'YY, so their pixel
+      // widths (used to lay out the leaders) differ and must be re-read.
+      const remeasure = () => { measured = false; };
+      window.addEventListener("resize", remeasure);
+      teardown.push(() => window.removeEventListener("resize", remeasure));
+
       const updateSurvey = (
         yaw: number,
         pitch: number,
@@ -537,6 +554,10 @@ export default function RidgelineStage() {
         const W = cvs.clientWidth;
         const H = cvs.clientHeight;
         if (!W || !H) return;
+        // the mobile flank uses the compact labels + a shorter header, so they can
+        // sit higher and splay a touch further up to clear the dense contour lines
+        const mobile = W < 760;
+        const headerSafe = mobile ? 58 : HEADER_SAFE;
 
         // measure the (static) label widths once the font has laid out
         if (!measured) {
@@ -580,16 +601,16 @@ export default function RidgelineStage() {
           // → right) so vertically-stacked neighbours never collide; fall back to
           // whichever side fits when the column drifts near an edge.
           const shelf = labelW[k] + 14;
-          const pad = 16;
-          const outX = Math.min(W * 0.12, 150);
-          const outY = Math.min(H * 0.1, 78);
+          const pad = mobile ? 12 : 16;
+          const outX = mobile ? W * 0.16 : Math.min(W * 0.12, 150);
+          const outY = mobile ? 92 : Math.min(H * 0.1, 78);
           const fitLeft = a.x - outX >= pad + shelf;
           const fitRight = a.x + outX <= W - pad - shelf;
           const preferLeft = (k % 2) === 0;
           const toLeft = preferLeft ? fitLeft || !fitRight : !(fitRight || !fitLeft);
           let ex = a.x + (toLeft ? -outX : outX); // elbow
           ex = toLeft ? Math.max(ex, pad + shelf) : Math.min(ex, W - pad - shelf);
-          const ey = Math.max(a.y - outY, HEADER_SAFE); // sit below the site header
+          const ey = Math.max(a.y - outY, headerSafe); // sit below the site header
           const sx = ex + (toLeft ? -shelf : shelf); // far end of the underline shelf
           const lx = toLeft ? ex - labelW[k] : ex; // text hugs the elbow (inner) end
           ptsA[k] = `${a.x.toFixed(1)},${a.y.toFixed(1)} ${ex.toFixed(1)},${ey.toFixed(1)} ${sx.toFixed(1)},${ey.toFixed(1)}`;
@@ -704,8 +725,15 @@ export default function RidgelineStage() {
         // selected state. focusBand is held sticky until the dim has fully faded so
         // it eases off the right band on dismiss rather than snapping to none.
         const focused = selectedRef.current != null;
+        // on a tall/narrow phone, hold the camera a touch further back so the whole
+        // massif and its survey labels breathe instead of cropping at the edges; wide
+        // (desktop) viewports keep the authored framing (zoomBase = 1). The focus
+        // dolly then leans in from whatever the resting base is.
+        const aspectNow = cvs.clientWidth / Math.max(cvs.clientHeight, 1);
+        const zoomBase = 1 + 0.22 * smooth(1.0, 0.5, aspectNow);
+        const rTgt = focused ? zoomBase * 0.85 : zoomBase;
         const fk = reduceMotion ? 1 : 1 - Math.exp(-dt / FOCUS_TAU);
-        radiusScale += ((focused ? 0.84 : 1) - radiusScale) * fk;
+        radiusScale += (rTgt - radiusScale) * fk;
         focusAmt += ((focused ? 1 : 0) - focusAmt) * fk;
         if (focused) focusBand = selectedRef.current as number;
         else if (focusAmt < 0.01) focusBand = -1;
@@ -761,8 +789,12 @@ export default function RidgelineStage() {
         </svg>
         <ul className="survey-list">
           {STATIONS.map((s, k) => (
+            // both forms render; CSS shows the full ORG·CITY·YEAR on desktop and the
+            // compact ORG 'YY on the narrow mobile flank. offsetWidth (measured for
+            // the leader layout) reflects whichever span is visible.
             <li className="survey-callout" key={`callout-${k}`}>
-              {s.label}
+              <span className="survey-full">{s.label}</span>
+              <span className="survey-short">{s.short}</span>
             </li>
           ))}
         </ul>
