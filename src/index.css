@@ -397,6 +397,12 @@ canvas#ridge:active {
   .ridge-hint-icon {
     animation: none;
   }
+  /* reduced motion snaps the focus camera (no pan), so the slice never sweeps the
+     seam — drop the frost delay and just show it. */
+  .role-frost {
+    animation: none;
+    opacity: 1;
+  }
 }
 
 /* ---- focused role overlay (ridgeline click-to-focus) ------------------------
@@ -456,6 +462,21 @@ canvas#ridge:active {
   backdrop-filter: blur(22px) saturate(1.05) brightness(0.84);
   -webkit-mask-image: linear-gradient(104deg, #000 0%, #000 44%, transparent 62%, transparent 100%);
   mask-image: linear-gradient(104deg, #000 0%, #000 44%, transparent 62%, transparent 100%);
+  /* hold the heavy frost back a beat. On open, the camera dollies in and pans the lit
+     slice from screen-centre (~50%, inside this frost's seam) out to the open right
+     (~71%, clear) — it crosses into the clear zone at ~0.14s. If this 22px blur faded
+     in with the overlay it would catch the slice mid-sweep, so its blur visibly DIPS
+     up then settles. Delaying the ramp until ~0.2s lets the slice reach the clear
+     right first; the frost then builds only behind the prose on the left, never over
+     the highlighted slice. (Navigation between stations keeps the overlay mounted, so
+     this runs once on open and never re-triggers.) */
+  opacity: 0;
+  animation: role-frost-in 0.34s cubic-bezier(0.22, 1, 0.36, 1) 0.2s forwards;
+}
+@keyframes role-frost-in {
+  to {
+    opacity: 1;
+  }
 }
 
 /* surveyor corner ticks — small L-marks at each corner of a frame */

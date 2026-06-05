@@ -167,9 +167,20 @@ export default function RidgelineStage() {
       // that was selected rather than snapping. lastFrameT caches the loop clock so a
       // click can pick against the exact frame the eye is on. ----------------------
       const FOCUS_TAU = 0.16; // s — snappier than the hover ease, still smooth
+      // ---- the framing line the SELECTED ring is lifted to while focused (NDC_y; +up).
+      // ~upper third — clear of the site header, and inside the dossier's clear flank
+      // (the open right on desktop, the open top band on mobile). The lift is CLAMPED so
+      // the mountain's foot never rises past the bottom: NEAR_EDGE is the front-centre of
+      // the terrain (x = 0 on the z = ZN near row; y ≈ heightAt(0, ZN) ≈ 340, see
+      // gpu/ridgeline.ts), pinned to FOCUS_FOOT (just below the bottom) so the widest
+      // dune ring still lifts into view without baring black sky beneath the massif.
+      const FOCUS_AIM_Y = 0.2; // NDC_y the selected ring rises toward
+      const NEAR_EDGE = { x: 0, y: 340, z: 500 }; // world front-centre foot of the massif
+      const FOCUS_FOOT = -1.04; // NDC_y the foot pins to (a hair below the frame bottom)
       let radiusScale = 1; // 1 at rest → ~0.84 focused
       let focusAmt = 0; // 0 at rest → 1 focused
       let focusBand = -1; // the band the dim is centred on (sticky during fade-out)
+      let focusShiftY = 0; // eased vertical lens shift that lifts the selected ring
       let lastFrameT = 0;
       const clampPitch = (p: number) => Math.min(Math.max(p, PITCH_LO), PITCH_HI);
       // add a pitch delta with a soft, direction-aware cushion: within PITCH_SOFT
@@ -417,6 +428,7 @@ export default function RidgelineStage() {
         dt: number,
         radiusScale: number,
         focusShift: number,
+        focusShiftY: number,
       ) => {
         const overlay = overlayRef.current;
         if (!overlay) return;
@@ -449,7 +461,7 @@ export default function RidgelineStage() {
           }
         }
 
-        const { vp } = ridgeCamera(yaw, pitch, W / H, t, radiusScale, focusShift);
+        const { vp } = ridgeCamera(yaw, pitch, W / H, t, radiusScale, focusShift, focusShiftY);
         // one FACING fade for the whole survey: all seven anchors live on the x = 0
         // near ridge, so they face the camera together. Fold the signed orbit to its
         // magnitude (spinning either way surveys the same flank) and fade the lot out
@@ -626,6 +638,32 @@ export default function RidgelineStage() {
         const wide = smooth(1.0, 1.4, aspectNow);
         const focusShift = focusAmt * 0.42 * wide;
 
+        // lift the SELECTED ring to a comfortable framing height. The dolly-in keeps
+        // aiming at the summit, so without this the low (early-career) rings near the
+        // dune plain dolly off the bottom of the frame and the clicked station can't be
+        // seen. Project BOTH the chosen ring anchor and the massif's near-edge foot
+        // through the LIVE focused camera (this frame's dolly + pan + breathing,
+        // shiftY = 0): lift the ring toward FOCUS_AIM_Y, but never by more than what
+        // keeps the foot at FOCUS_FOOT — so the widest dune rings (whose foot is right
+        // at the mesh edge) rise into view without baring black sky below the mountain.
+        // max(0, …) pulls only UP, leaving the high summit rings already-framed.
+        let shiftYTarget = 0;
+        const selBand = selectedRef.current;
+        if (selBand != null) {
+          const { vp } = ridgeCamera(yaw, pitch, aspectNow, t, radiusScale, focusShift);
+          const anc = ringAnchor(STATIONS[selBand].radius);
+          const rcy = vp[1] * anc.x + vp[5] * anc.y + vp[9] * anc.z + vp[13];
+          const rcw = vp[3] * anc.x + vp[7] * anc.y + vp[11] * anc.z + vp[15];
+          const fcy = vp[1] * NEAR_EDGE.x + vp[5] * NEAR_EDGE.y + vp[9] * NEAR_EDGE.z + vp[13];
+          const fcw = vp[3] * NEAR_EDGE.x + vp[7] * NEAR_EDGE.y + vp[11] * NEAR_EDGE.z + vp[15];
+          if (rcw > 1e-6 && fcw > 1e-6) {
+            const liftToAim = FOCUS_AIM_Y - rcy / rcw; // raise the ring to the framing line
+            const footCap = FOCUS_FOOT - fcy / fcw; // …but not past the foot at the bottom
+            shiftYTarget = Math.max(0, Math.min(liftToAim, footCap));
+          }
+        }
+        focusShiftY += (shiftYTarget - focusShiftY) * fk;
+
         gpu.render({
           time: t,
           yaw,
@@ -636,8 +674,9 @@ export default function RidgelineStage() {
           focusAmt,
           radiusScale,
           focusShift,
+          focusShiftY,
         });
-        updateSurvey(yaw, pitch, t, dt, radiusScale, focusShift);
+        updateSurvey(yaw, pitch, t, dt, radiusScale, focusShift, focusShiftY);
         raf = requestAnimationFrame(frame);
       };
       raf = requestAnimationFrame(frame);

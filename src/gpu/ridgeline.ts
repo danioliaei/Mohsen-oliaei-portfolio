@@ -80,6 +80,12 @@ export interface RidgeFrame {
    *  focused (desktop only) so the massif pans into the clear RIGHT of the dossier.
    *  MUST match the value the survey overlay projects with (same vp). */
   focusShift?: number;
+  /** VERTICAL lens shift in NDC: 0 at rest, eased to a positive value while a slice
+   *  is focused so the SELECTED ring lifts to a comfortable framing height — without
+   *  it the dolly-in keeps aiming at the summit and the low (early-career) rings near
+   *  the dune plain fall off the bottom of the frame. Mirror of focusShift; MUST match
+   *  the value the survey overlay projects with (same vp). */
+  focusShiftY?: number;
 }
 
 /* ---- orbit camera: drag to spin a full turn around the summit -------------
@@ -193,6 +199,7 @@ export function ridgeCamera(
   time = 0,
   radiusScale = 1,
   shiftX = 0,
+  shiftY = 0,
 ): { vp: Float32Array; eye: [number, number, number] } {
   const azim = ORBIT.azim + yaw + Math.sin(time * 0.05) * 0.0045;
   const p = Math.min(Math.max(pitch, PITCH_LO), PITCH_HI);
@@ -217,6 +224,16 @@ export function ridgeCamera(
     vp[4] += shiftX * vp[7];
     vp[8] += shiftX * vp[11];
     vp[12] += shiftX * vp[15];
+  }
+  // the VERTICAL twin: add `shiftY` to clip-y (NDC_y += shiftY at every depth) — the
+  // same pure image translation, used while focused to lift the selected ring up to a
+  // comfortable framing height (positive = image moves UP). Same vp, so projection +
+  // pick stay welded.
+  if (shiftY !== 0) {
+    vp[1] += shiftY * vp[3];
+    vp[5] += shiftY * vp[7];
+    vp[9] += shiftY * vp[11];
+    vp[13] += shiftY * vp[15];
   }
   return { vp, eye: [ex, ey, ez] };
 }
@@ -674,7 +691,9 @@ export class RidgelineScene {
     // in RidgelineStage projects its anchors from the exact same eye — the labels
     // stay welded to the mountain as it spins. (Breathing lives inside the helper:
     // a whisper of sub-degree drift so an untouched mountain still feels alive.)
-    const { vp, eye } = ridgeCamera(s.yaw, s.pitch, aspect, s.time, s.radiusScale ?? 1, s.focusShift ?? 0);
+    const { vp, eye } = ridgeCamera(
+      s.yaw, s.pitch, aspect, s.time, s.radiusScale ?? 1, s.focusShift ?? 0, s.focusShiftY ?? 0,
+    );
     const [ex, ey, ez] = eye;
 
     const u = this.uArr;
