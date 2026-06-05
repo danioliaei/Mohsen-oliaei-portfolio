@@ -20,13 +20,13 @@ import {
    ========================================================================= */
 
 /* ---- B1 survey callouts: one per index-contour RING -----------------------
-   Listed in REVEAL order — the order you meet them as you orbit away from the
-   silent rest pose — newest (the tight summit ring) first, so a single orbit
-   walks the career DOWN the mountain, present → past. Each `radius` is the plan
-   radius of the ring it pins to and mirrors RING_RADII in ridgeline.ts (720 =
-   hugging the summit … 5600 = the wide ring sweeping the near dunes). The labels
-   are the only words in the piece: tracked small-caps surveyor annotations —
-   ORG · CITY · YEAR — never more than one on screen. */
+   Listed newest (the tight summit ring) first → oldest (the wide ring sweeping the
+   near dunes), so the column reads present → past down the mountain. Each `radius`
+   is the plan radius of the ring it pins to and mirrors RING_RADII in ridgeline.ts
+   (720 = hugging the summit … 5600 = the wide ring sweeping the near dunes). The
+   labels are the only words in the piece: tracked small-caps surveyor annotations —
+   ORG · CITY · YEAR — all of them held on the camera-facing flank at once, the one
+   under the pointer lit while the rest recede. */
 const STATIONS = [
   { radius: 720, label: "STEGRA · STOCKHOLM · 2025" },
   { radius: 1300, label: "NEOBUILT · GOTHENBURG · 2025" },
@@ -37,26 +37,22 @@ const STATIONS = [
   { radius: 5600, label: "SHAHID BEHESHTI · TEHRAN · 2014" },
 ] as const;
 
-// where each station sits on the orbit (wrapped yaw, radians) and how wide its
-// reveal window is. REVEAL_BASE leaves the rest pose (yaw 0) in a silent gap; the
-// stations then march across the front arc one window apart. HALF < STEP/2 keeps a
-// sliver of pure mountain between chapters so the active leader never jumps while
-// lit — it fades to black, swaps anchor, fades back in.
+// All seven callouts are held on the camera-facing flank together — no per-station
+// reveal window. A single FACING fade (FACE_NEAR..FACE_FAR, in radians of orbit off
+// the rest pose) carries the whole survey out of view as the orbit swings around to
+// the back of the massif, where the anchors would be hidden behind it. The resting
+// callouts sit at REST_OP; the one under the pointer rises to full while the others
+// recede to DIM_OP, so the highlight reads without ever hiding the rest.
 const TWO_PI = Math.PI * 2;
-const REVEAL_BASE = 0.42;
-const REVEAL_STEP = 0.24;
-const REVEAL_HALF = 0.11;
+const FACE_NEAR = 1.45; // rad (~83°) — full survey out to here
+const FACE_FAR = 2.45; // rad (~140°) — fully faded by here (anchors now round the back)
+const REST_OP = 0.46; // resting opacity for an un-hovered, front-facing callout
+const DIM_OP = 0.24; // the others recede to this while one is hovered
 const HEADER_SAFE = 110; // px — callouts stay below the full-width site header
 
 const smooth = (e0: number, e1: number, x: number) => {
   const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0)));
   return t * t * (3 - 2 * t);
-};
-const angDelta = (a: number, b: number) => {
-  let d = (a - b) % TWO_PI;
-  if (d < -Math.PI) d += TWO_PI;
-  if (d > Math.PI) d -= TWO_PI;
-  return Math.abs(d);
 };
 
 export default function RidgelineStage() {
@@ -287,6 +283,14 @@ export default function RidgelineStage() {
       let leaderEls: NodeListOf<SVGPolylineElement> | null = null;
       const labelW = new Array<number>(STATIONS.length).fill(0);
       let measured = false;
+      // per-frame layout scratch (hoisted so the rAF loop never allocates): each
+      // station's projected anchor, computed leader path, label origin, and how
+      // visible (front-facing + on-screen) it is this frame. Pass 1 fills these and
+      // resolves the hovered station; pass 2 writes opacity with the highlight applied.
+      const visA = new Array<number>(STATIONS.length).fill(0);
+      const ptsA = new Array<string>(STATIONS.length).fill("");
+      const lxA = new Array<number>(STATIONS.length).fill(0);
+      const eyA = new Array<number>(STATIONS.length).fill(0);
 
       const updateSurvey = (yaw: number, pitch: number, t: number) => {
         const overlay = overlayRef.current;
@@ -313,77 +317,92 @@ export default function RidgelineStage() {
         }
 
         const { vp } = ridgeCamera(yaw, pitch, W / H, t);
-        // signed orbit folded to its magnitude, so spinning EITHER way surveys the
-        // same sequence (the index bands wrap the massif — both flanks read them);
-        // the rest pose (yaw 0) sits in the silent gap before the first station
+        // one FACING fade for the whole survey: all seven anchors live on the x = 0
+        // near ridge, so they face the camera together. Fold the signed orbit to its
+        // magnitude (spinning either way surveys the same flank) and fade the lot out
+        // as the eye swings past FACE_FAR toward the hidden back of the massif.
         let phi = yaw % TWO_PI;
         if (phi > Math.PI) phi -= TWO_PI;
         if (phi < -Math.PI) phi += TWO_PI;
-        const aphi = Math.abs(phi);
+        const face = 1 - smooth(FACE_NEAR, FACE_FAR, Math.abs(phi));
 
-        // which slice the pointer is resting on this frame (only the clearly-revealed
-        // leader is hoverable, and never mid-drag); resolved after the loop
+        // which slice the pointer is resting on this frame (never mid-drag); when
+        // discs overlap, a label hit wins outright, else the nearest anchor takes it
         let foundHover = -1;
+        let bestScore = Infinity;
 
+        // ---- pass 1: project + lay out every visible station, resolve the hover ----
         for (let k = 0; k < STATIONS.length; k++) {
-          const label = labels[k];
-          const leader = leaders[k];
-
-          // reveal opacity from how near the orbit is to this station's window
-          const theta = REVEAL_BASE + k * REVEAL_STEP;
-          let op = 1 - smooth(REVEAL_HALF * 0.4, REVEAL_HALF, angDelta(aphi, theta));
-
+          let vis = face;
           // project the anchor where this ring crosses the mountain's near face
           const anc = ringAnchor(STATIONS[k].radius);
           const a = projectToScreen(vp, anc.x, anc.y, anc.z, W, H);
-          if (!a.visible || a.x < -60 || a.x > W + 60 || a.y < -60 || a.y > H + 60) op = 0;
+          if (!a.visible || a.x < -60 || a.x > W + 60 || a.y < -60 || a.y > H + 60) vis = 0;
+          visA[k] = vis;
+          if (vis <= 0.004 || !measured) {
+            ptsA[k] = "";
+            continue;
+          }
 
-          if (op <= 0.004 || !measured) {
+          // splay the leader up and out, then clamp it clear of the header band and
+          // the viewport edges. Alternate the splay side by parity (even → left, odd
+          // → right) so vertically-stacked neighbours never collide; fall back to
+          // whichever side fits when the column drifts near an edge.
+          const shelf = labelW[k] + 14;
+          const pad = 16;
+          const outX = Math.min(W * 0.12, 150);
+          const outY = Math.min(H * 0.1, 78);
+          const fitLeft = a.x - outX >= pad + shelf;
+          const fitRight = a.x + outX <= W - pad - shelf;
+          const preferLeft = (k % 2) === 0;
+          const toLeft = preferLeft ? fitLeft || !fitRight : !(fitRight || !fitLeft);
+          let ex = a.x + (toLeft ? -outX : outX); // elbow
+          ex = toLeft ? Math.max(ex, pad + shelf) : Math.min(ex, W - pad - shelf);
+          const ey = Math.max(a.y - outY, HEADER_SAFE); // sit below the site header
+          const sx = ex + (toLeft ? -shelf : shelf); // far end of the underline shelf
+          const lx = toLeft ? ex - labelW[k] : ex; // text hugs the elbow (inner) end
+          ptsA[k] = `${a.x.toFixed(1)},${a.y.toFixed(1)} ${ex.toFixed(1)},${ey.toFixed(1)} ${sx.toFixed(1)},${ey.toFixed(1)}`;
+          lxA[k] = lx;
+          eyA[k] = ey;
+
+          // pointer hover → light THIS slice. A generous disc around the anchor on
+          // the slope and the label box itself both count, so the eye can rest on the
+          // words or on the band they point to.
+          if (!dragging && hx >= 0 && vis > 0.12) {
+            const dxh = hx - a.x;
+            const dyh = hy - a.y;
+            const d2 = dxh * dxh + dyh * dyh;
+            const nearAnchor = d2 < 132 * 132;
+            const inLabel =
+              hx >= lx - 14 && hx <= lx + labelW[k] + 14 && hy >= ey - 32 && hy <= ey + 8;
+            if (nearAnchor || inLabel) {
+              const score = inLabel ? -1 : d2; // a label hit beats any anchor disc
+              if (score < bestScore) {
+                bestScore = score;
+                foundHover = k;
+              }
+            }
+          }
+        }
+
+        // ---- pass 2: write opacity, lifting the hovered station and dimming the rest
+        const anyHover = foundHover >= 0;
+        for (let k = 0; k < STATIONS.length; k++) {
+          const label = labels[k];
+          const leader = leaders[k];
+          if (visA[k] <= 0.004 || !measured || !ptsA[k]) {
             if (label.style.opacity !== "0") {
               label.style.opacity = "0";
               leader.style.opacity = "0";
             }
             continue;
           }
-
-          // splay the leader up and toward the nearer edge (into open sky), then
-          // clamp it clear of the full-width header band and the viewport edges so
-          // the type never lands on the logo/nav or runs off-screen
-          const shelf = labelW[k] + 14;
-          const pad = 16;
-          const outX = Math.min(W * 0.12, 150);
-          const outY = Math.min(H * 0.1, 78);
-          // pick the splay side that fits the label + shelf on-screen without a
-          // fold-back; when both fit, lean toward the nearer edge (more open sky)
-          const fitLeft = a.x - outX >= pad + shelf;
-          const fitRight = a.x + outX <= W - pad - shelf;
-          const toLeft = fitLeft && fitRight ? a.x < W * 0.5 : fitLeft || !fitRight;
-          let ex = a.x + (toLeft ? -outX : outX); // elbow
-          ex = toLeft ? Math.max(ex, pad + shelf) : Math.min(ex, W - pad - shelf);
-          const ey = Math.max(a.y - outY, HEADER_SAFE); // sit below the site header
-          const sx = ex + (toLeft ? -shelf : shelf); // far end of the underline shelf
-          leader.setAttribute(
-            "points",
-            `${a.x.toFixed(1)},${a.y.toFixed(1)} ${ex.toFixed(1)},${ey.toFixed(1)} ${sx.toFixed(1)},${ey.toFixed(1)}`,
-          );
-          leader.style.opacity = op.toFixed(3);
-
-          // text rides just above the shelf, hugging the elbow (inner) end
-          const lx = toLeft ? ex - labelW[k] : ex;
-          label.style.transform = `translate(${lx.toFixed(1)}px, ${(ey - 14).toFixed(1)}px)`;
-          label.style.opacity = op.toFixed(3);
-
-          // pointer hover → light THIS slice. A generous disc around the anchor on
-          // the slope (where the leader meets the mountain) and the label box itself
-          // both count, so the eye can rest on the words or on the band they point to.
-          if (!dragging && hx >= 0 && op > 0.5) {
-            const dxh = hx - a.x;
-            const dyh = hy - a.y;
-            const nearAnchor = dxh * dxh + dyh * dyh < 132 * 132;
-            const inLabel =
-              hx >= lx - 14 && hx <= lx + labelW[k] + 14 && hy >= ey - 32 && hy <= ey + 8;
-            if (nearAnchor || inLabel) foundHover = k;
-          }
+          const tier = k === foundHover ? 1 : anyHover ? DIM_OP : REST_OP;
+          const op = (visA[k] * tier).toFixed(3);
+          leader.setAttribute("points", ptsA[k]);
+          leader.style.opacity = op;
+          label.style.transform = `translate(${lxA[k].toFixed(1)}px, ${(eyA[k] - 14).toFixed(1)}px)`;
+          label.style.opacity = op;
         }
         hoverBand = foundHover;
       };
