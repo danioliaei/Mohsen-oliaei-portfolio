@@ -6,6 +6,7 @@ import {
   ridgeCamera,
   projectToScreen,
   ringAnchor,
+  pickBand,
 } from "../road/gpu/ridgeline";
 
 /* =========================================================================
@@ -129,12 +130,16 @@ export default function RidgelineStage() {
 
       // ---- hover state: the career SLICE the pointer is resting on, and the eased,
       // breathing pulse amplitude that lights it. hx/hy track the mouse in canvas
-      // pixels (mouse only — touch has no hover); the rAF loop eases hoverAmt toward
-      // the hovered slice and holds lastHoverBand through the fade-out so the right
-      // band stays lit while it dims. ------------------------------------------------
+      // pixels (mouse only — touch has no hover). Nothing here ever snaps: the rAF
+      // loop eases hoverAmt up/down, and moving between slices cross-DISSOLVES (the
+      // old band's wash eases out, then shownBand adopts the new one and eases in),
+      // so the highlight is always a gentle rise/fall, never a jump. The callout
+      // opacities are eased per-label in updateSurvey on the same principle. --------
+      const HOVER_TAU = 0.28; // s — wash rise/fall + slice-to-slice cross-dissolve (gentle)
+      const OP_TAU = 0.22; // s — callout highlight/dim easing, so titles never pop
       let hx = -1, hy = -1; // pointer in canvas px, or -1 when off-canvas
       let hoverBand = -1; // slice under the pointer THIS frame (set in updateSurvey)
-      let lastHoverBand = -1; // held through the fade so the dimming slice is the right one
+      let shownBand = -1; // the slice the wash is CURRENTLY on (cross-dissolve bookkeeping)
       let hoverAmt = 0; // eased presence 0..1
       const reduceMotion =
         typeof matchMedia === "function" &&
@@ -301,8 +306,12 @@ export default function RidgelineStage() {
       const ptsA = new Array<string>(STATIONS.length).fill("");
       const lxA = new Array<number>(STATIONS.length).fill(0);
       const eyA = new Array<number>(STATIONS.length).fill(0);
+      // the eased, currently-DISPLAYED opacity of each callout — pass 2 nudges these
+      // toward their target (highlight / dim / rest) every frame so the survey never
+      // snaps; the lit slice rises and its neighbours recede over a beat.
+      const dispOp = new Array<number>(STATIONS.length).fill(0);
 
-      const updateSurvey = (yaw: number, pitch: number, t: number) => {
+      const updateSurvey = (yaw: number, pitch: number, t: number, dt: number) => {
         const overlay = overlayRef.current;
         if (!overlay) return;
         if (!labelEls) {
@@ -336,10 +345,10 @@ export default function RidgelineStage() {
         if (phi < -Math.PI) phi += TWO_PI;
         const face = 1 - smooth(FACE_NEAR, FACE_FAR, Math.abs(phi));
 
-        // which slice the pointer is resting on this frame (never mid-drag); when
-        // discs overlap, a label hit wins outright, else the nearest anchor takes it
-        let foundHover = -1;
-        let bestScore = Infinity;
+        // which slice the pointer is resting on this frame (never mid-drag): a label
+        // hit wins outright; otherwise the camera ray is cast through the pointer to
+        // find the slice band its terrain hit lands on (resolved after pass 1).
+        let labelHover = -1;
 
         // ---- pass 1: project + lay out every visible station, resolve the hover ----
         for (let k = 0; k < STATIONS.length; k++) {
@@ -375,43 +384,46 @@ export default function RidgelineStage() {
           lxA[k] = lx;
           eyA[k] = ey;
 
-          // pointer hover → light THIS slice. A generous disc around the anchor on
-          // the slope and the label box itself both count, so the eye can rest on the
-          // words or on the band they point to.
+          // a hover over the callout text lights its slice directly (the words are
+          // the one thing the terrain pick can't see). The slope itself is handled
+          // after the loop by the camera-ray pick, so resting anywhere on a slice's
+          // whole face lights it — not just a disc by the anchor.
           if (!dragging && hx >= 0 && vis > 0.12) {
-            const dxh = hx - a.x;
-            const dyh = hy - a.y;
-            const d2 = dxh * dxh + dyh * dyh;
-            const nearAnchor = d2 < 132 * 132;
             const inLabel =
               hx >= lx - 14 && hx <= lx + labelW[k] + 14 && hy >= ey - 32 && hy <= ey + 8;
-            if (nearAnchor || inLabel) {
-              const score = inLabel ? -1 : d2; // a label hit beats any anchor disc
-              if (score < bestScore) {
-                bestScore = score;
-                foundHover = k;
-              }
-            }
+            if (inLabel) labelHover = k;
           }
         }
 
-        // ---- pass 2: write opacity, lifting the hovered station and dimming the rest
+        // ---- resolve the hovered slice: a label hit wins; else cast the camera ray
+        // through the pointer and take the slice band its terrain hit falls on, but
+        // only if that station is currently facing the camera (its label visible) ---
+        let foundHover = labelHover;
+        if (foundHover < 0 && !dragging && hx >= 0) {
+          const cand = pickBand(yaw, pitch, W / H, t, hx, hy, W, H);
+          if (cand >= 0 && visA[cand] > 0.12) foundHover = cand;
+        }
+
+        // ---- pass 2: EASE each callout toward its target opacity (highlight / dim /
+        // rest) so the survey never pops. The lit slice rises and its neighbours
+        // recede over OP_TAU instead of snapping; opacity also eases to/from 0 as a
+        // station faces in or rounds out of view. Layout (transform / leader points)
+        // is refreshed only while the station is laid out this frame.
         const anyHover = foundHover >= 0;
+        const opK = 1 - Math.exp(-dt / OP_TAU);
         for (let k = 0; k < STATIONS.length; k++) {
           const label = labels[k];
           const leader = leaders[k];
-          if (visA[k] <= 0.004 || !measured || !ptsA[k]) {
-            if (label.style.opacity !== "0") {
-              label.style.opacity = "0";
-              leader.style.opacity = "0";
-            }
-            continue;
-          }
+          const laidOut = !(visA[k] <= 0.004 || !measured || !ptsA[k]);
           const tier = k === foundHover ? 1 : anyHover ? DIM_OP : REST_OP;
-          const op = (visA[k] * tier).toFixed(3);
-          leader.setAttribute("points", ptsA[k]);
+          const target = laidOut ? visA[k] * tier : 0;
+          dispOp[k] += (target - dispOp[k]) * opK;
+          const op = dispOp[k].toFixed(3);
+          if (laidOut) {
+            leader.setAttribute("points", ptsA[k]);
+            label.style.transform = `translate(${lxA[k].toFixed(1)}px, ${(eyA[k] - 14).toFixed(1)}px)`;
+          }
           leader.style.opacity = op;
-          label.style.transform = `translate(${lxA[k].toFixed(1)}px, ${(eyA[k] - 14).toFixed(1)}px)`;
           label.style.opacity = op;
         }
         hoverBand = foundHover;
@@ -443,21 +455,22 @@ export default function RidgelineStage() {
         yaw += (tYaw - yaw) * k;
         pitch += (tPitch - pitch) * k;
 
-        // hover pulse: ease presence toward the slice under the pointer, hold the
-        // band index through the fade-out, and breathe the amplitude so the lit slice
-        // feels alive rather than flat-on. (updateSurvey set hoverBand last frame.)
-        if (hoverBand >= 0) lastHoverBand = hoverBand;
-        const hoverTarget = hoverBand >= 0 ? 1 : 0;
-        hoverAmt += (hoverTarget - hoverAmt) * (1 - Math.exp(-dt / 0.16));
-        if (hoverTarget === 0 && hoverAmt < 0.003) {
-          hoverAmt = 0;
-          lastHoverBand = -1;
-        }
+        // hover pulse — never a jump: the wash CROSS-DISSOLVES between slices. When
+        // the pointer wants a different band than the one currently shown (or moves
+        // off the mountain), ease the current wash OUT to zero first; once it's faded
+        // the displayed band adopts the new target and the wash eases back IN. So a
+        // slice-to-slice move slides off one band and onto the next, and a fresh enter
+        // (from no band) adopts immediately and rises. Amplitude breathes so the lit
+        // slice feels alive. (updateSurvey set hoverBand from the pointer last frame.)
+        const amtTarget =
+          shownBand !== hoverBand ? 0 : hoverBand >= 0 ? 1 : 0;
+        if (shownBand !== hoverBand && hoverAmt < 0.02) shownBand = hoverBand;
+        hoverAmt += (amtTarget - hoverAmt) * (1 - Math.exp(-dt / HOVER_TAU));
         const breath = reduceMotion ? 0.66 : 0.64 + 0.22 * Math.sin(t * 2.2);
         const hoverGlow = hoverAmt * breath;
 
-        gpu.render({ time: t, yaw, pitch, hoverBand: lastHoverBand, hoverGlow });
-        updateSurvey(yaw, pitch, t);
+        gpu.render({ time: t, yaw, pitch, hoverBand: shownBand, hoverGlow });
+        updateSurvey(yaw, pitch, t, dt);
         raf = requestAnimationFrame(frame);
       };
       raf = requestAnimationFrame(frame);

@@ -231,26 +231,12 @@ struct VsOut {
   let warp = (fbm(vec2<f32>(i.wpos.x * 0.00026, i.wpos.z * 0.00023) + 47.0) - 0.5) * 980.0
            + (fbm(vec2<f32>(i.wpos.x * 0.00090, i.wpos.z * 0.00078) + 12.0) - 0.5) * 210.0;
   let rw = baseR + warp;
-  // screen-space line AA: the distance to each ring is measured in PIXELS (world
-  // delta ÷ per-pixel gradient), with the gradient clamped so a near-silhouette fold
-  // fades the line out cleanly instead of smearing it into a fat blur. With only
-  // seven well-separated rings there is no moiré to fight, so — unlike the dense
-  // hairlines — the rings are NEVER dissolved: each stays a continuous unbroken loop
-  // wrapping the massif, thinning only where its slope turns edge-on to the eye.
-  let aaR = clamp(fwidth(rw), 1e-4, 100.0);
+  // The slice plan-radius rw is kept only to centre the HOVER wash below; the
+  // dividing ring contours (and their flanking moat) are no longer painted, so
+  // the career borders are invisible at rest. A slice surfaces only as a soft glow
+  // when the pointer rests anywhere on its band. Radii stay in sync with RING_RADII
+  // (ridgeline.ts) for the hover lookup.
   var RINGS = array<f32, 7>(720.0, 1300.0, 1980.0, 2750.0, 3600.0, 4550.0, 5600.0);
-  var ring = 0.0;
-  var moat = 0.0;
-  for (var k = 0; k < 7; k = k + 1) {
-    let dPix = abs(rw - RINGS[k]) / aaR;                  // distance to this ring, in px
-    ring = max(ring, 1.0 - smoothstep(0.6, 1.7, dPix));   // a fine ~1.4 px hairline
-    moat = max(moat, 1.0 - smoothstep(2.0, 5.5, dPix));   // a slim flanking band
-  }
-  // each ring clears a band of breathing room out of the hairline weave on its
-  // flanks (the survey "moat") so the cut still reads as a ring — but gently now,
-  // a soft dimming rather than a black trench, so the slice borders feel surveyed
-  // onto the slope instead of carved through it
-  hair = hair * (1.0 - 0.32 * clamp(moat - ring, 0.0, 1.0));
 
   // ---- monochrome shading: form from a soft key light, snow from elevation --
   let n = normalize(i.nrm);
@@ -274,15 +260,6 @@ struct VsOut {
   let snowFill = snow * snow * (0.24 + 0.46 * diff);
   var c = lum + snowFill;                          // the base surface
 
-  // ---- the seven SURVEY RINGS as a quiet contour ---------------------------
-  // a soft off-white on the dark rock / dune (no longer riding hot above the bloom
-  // line) and a muted grey where it crosses the snow — the same bright-on-rock /
-  // dark-on-snow inversion the weave uses, but pulled WAY back so the slice borders
-  // read as gentle surveyed contours dividing the massif, not stark cuts slicing it
-  // apart. Blended partially (ring * 0.68) so even the stroke peak stays restrained.
-  let ringTone = mix(1.16, 0.20, snow);
-  c = mix(c, ringTone, ring * 0.5);
-
   // ---- hover wash: when the pointer rests on a career callout, ITS slice of the
   // massif lifts in a soft, breathing pulse (amplitude driven from RidgelineStage).
   // Centred on the hovered ring's plan radius and feathered across the whole band,
@@ -294,10 +271,11 @@ struct VsOut {
     let dn = abs(rw - hc) / 660.0;                  // 0 at the slice centre → 1 at edges
     let prof = 1.0 - smoothstep(0.0, 1.0, dn);      // a smooth bump across the band
     // additive wash, sculpted by the key light so the lit slice keeps its form;
-    // eased back on snow so the summit slices brighten without flattening to white,
-    // and the hovered ring's own contour stroke flares a touch to anchor the eye
-    let wash = prof * F.hov.y * (0.27 + 0.50 * lit) * (1.0 - 0.34 * snow);
-    c = c + wash + ring * prof * F.hov.y * 0.7;
+    // eased back on snow so the summit slices brighten without flattening to white.
+    // With no painted ring border, this glow IS the slice — broadened a touch so the
+    // whole band lifts as one when the pointer rests anywhere on the experience.
+    let wash = prof * F.hov.y * (0.34 + 0.52 * lit) * (1.0 - 0.34 * snow);
+    c = c + wash;
   }
   return vec4<f32>(vec3<f32>(c), 1.0);                     // opaque → writes depth, occludes
 }
