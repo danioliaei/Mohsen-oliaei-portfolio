@@ -94,10 +94,17 @@ export default function RidgelineStage() {
       // around the summit. The pointer steers a TARGET; the camera EASES toward
       // it every frame, so the motion glides instead of snapping 1:1 — calm and
       // weighty rather than twitchy. A gentle, capped release-flick keeps it
-      // drifting before it settles. yaw is free (360°+); pitch is clamped to
-      // PITCH_LO..PITCH_HI so the eye never dips under the dunes or tips past a
-      // high survey angle. Haptics tick through the turn on capable phones. -----
+      // drifting before it settles. yaw is free (360°+). pitch is bounded to
+      // PITCH_LO..PITCH_HI (the eye can't dip under the dunes nor tip past a high
+      // survey angle), but those limits are CUSHIONED, not hard walls: the tilt
+      // decelerates smoothly into them so a drag never stops dead at a point —
+      // and yaw keeps spinning freely throughout. The downward floor is naturally
+      // shallow (the eye is already low), so vertical input is gentled too, which
+      // keeps the headline horizontal spin from tripping it. Haptics tick through
+      // the turn on capable phones. ------------------------------------------
       const SENS = 0.45; // turns per canvas-height of drag (< 1 = unhurried)
+      const PITCH_SENS = 0.55; // vertical tilt is gentler than the free spin
+      const PITCH_SOFT = 0.28; // rad — cushion zone where the tilt eases into a limit
       const SMOOTH_TAU = 0.13; // s — how loosely the camera trails the target
       const INERTIA_TAU = 0.7; // s — a brief, controlled drift, not a runaway spin
       const MAX_VEL = 2.0; // rad/s — cap so even a hard flick stays calm
@@ -110,6 +117,15 @@ export default function RidgelineStage() {
       let pid = -1; // captured pointer id
       let lastX = 0, lastY = 0, lastT = 0;
       const clampPitch = (p: number) => Math.min(Math.max(p, PITCH_LO), PITCH_HI);
+      // add a pitch delta with a soft, direction-aware cushion: within PITCH_SOFT
+      // of the limit you're heading toward, the step is scaled down to zero so the
+      // tilt glides to rest instead of slamming. Returns the new (still-bounded)
+      // target — never overshoots, and reverses cleanly with no dead zone.
+      const addPitch = (cur: number, delta: number) => {
+        const head = delta > 0 ? PITCH_HI - cur : delta < 0 ? cur - PITCH_LO : 1;
+        const ease = head < PITCH_SOFT ? Math.max(0, head) / PITCH_SOFT : 1;
+        return clampPitch(cur + delta * ease);
+      };
 
       // ---- hover state: the career SLICE the pointer is resting on, and the eased,
       // breathing pulse amplitude that lights it. hx/hy track the mouse in canvas
@@ -200,9 +216,8 @@ export default function RidgelineStage() {
 
         const dYaw = -dxPix * rot;
         tYaw += dYaw;
-        const reqPitch = dyPix * rot;
         const before = tPitch;
-        tPitch = clampPitch(tPitch + reqPitch);
+        tPitch = addPitch(tPitch, dyPix * rot * PITCH_SENS);
         const dPitch = tPitch - before;
 
         // velocity feeds the release-flick; clamp the magnitude so it stays gentle
@@ -214,11 +229,6 @@ export default function RidgelineStage() {
         // loop is outside any gesture and gets silently ignored on iPhone)
         const notch = Math.round(tYaw / DETENT);
         if (notch !== lastNotch) { lastNotch = notch; haptic(6, e.timeStamp); }
-
-        // a firmer bump the instant you push into the top/bottom pitch limit
-        if (Math.abs(reqPitch) > 1e-4 && Math.abs(dPitch) < Math.abs(reqPitch) * 0.5) {
-          haptic(18, e.timeStamp);
-        }
       };
 
       const onUp = (e: PointerEvent) => {
@@ -233,8 +243,8 @@ export default function RidgelineStage() {
         const step = 0.2; // rad per press (~11°) — eased in by the smoothing
         if (e.key === "ArrowLeft") tYaw += step;
         else if (e.key === "ArrowRight") tYaw -= step;
-        else if (e.key === "ArrowUp") tPitch = clampPitch(tPitch - step);
-        else if (e.key === "ArrowDown") tPitch = clampPitch(tPitch + step);
+        else if (e.key === "ArrowUp") tPitch = addPitch(tPitch, -step);
+        else if (e.key === "ArrowDown") tPitch = addPitch(tPitch, step);
         else return;
         hideHint();
         velYaw = 0;
@@ -419,8 +429,8 @@ export default function RidgelineStage() {
         if (!dragging && (velYaw !== 0 || velPitch !== 0)) {
           tYaw += velYaw * dt;
           const before = tPitch;
-          tPitch = clampPitch(tPitch + velPitch * dt);
-          if (tPitch === before) velPitch = 0; // hit a pitch wall → stop pushing
+          tPitch = addPitch(tPitch, velPitch * dt); // cushions into the limit, no slam
+          if (tPitch === before) velPitch = 0; // settled at a pitch limit → stop pushing
           const damp = Math.exp(-dt / INERTIA_TAU);
           velYaw *= damp;
           velPitch *= damp;
