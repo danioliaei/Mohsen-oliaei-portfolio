@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import {
   RidgelineScene,
   PITCH_LO,
@@ -29,15 +30,81 @@ import {
    labels are the only words in the piece: tracked small-caps surveyor annotations —
    ORG · CITY · YEAR — all of them held on the camera-facing flank at once, the one
    under the pointer lit while the rest recede. */
-const STATIONS = [
-  { radius: 720, label: "STEGRA · STOCKHOLM · 2025" },
-  { radius: 1300, label: "NEOBUILT · GOTHENBURG · 2025" },
-  { radius: 1980, label: "NORTHVOLT · SKELLEFTEÅ · 2023" },
-  { radius: 2750, label: "COLLECTIVE ARCHITECTURE · LOS ANGELES · 2023" },
-  { radius: 3600, label: "WHITE ARKITEKTER · GOTHENBURG · 2022" },
-  { radius: 4550, label: "CHALMERS · GOTHENBURG · 2020" },
-  { radius: 5600, label: "SHAHID BEHESHTI · TEHRAN · 2014" },
-] as const;
+// Each station carries both the floating callout `label` (the eyebrow, kept in the
+// surveyor voice) and the copy that fills the focused panel when its slice is
+// clicked: a short `role` title, a one-breath `body`, a tracked `meta` line, and a
+// `cta` label for the liquid button (its action comes later). `radius` stays the
+// source of truth for the seven ring radii (see the header note above).
+type Station = {
+  radius: number;
+  label: string;
+  role: string;
+  body: string;
+  meta: string;
+  cta: string;
+};
+const STATIONS: Station[] = [
+  {
+    radius: 720,
+    label: "STEGRA · STOCKHOLM · 2025",
+    role: "BIM Specialist",
+    body: "Shaping BIM strategy and building the Power BI dashboards that keep the project legible. Trains stakeholders and supports the coordination team.",
+    meta: "Now · BIM strategy, Power BI",
+    cta: "View role",
+  },
+  {
+    radius: 1300,
+    label: "NEOBUILT · GOTHENBURG · 2025",
+    role: "BIM Developer · Founder",
+    body: "Founded a practice building bespoke tooling on the Revit and Navisworks APIs, turning repetitive modelling work into automation.",
+    meta: "Now · C#/.NET, Python, Revit API",
+    cta: "View role",
+  },
+  {
+    radius: 1980,
+    label: "NORTHVOLT · SKELLEFTEÅ · 2023",
+    role: "BIM Coordinator",
+    body: "Ran ISO 19650 information management and clash coordination across disciplines, with heavy emphasis on mentoring and training the wider team.",
+    meta: "2023–2024 · ISO 19650, Navisworks",
+    cta: "View role",
+  },
+  {
+    radius: 2750,
+    label: "COLLECTIVE ARCHITECTURE · LOS ANGELES · 2023",
+    role: "BIM Modeler",
+    body: "Drove energy and daylight studies in Rhino and Grasshopper, feeding the analysis back into the architectural model.",
+    meta: "2023 · Rhino, Grasshopper",
+    cta: "View role",
+  },
+  {
+    radius: 3600,
+    label: "WHITE ARKITEKTER · GOTHENBURG · 2022",
+    role: "BIM Modeler",
+    body: "Modelled Revit healthcare projects and prepared the IFC deliveries the wider design team relied on.",
+    meta: "2022 · Revit, IFC",
+    cta: "View role",
+  },
+  {
+    radius: 4550,
+    label: "CHALMERS · GOTHENBURG · 2020",
+    role: "M.Sc. Architectural Engineering",
+    body: "A master's grounded in computational design, exploring geometry and performance through Rhino and Grasshopper.",
+    meta: "2020–2023 · Computational design, Rhino",
+    cta: "View studies",
+  },
+  {
+    radius: 5600,
+    label: "SHAHID BEHESHTI · TEHRAN · 2014",
+    role: "B.Sc. Architectural Engineering",
+    body: "Where it began — undergraduate studies alongside the first BIM modelling at Boomshahr Paydar, the start of the whole climb.",
+    meta: "2014–2019 · ArchiCAD, first BIM",
+    cta: "View studies",
+  },
+];
+
+// shared motion language: the project's signature ease, used across the header and
+// the focused-panel choreography.
+const PANEL_EASE = [0.22, 1, 0.36, 1] as const;
 
 // All seven callouts are held on the camera-facing flank together — no per-station
 // reveal window. A single FACING fade (FACE_NEAR..FACE_FAR, in radians of orbit off
@@ -63,6 +130,83 @@ export default function RidgelineStage() {
   const hintRef = useRef<HTMLButtonElement>(null);
   const demoRef = useRef<(() => void) | null>(null);
   const [unsupported, setUnsupported] = useState(false);
+
+  // ---- click-to-focus state -------------------------------------------------
+  // `selected` (React) drives the focused panel; `selectedRef` is the same value the
+  // imperative rAF loop + pointer handlers read each frame (they live in a one-time
+  // effect and would otherwise close over a stale value). `selectRef` lets that loop
+  // reach the LATEST setter without re-subscribing. A single `select()` keeps the two
+  // handles in lock-step.
+  const [selected, setSelected] = useState<number | null>(null);
+  const selectedRef = useRef<number | null>(null);
+  const selectRef = useRef<(i: number | null) => void>(() => {});
+  const lastFocusRef = useRef<HTMLElement | null>(null);
+  const wasOpenRef = useRef(false);
+  const panelRef = useRef<HTMLElement>(null);
+  const closeBtnRef = useRef<HTMLButtonElement>(null);
+  const reduce = useReducedMotion();
+
+  const select = useCallback((i: number | null) => {
+    selectedRef.current = i;
+    setSelected(i);
+  }, []);
+  // keep the loop's escape hatch pointed at the freshest setter every render
+  useEffect(() => {
+    selectRef.current = select;
+  });
+
+  // focus management: on open, remember what was focused and move focus into the
+  // dialog; on close (only after an actual open), restore it to the trigger. The
+  // wasOpenRef guard keeps the initial mount from stealing focus to the hint.
+  useEffect(() => {
+    if (selected !== null) {
+      lastFocusRef.current = document.activeElement as HTMLElement | null;
+      closeBtnRef.current?.focus();
+      wasOpenRef.current = true;
+    } else if (wasOpenRef.current) {
+      wasOpenRef.current = false;
+      (lastFocusRef.current ?? hintRef.current)?.focus?.();
+    }
+  }, [selected]);
+
+  // trap Tab within the open dialog so keyboard focus can't wander onto the dimmed
+  // scene behind it; Escape (closing) is handled by the window keydown in the effect.
+  const onPanelKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key !== "Tab") return;
+    const root = panelRef.current;
+    if (!root) return;
+    const f = root.querySelectorAll<HTMLElement>(
+      'button, [href], input, [tabindex]:not([tabindex="-1"])',
+    );
+    if (!f.length) return;
+    const first = f[0];
+    const last = f[f.length - 1];
+    if (e.shiftKey && document.activeElement === first) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && document.activeElement === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  };
+
+  // panel motion: a soft scale/blur "grow from the callout" on enter, eased exit;
+  // reduced-motion collapses every layer to a plain cross-fade.
+  const itemVariants = reduce
+    ? { hide: { opacity: 0 }, show: { opacity: 1, transition: { duration: 0.4 } } }
+    : {
+        hide: { opacity: 0, y: 12, filter: "blur(6px)" },
+        show: {
+          opacity: 1,
+          y: 0,
+          filter: "blur(0px)",
+          transition: { duration: 0.5, ease: PANEL_EASE },
+        },
+      };
+  const staggerVariants = {
+    hide: {},
+    show: { transition: { staggerChildren: 0.06, delayChildren: 0.12 } },
+  };
 
   useEffect(() => {
     const cvs = canvasRef.current;
@@ -118,6 +262,25 @@ export default function RidgelineStage() {
       let dragging = false;
       let pid = -1; // captured pointer id
       let lastX = 0, lastY = 0, lastT = 0;
+
+      // ---- click-to-focus: a press that barely moves and releases quickly is a
+      // CLICK (focus the slice under it), not a drag-orbit. downX/Y/T anchor the
+      // gesture; `moved` latches the moment it travels past CLICK_SLOP so a real
+      // orbit never trips the pick. ------------------------------------------------
+      const CLICK_SLOP = 6; // px of travel still counted as a click
+      const CLICK_TIME = 350; // ms — longer presses read as a deliberate hold/drag
+      let downX = 0, downY = 0, downT = 0, moved = false;
+
+      // ---- focus dolly + isolation: eased toward the selected state. radiusScale
+      // leans the camera in; focusAmt drives the dim of the un-selected bands.
+      // focusBand stays sticky through the fade-out so the dim eases off the band
+      // that was selected rather than snapping. lastFrameT caches the loop clock so a
+      // click can pick against the exact frame the eye is on. ----------------------
+      const FOCUS_TAU = 0.16; // s — snappier than the hover ease, still smooth
+      let radiusScale = 1; // 1 at rest → ~0.84 focused
+      let focusAmt = 0; // 0 at rest → 1 focused
+      let focusBand = -1; // the band the dim is centred on (sticky during fade-out)
+      let lastFrameT = 0;
       const clampPitch = (p: number) => Math.min(Math.max(p, PITCH_LO), PITCH_HI);
       // add a pitch delta with a soft, direction-aware cushion: within PITCH_SOFT
       // of the limit you're heading toward, the step is scaled down to zero so the
@@ -201,6 +364,12 @@ export default function RidgelineStage() {
         lastX = e.clientX;
         lastY = e.clientY;
         lastT = e.timeStamp;
+        // anchor the click test — a release near here, soon, with no real travel
+        // focuses the slice instead of orbiting
+        downX = e.clientX;
+        downY = e.clientY;
+        downT = e.timeStamp;
+        moved = false;
         velYaw = 0;
         velPitch = 0;
         try { cvs.setPointerCapture(pid); } catch { /* capture optional */ }
@@ -212,6 +381,10 @@ export default function RidgelineStage() {
 
       const onMove = (e: PointerEvent) => {
         if (!dragging || e.pointerId !== pid) return;
+        // once the press travels past the slop it's a drag, not a click
+        if (!moved && Math.hypot(e.clientX - downX, e.clientY - downY) > CLICK_SLOP) {
+          moved = true;
+        }
         const rot = ((2 * Math.PI) / Math.max(cvs.clientHeight, 1)) * SENS;
         const dxPix = e.clientX - lastX;
         const dyPix = e.clientY - lastY;
@@ -243,9 +416,37 @@ export default function RidgelineStage() {
         pid = -1;
         try { cvs.releasePointerCapture(e.pointerId); } catch { /* already gone */ }
         cvs.style.cursor = "grab";
+
+        // a click (no real travel, released quickly, left button) focuses the slice
+        // it lands on. Cast the same camera ray the hover uses, at the live focus
+        // dolly so the pick matches what's on screen. While a panel is already open
+        // the scrim covers the canvas, so this only ever OPENS a focus.
+        const isClick =
+          !moved &&
+          e.timeStamp - downT < CLICK_TIME &&
+          (e.pointerType !== "mouse" || e.button === 0);
+        if (isClick) {
+          const r = cvs.getBoundingClientRect();
+          const px = e.clientX - r.left;
+          const py = e.clientY - r.top;
+          const b = pickBand(
+            yaw, pitch, cvs.clientWidth / Math.max(cvs.clientHeight, 1),
+            lastFrameT, px, py, cvs.clientWidth, cvs.clientHeight, radiusScale,
+          );
+          if (b >= 0) {
+            selectRef.current(b);
+            hideHint();
+          }
+        }
       };
 
       const onKey = (e: KeyboardEvent) => {
+        // Escape dismisses an open focus before any orbit handling
+        if (e.key === "Escape" && selectedRef.current != null) {
+          selectRef.current(null);
+          e.preventDefault();
+          return;
+        }
         const step = 0.2; // rad per press (~11°) — eased in by the smoothing
         if (e.key === "ArrowLeft") tYaw += step;
         else if (e.key === "ArrowRight") tYaw -= step;
@@ -312,9 +513,19 @@ export default function RidgelineStage() {
       // snaps; the lit slice rises and its neighbours recede over a beat.
       const dispOp = new Array<number>(STATIONS.length).fill(0);
 
-      const updateSurvey = (yaw: number, pitch: number, t: number, dt: number) => {
+      const updateSurvey = (
+        yaw: number,
+        pitch: number,
+        t: number,
+        dt: number,
+        radiusScale: number,
+      ) => {
         const overlay = overlayRef.current;
         if (!overlay) return;
+        // while a slice is focused the survey words recede behind the panel — only
+        // the selected callout stays lit, and the per-frame hover pick is skipped.
+        const focusActive = selectedRef.current != null;
+        const fsel = selectedRef.current ?? -1;
         if (!labelEls) {
           labelEls = overlay.querySelectorAll<HTMLElement>(".survey-callout");
           leaderEls = overlay.querySelectorAll<SVGPolylineElement>(".survey-leader");
@@ -336,7 +547,7 @@ export default function RidgelineStage() {
           }
         }
 
-        const { vp } = ridgeCamera(yaw, pitch, W / H, t);
+        const { vp } = ridgeCamera(yaw, pitch, W / H, t, radiusScale);
         // one FACING fade for the whole survey: all seven anchors live on the x = 0
         // near ridge, so they face the camera together. Fold the signed orbit to its
         // magnitude (spinning either way surveys the same flank) and fade the lot out
@@ -403,9 +614,13 @@ export default function RidgelineStage() {
         // its slice from ANY orbit angle, even after the camera has spun past the rest
         // pose and the callout anchors (pinned to the near face) have rounded out of
         // view. The glow is no longer gated on the label still facing the camera. ----
+        // while focused the selected band IS the highlight — skip the per-frame ray
+        // pick entirely. Otherwise a label hit wins, else cast the camera ray.
         let foundHover = labelHover;
-        if (foundHover < 0 && !dragging && hx >= 0) {
-          const cand = pickBand(yaw, pitch, W / H, t, hx, hy, W, H);
+        if (focusActive) {
+          foundHover = fsel;
+        } else if (foundHover < 0 && !dragging && hx >= 0) {
+          const cand = pickBand(yaw, pitch, W / H, t, hx, hy, W, H, radiusScale);
           if (cand >= 0) foundHover = cand;
         }
 
@@ -424,7 +639,13 @@ export default function RidgelineStage() {
           const label = labels[k];
           const leader = leaders[k];
           const laidOut = !(visA[k] <= 0.004 || !measured || !ptsA[k]);
-          const tier = k === foundHover ? 1 : anyHover ? DIM_OP : REST_OP;
+          // focused: every callout recedes — the words now live in the panel, and the
+          // lit slice's own GPU glow + the dim + the dolly are what mark the selection,
+          // so a floating label here would only duplicate the panel eyebrow.
+          // resting: the lit slice rises, neighbours dim, the rest sit at REST_OP.
+          const tier = focusActive
+            ? 0
+            : k === foundHover ? 1 : anyHover ? DIM_OP : REST_OP;
           const target = laidOut ? visA[k] * tier : 0;
           dispOp[k] += (target - dispOp[k]) * opK;
           const op = dispOp[k].toFixed(3);
@@ -445,6 +666,7 @@ export default function RidgelineStage() {
         const dt = Math.min((now - prev) / 1000, 0.05);
         prev = now;
         const t = (now - startT) / 1000;
+        lastFrameT = t; // so a click can pick against the exact frame on screen
 
         // after release, inertia drifts the TARGET, eased out until it settles
         if (!dragging && (velYaw !== 0 || velPitch !== 0)) {
@@ -478,8 +700,27 @@ export default function RidgelineStage() {
         const breath = reduceMotion ? 0.66 : 0.64 + 0.22 * Math.sin(t * 2.2);
         const hoverGlow = hoverAmt * breath;
 
-        gpu.render({ time: t, yaw, pitch, hoverBand: shownBand, hoverGlow });
-        updateSurvey(yaw, pitch, t, dt);
+        // focus dolly + isolation: ease the camera lean-in and the dim toward the
+        // selected state. focusBand is held sticky until the dim has fully faded so
+        // it eases off the right band on dismiss rather than snapping to none.
+        const focused = selectedRef.current != null;
+        const fk = reduceMotion ? 1 : 1 - Math.exp(-dt / FOCUS_TAU);
+        radiusScale += ((focused ? 0.84 : 1) - radiusScale) * fk;
+        focusAmt += ((focused ? 1 : 0) - focusAmt) * fk;
+        if (focused) focusBand = selectedRef.current as number;
+        else if (focusAmt < 0.01) focusBand = -1;
+
+        gpu.render({
+          time: t,
+          yaw,
+          pitch,
+          hoverBand: shownBand,
+          hoverGlow,
+          focusBand,
+          focusAmt,
+          radiusScale,
+        });
+        updateSurvey(yaw, pitch, t, dt, radiusScale);
         raf = requestAnimationFrame(frame);
       };
       raf = requestAnimationFrame(frame);
@@ -545,6 +786,80 @@ export default function RidgelineStage() {
         </svg>
         <span className="ridge-hint-label">Drag to rotate</span>
       </button>
+
+      {/* focused experience: clicking a slice dims the rest, dollies the camera in,
+          and grows this glass panel in from the right — the lit ring stays the hero
+          on the left while a breath of detail appears beside it. The scrim captures
+          a click anywhere outside the panel to dismiss (Escape + ✕ also close). */}
+      <AnimatePresence>
+        {selected !== null && (
+          <motion.div
+            key="ridge-scrim"
+            className="ridge-scrim"
+            aria-hidden="true"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.5, ease: PANEL_EASE }}
+            onClick={() => select(null)}
+          />
+        )}
+        {selected !== null && (
+          <motion.aside
+            key="ridge-panel"
+            ref={panelRef}
+            className="ridge-panel"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="ridge-panel-role"
+            onKeyDown={onPanelKeyDown}
+            initial={reduce ? { opacity: 0 } : { opacity: 0, scale: 0.94, y: 14, filter: "blur(8px)" }}
+            animate={reduce ? { opacity: 1 } : { opacity: 1, scale: 1, y: 0, filter: "blur(0px)" }}
+            exit={reduce ? { opacity: 0 } : { opacity: 0, scale: 0.96, y: 10, filter: "blur(6px)" }}
+            transition={{ duration: 0.62, ease: PANEL_EASE }}
+          >
+            <button
+              type="button"
+              className="ridge-panel-close"
+              ref={closeBtnRef}
+              onClick={() => select(null)}
+              aria-label="Close"
+            >
+              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+              </svg>
+            </button>
+            <motion.div
+              className="ridge-panel-body"
+              variants={staggerVariants}
+              initial="hide"
+              animate="show"
+            >
+              <motion.p className="ridge-eyebrow" variants={itemVariants}>
+                {STATIONS[selected].label}
+              </motion.p>
+              <motion.h2 id="ridge-panel-role" className="ridge-role" variants={itemVariants}>
+                {STATIONS[selected].role}
+              </motion.h2>
+              <motion.p className="ridge-body" variants={itemVariants}>
+                {STATIONS[selected].body}
+              </motion.p>
+              <motion.p className="ridge-meta-line" variants={itemVariants}>
+                {STATIONS[selected].meta}
+              </motion.p>
+              <motion.div variants={itemVariants}>
+                {/* liquid CTA — same recipe as the drag hint; its action comes later */}
+                <button className="ridge-cta" type="button">
+                  <span className="ridge-cta-label">{STATIONS[selected].cta}</span>
+                  <svg className="ridge-cta-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <path d="M5 12h14M13 6l6 6-6 6" />
+                  </svg>
+                </button>
+              </motion.div>
+            </motion.div>
+          </motion.aside>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

@@ -166,7 +166,9 @@ const TWO_PI : f32 = 6.28318530718;
   // one crisp defined circle near the inner edge (the bright ring hugging the peak)
   let circ = (1.0 - smoothstep(0.0, raa * 2.2, abs(rings - 8.4))) * smoothstep(0.0, 0.02, r);
 
-  let halo = ring * dots * env * 0.66 + circ * 0.58 + env * dots * 0.07;
+  // dim the halo by the focus amount (hov.w) so the sky recedes with the slopes
+  // when a slice is selected, keeping the lit ring the sole bright element
+  let halo = (ring * dots * env * 0.66 + circ * 0.58 + env * dots * 0.07) * (1.0 - 0.62 * F.hov.w);
   return vec4<f32>(vec3<f32>(halo), 1.0);
 }
 `;
@@ -276,6 +278,20 @@ struct VsOut {
     // whole band lifts as one when the pointer rests anywhere on the experience.
     let wash = prof * F.hov.y * (0.34 + 0.52 * lit) * (1.0 - 0.34 * snow);
     c = c + wash;
+  }
+
+  // ---- focus isolation: when a career slice is CLICKED, recede every other band
+  // toward black so the chosen ring reads as the lit hero. hov = (hoverBand,
+  // hoverGlow, focusBand, focusAmt). Reuses the same plan-radius rw + RINGS as the
+  // hover wash, with a feathered boundary so there's no visible ring edge — the
+  // un-selected slopes simply dim to a faint structure, never a hard void. -------
+  if (F.hov.w > 0.0001 && F.hov.z >= 0.0) {
+    let sel = clamp(i32(F.hov.z), 0, 6);
+    let sc  = RINGS[sel];
+    let dn  = abs(rw - sc) / 660.0;                 // 0 at the slice centre (same width as hover)
+    let inBand = 1.0 - smoothstep(0.55, 1.25, dn);  // 1 on the selected band → 0 outside, feathered
+    let dim = mix(0.18, 1.0, inBand);               // others fall to 18% — recessed, not deleted
+    c = c * mix(1.0, dim, F.hov.w);
   }
   return vec4<f32>(vec3<f32>(c), 1.0);                     // opaque → writes depth, occludes
 }
