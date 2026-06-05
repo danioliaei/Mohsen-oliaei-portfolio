@@ -246,11 +246,10 @@ struct VsOut {
     ring = max(ring, 1.0 - smoothstep(0.6, 1.7, dPix));   // a fine ~1.4 px hairline
     moat = max(moat, 1.0 - smoothstep(2.0, 5.5, dPix));   // a slim flanking band
   }
-  // each ring clears a band of breathing room out of the hairline weave on its
-  // flanks (the survey "moat") so the cut still reads as a ring — but gently now,
-  // a soft dimming rather than a black trench, so the slice borders feel surveyed
-  // onto the slope instead of carved through it
-  hair = hair * (1.0 - 0.32 * clamp(moat - ring, 0.0, 1.0));
+  // each ring barely breathes the hairline weave on its flanks (the survey "moat") —
+  // a whisper of dimming, not a trench, so the slice boundary dissolves into the
+  // slope and never reads as a drawn border line
+  hair = hair * (1.0 - 0.07 * clamp(moat - ring, 0.0, 1.0));
 
   // ---- monochrome shading: form from a soft key light, snow from elevation --
   let n = normalize(i.nrm);
@@ -274,14 +273,13 @@ struct VsOut {
   let snowFill = snow * snow * (0.24 + 0.46 * diff);
   var c = lum + snowFill;                          // the base surface
 
-  // ---- the seven SURVEY RINGS as a quiet contour ---------------------------
-  // a soft off-white on the dark rock / dune (no longer riding hot above the bloom
-  // line) and a muted grey where it crosses the snow — the same bright-on-rock /
-  // dark-on-snow inversion the weave uses, but pulled WAY back so the slice borders
-  // read as gentle surveyed contours dividing the massif, not stark cuts slicing it
-  // apart. Blended partially (ring * 0.68) so even the stroke peak stays restrained.
+  // ---- the seven SURVEY RINGS, dissolved into the slope --------------------
+  // pulled down to a near-invisible trace: the faintest tonal lean (off-white on
+  // rock, muted grey on snow) so the survey geometry is still THERE for the hover
+  // glow to ride, but the resting eye reads one continuous mountain — no drawn line
+  // separating the slices.
   let ringTone = mix(1.16, 0.20, snow);
-  c = mix(c, ringTone, ring * 0.5);
+  c = mix(c, ringTone, ring * 0.07);
 
   // ---- hover wash: when the pointer rests on a career callout, ITS slice of the
   // massif lifts in a soft, breathing pulse (amplitude driven from RidgelineStage).
@@ -294,10 +292,11 @@ struct VsOut {
     let dn = abs(rw - hc) / 660.0;                  // 0 at the slice centre → 1 at edges
     let prof = 1.0 - smoothstep(0.0, 1.0, dn);      // a smooth bump across the band
     // additive wash, sculpted by the key light so the lit slice keeps its form;
-    // eased back on snow so the summit slices brighten without flattening to white,
-    // and the hovered ring's own contour stroke flares a touch to anchor the eye
+    // eased back on snow so the summit slices brighten without flattening to white.
+    // the wash is a smooth radial bump across the band — no hard stroke — so hovering
+    // lights the slice as a soft swell of the slope, never by drawing its border back in
     let wash = prof * F.hov.y * (0.27 + 0.50 * lit) * (1.0 - 0.34 * snow);
-    c = c + wash + ring * prof * F.hov.y * 0.7;
+    c = c + wash + ring * prof * F.hov.y * 0.12;
   }
   return vec4<f32>(vec3<f32>(c), 1.0);                     // opaque → writes depth, occludes
 }

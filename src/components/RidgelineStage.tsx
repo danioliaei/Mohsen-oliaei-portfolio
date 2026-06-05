@@ -301,6 +301,8 @@ export default function RidgelineStage() {
       const ptsA = new Array<string>(STATIONS.length).fill("");
       const lxA = new Array<number>(STATIONS.length).fill(0);
       const eyA = new Array<number>(STATIONS.length).fill(0);
+      const axA = new Array<number>(STATIONS.length).fill(0); // projected anchor x (canvas px)
+      const ayA = new Array<number>(STATIONS.length).fill(0); // projected anchor y (canvas px)
 
       const updateSurvey = (yaw: number, pitch: number, t: number) => {
         const overlay = overlayRef.current;
@@ -336,12 +338,7 @@ export default function RidgelineStage() {
         if (phi < -Math.PI) phi += TWO_PI;
         const face = 1 - smooth(FACE_NEAR, FACE_FAR, Math.abs(phi));
 
-        // which slice the pointer is resting on this frame (never mid-drag); when
-        // discs overlap, a label hit wins outright, else the nearest anchor takes it
-        let foundHover = -1;
-        let bestScore = Infinity;
-
-        // ---- pass 1: project + lay out every visible station, resolve the hover ----
+        // ---- pass 1: project + lay out every visible station ----------------------
         for (let k = 0; k < STATIONS.length; k++) {
           let vis = face;
           // project the anchor where this ring crosses the mountain's near face
@@ -353,6 +350,8 @@ export default function RidgelineStage() {
             ptsA[k] = "";
             continue;
           }
+          axA[k] = a.x;
+          ayA[k] = a.y;
 
           // splay the leader up and out, then clamp it clear of the header band and
           // the viewport edges. Alternate the splay side by parity (even → left, odd
@@ -374,23 +373,36 @@ export default function RidgelineStage() {
           ptsA[k] = `${a.x.toFixed(1)},${a.y.toFixed(1)} ${ex.toFixed(1)},${ey.toFixed(1)} ${sx.toFixed(1)},${ey.toFixed(1)}`;
           lxA[k] = lx;
           eyA[k] = ey;
+        }
 
-          // pointer hover → light THIS slice. A generous disc around the anchor on
-          // the slope and the label box itself both count, so the eye can rest on the
-          // words or on the band they point to.
-          if (!dragging && hx >= 0 && vis > 0.12) {
-            const dxh = hx - a.x;
-            const dyh = hy - a.y;
-            const d2 = dxh * dxh + dyh * dyh;
-            const nearAnchor = d2 < 132 * 132;
+        // ---- resolve the hovered slice (mouse only, never mid-drag) ----------------
+        // The career slices read as a vertical stack of contour bands on the near
+        // face, so the pointer picks a slice by its HEIGHT on screen: each station
+        // owns a wide horizontal slab around its anchor — its width scaled by the
+        // ring's plan radius, so a summit slab stays tight while a base slab spans the
+        // broad dunes — and the nearest band by screen-y wins. This lights the whole
+        // slice the pointer rests on, not just a small disc on the anchor dot. The
+        // floating label box still wins outright (score −1) so resting on the words
+        // lights its band too.
+        let foundHover = -1;
+        let bestScore = Infinity;
+        if (!dragging && hx >= 0) {
+          for (let k = 0; k < STATIONS.length; k++) {
+            if (visA[k] <= 0.12 || !ptsA[k]) continue;
             const inLabel =
-              hx >= lx - 14 && hx <= lx + labelW[k] + 14 && hy >= ey - 32 && hy <= ey + 8;
-            if (nearAnchor || inLabel) {
-              const score = inLabel ? -1 : d2; // a label hit beats any anchor disc
-              if (score < bestScore) {
-                bestScore = score;
-                foundHover = k;
-              }
+              hx >= lxA[k] - 14 && hx <= lxA[k] + labelW[k] + 14 && hy >= eyA[k] - 32 && hy <= eyA[k] + 8;
+            let score = Infinity;
+            if (inLabel) {
+              score = -1;
+            } else {
+              const halfW = 120 + (STATIONS[k].radius / 5600) * 360; // summit tight → base broad
+              const dx = hx - axA[k];
+              const dy = hy - ayA[k];
+              if (Math.abs(dx) <= halfW && Math.abs(dy) <= 132) score = Math.abs(dy);
+            }
+            if (score < bestScore) {
+              bestScore = score;
+              foundHover = k;
             }
           }
         }
