@@ -64,6 +64,18 @@ export interface RidgeFrame {
   /** Hover pulse amplitude 0..1 (eased on enter, gently breathing, eased out on
    *  leave); 0 leaves every slice at rest. */
   hoverGlow?: number;
+  /** SELECTED (clicked) career slice 0..6, or -1 when nothing is focused. While a
+   *  slice is focused every OTHER band recedes toward black so the chosen ring reads
+   *  as the lit hero. Held sticky through the fade-out so the dim eases off the right
+   *  band rather than snapping. */
+  focusBand?: number;
+  /** Focus / isolation amount 0..1 (eased on select, eased out on dismiss). Drives
+   *  both the dim of the un-selected bands and the camera dolly via `radiusScale`. */
+  focusAmt?: number;
+  /** Orbit-radius multiplier: 1 at rest, ~0.84 when a slice is focused (a gentle
+   *  dolly-in toward the summit). MUST match the value the survey overlay projects
+   *  with, or the callouts slide off the mountain during the zoom. */
+  radiusScale?: number;
 }
 
 /* ---- orbit camera: drag to spin a full turn around the summit -------------
@@ -175,15 +187,19 @@ export function ridgeCamera(
   pitch: number,
   aspect: number,
   time = 0,
+  radiusScale = 1,
 ): { vp: Float32Array; eye: [number, number, number] } {
   const azim = ORBIT.azim + yaw + Math.sin(time * 0.05) * 0.0045;
   const p = Math.min(Math.max(pitch, PITCH_LO), PITCH_HI);
   const elev = ORBIT.elev + p + Math.sin(time * 0.037) * 0.0035;
   const ce = Math.cos(elev);
   const se = Math.sin(elev);
-  const ex = TGT[0] + ORBIT.radius * ce * Math.sin(azim);
-  const ey = TGT[1] + ORBIT.radius * se;
-  const ez = TGT[2] + ORBIT.radius * ce * Math.cos(azim);
+  // a focus dolly scales the orbit radius (eye → summit) without touching the
+  // azim/elev, so it's a pure lean-in that never re-frames or risks the pitch walls.
+  const R = ORBIT.radius * radiusScale;
+  const ex = TGT[0] + R * ce * Math.sin(azim);
+  const ey = TGT[1] + R * se;
+  const ez = TGT[2] + R * ce * Math.cos(azim);
   const view = lookAt(ex, ey, ez, TGT[0], TGT[1], TGT[2], 0, 1, 0);
   return { vp: mul(persp(FOVY, aspect, NEAR, FAR), view), eye: [ex, ey, ez] };
 }
@@ -288,15 +304,17 @@ export function pickBand(
   py: number,
   W: number,
   H: number,
+  radiusScale = 1,
 ): number {
-  // the exact rendered eye (mirror ridgeCamera, breathing included)
+  // the exact rendered eye (mirror ridgeCamera, breathing + focus dolly included)
   const azim = ORBIT.azim + yaw + Math.sin(time * 0.05) * 0.0045;
   const p = Math.min(Math.max(pitch, PITCH_LO), PITCH_HI);
   const elev = ORBIT.elev + p + Math.sin(time * 0.037) * 0.0035;
   const ce = Math.cos(elev), se = Math.sin(elev);
-  const ex = TGT[0] + ORBIT.radius * ce * Math.sin(azim);
-  const ey = TGT[1] + ORBIT.radius * se;
-  const ez = TGT[2] + ORBIT.radius * ce * Math.cos(azim);
+  const R = ORBIT.radius * radiusScale;
+  const ex = TGT[0] + R * ce * Math.sin(azim);
+  const ey = TGT[1] + R * se;
+  const ez = TGT[2] + R * ce * Math.cos(azim);
 
   // camera basis aimed at the summit pivot
   let fx = TGT[0] - ex, fy = TGT[1] - ey, fz = TGT[2] - ez;
@@ -639,7 +657,7 @@ export class RidgelineScene {
     // in RidgelineStage projects its anchors from the exact same eye — the labels
     // stay welded to the mountain as it spins. (Breathing lives inside the helper:
     // a whisper of sub-degree drift so an untouched mountain still feels alive.)
-    const { vp, eye } = ridgeCamera(s.yaw, s.pitch, aspect, s.time);
+    const { vp, eye } = ridgeCamera(s.yaw, s.pitch, aspect, s.time, s.radiusScale ?? 1);
     const [ex, ey, ez] = eye;
 
     const u = this.uArr;
@@ -648,7 +666,10 @@ export class RidgelineScene {
     u[20] = NEAR; u[21] = FAR; u[22] = WORLD_H_MAX; u[23] = s.time * 0.012; // haloSpin
     u[24] = 0.34; u[25] = 0.34; u[26] = 0.03; u[27] = 1.0; // bloomAmt, vignette, grain, exposure
     u[28] = ex; u[29] = ey; u[30] = ez; u[31] = 0;
-    u[32] = s.hoverBand ?? -1; u[33] = s.hoverGlow ?? 0; u[34] = 0; u[35] = 0; // hov
+    // hov = (hoverBand, hoverGlow, focusBand, focusAmt): x/y light a hovered slice,
+    // z/w recede every OTHER band so the focused (clicked) slice reads as the hero.
+    u[32] = s.hoverBand ?? -1; u[33] = s.hoverGlow ?? 0;
+    u[34] = s.focusBand ?? -1; u[35] = s.focusAmt ?? 0;
     this.g.device.queue.writeBuffer(this.uBuf, 0, u.buffer, 0, 256);
   }
 
