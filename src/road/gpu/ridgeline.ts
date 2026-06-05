@@ -205,6 +205,157 @@ export function projectToScreen(
   return { x: ((cx / cw) * 0.5 + 0.5) * W, y: (1 - ((cy / cw) * 0.5 + 0.5)) * H, visible: true };
 }
 
+/* ---- pointer → career SLICE (terrain pick) ---------------------------------
+   A JS twin of the WGSL height field (RIDGE_FIELD_WGSL), kept in lock-step with
+   the shader, so the stage can cast the camera ray through the pointer, intersect
+   the very mountain it renders, and read the world (x,z) — hence the plan RADIUS,
+   hence which surveyed ring band the pointer is resting on. This is what lets a
+   hover anywhere on a slice's whole face light it, not just a disc by the anchor. */
+const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
+const fract1 = (x: number) => x - Math.floor(x);
+const smoothstep01 = (e0: number, e1: number, x: number) => {
+  const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0)));
+  return t * t * (3 - 2 * t);
+};
+function hash2(x: number, y: number): number {
+  let p3x = fract1(x * 0.1031), p3y = fract1(y * 0.1031), p3z = fract1(x * 0.1031);
+  const d = p3x * (p3y + 33.33) + p3y * (p3z + 33.33) + p3z * (p3x + 33.33);
+  p3x += d; p3y += d; p3z += d;
+  return fract1((p3x + p3y) * p3z);
+}
+function vnoise(x: number, y: number): number {
+  const ix = Math.floor(x), iy = Math.floor(y);
+  const fx = x - ix, fy = y - iy;
+  const ux = fx * fx * (3 - 2 * fx), uy = fy * fy * (3 - 2 * fy);
+  return lerp(
+    lerp(hash2(ix, iy), hash2(ix + 1, iy), ux),
+    lerp(hash2(ix, iy + 1), hash2(ix + 1, iy + 1), ux),
+    uy,
+  );
+}
+function fbm2(x: number, y: number): number {
+  let s = 0, a = 0.5, f = 1;
+  for (let i = 0; i < 5; i++) { s += a * vnoise(x * f, y * f); f *= 2; a *= 0.5; }
+  return s;
+}
+function ridged(x: number, y: number): number {
+  let s = 0, a = 0.5, f = 1, prev = 1;
+  for (let i = 0; i < 6; i++) {
+    let n = vnoise(x * f, y * f);
+    n = 1 - Math.abs(2 * n - 1);
+    n = n * n;
+    s += a * n * prev; prev = n; f *= 2; a *= 0.5;
+  }
+  return s;
+}
+const ZN = 500; // near edge (mirrors the shader)
+function heightAtJS(x: number, z: number): number {
+  const dx = x - 0; // PEAK_X = 0
+  const dz = z - PEAK_Z;
+  const rad = Math.sqrt(dx * dx * 1.05 + dz * dz * 0.58) / 3300;
+  const sharp = Math.max(0, 1 - rad * 1.3);
+  const coneB = Math.exp(-rad * rad * 0.95);
+  let h = PEAK_H * (0.34 * coneB + 1.0 * sharp);
+  const gate = smoothstep01(0.05, 0.46, coneB);
+  const spur = ridged(x * 0.00072 + 13.0, z * 0.0006 + 7.0);
+  h += (spur - 0.35) * 1450 * gate;
+  const gully = ridged(x * 0.003 + 41.0, z * 0.00118 + 9.0);
+  h += gully * 520 * gate;
+  const gully2 = ridged(x * 0.0068 + 5.0, z * 0.0025 + 23.0);
+  h += gully2 * 195 * gate;
+  const plain = fbm2(x * 0.00042 + 21.0, z * 0.00052 + 21.0);
+  const plain2 = fbm2(x * 0.00022 + 81.0, z * 0.00026 + 81.0);
+  h += plain * 220 + plain2 * 300;
+  const s1 = Math.exp(-(((x + 5400) * (x + 5400) + (z - 6000) * (z - 6000) * 0.7)) / 6.0e6);
+  const s2 = Math.exp(-(((x - 6000) * (x - 6000) + (z - 12200) * (z - 12200) * 0.7)) / 7.0e6);
+  h += s1 * 600 + s2 * 520;
+  const near = 1 - smoothstep01(ZN, 6000, z);
+  h += Math.sin(x * 0.0012 + z * 0.00094) * 38 * near;
+  h += fbm2(x * 0.0015 + 5.0, z * 0.00175 + 5.0) * 50 * near;
+  return h;
+}
+
+/** Cast the camera ray through pointer pixel (px,py) and return the index of the
+ *  career SLICE (0 = tight summit ring … 6 = wide dune ring) the ray's terrain hit
+ *  falls on — matching RINGS in the shader and STATIONS in RidgelineStage — or -1
+ *  when the ray misses the mountain or lands past the widest surveyed ring. */
+export function pickBand(
+  yaw: number,
+  pitch: number,
+  aspect: number,
+  time: number,
+  px: number,
+  py: number,
+  W: number,
+  H: number,
+): number {
+  // the exact rendered eye (mirror ridgeCamera, breathing included)
+  const azim = ORBIT.azim + yaw + Math.sin(time * 0.05) * 0.0045;
+  const p = Math.min(Math.max(pitch, PITCH_LO), PITCH_HI);
+  const elev = ORBIT.elev + p + Math.sin(time * 0.037) * 0.0035;
+  const ce = Math.cos(elev), se = Math.sin(elev);
+  const ex = TGT[0] + ORBIT.radius * ce * Math.sin(azim);
+  const ey = TGT[1] + ORBIT.radius * se;
+  const ez = TGT[2] + ORBIT.radius * ce * Math.cos(azim);
+
+  // camera basis aimed at the summit pivot
+  let fx = TGT[0] - ex, fy = TGT[1] - ey, fz = TGT[2] - ez;
+  const fl = 1 / Math.hypot(fx, fy, fz); fx *= fl; fy *= fl; fz *= fl;
+  // right = normalize(cross(forward, worldUp(0,1,0))) = normalize(-fz, 0, fx)
+  let rx = -fz, rz = fx;
+  const rl = 1 / Math.hypot(rx, rz); rx *= rl; rz *= rl;
+  // camUp = cross(right, forward)
+  const ux = -rz * fy, uy = rz * fx - rx * fz, uz = rx * fy;
+
+  const ndcX = (px / W) * 2 - 1;
+  const ndcY = 1 - (py / H) * 2;
+  const tanY = Math.tan(FOVY / 2);
+  const tanX = tanY * aspect;
+  let dx = fx + rx * (ndcX * tanX) + ux * (ndcY * tanY);
+  let dy = fy + uy * (ndcY * tanY);
+  let dz = fz + rz * (ndcX * tanX) + uz * (ndcY * tanY);
+  const dl = 1 / Math.hypot(dx, dy, dz); dx *= dl; dy *= dl; dz *= dl;
+
+  // march the ray until it drops below the terrain, then bisect to the surface
+  const STEP = 140, TMAX = 44000;
+  let tPrev = NEAR;
+  let dPrev = (ey + dy * tPrev) - heightAtJS(ex + dx * tPrev, ez + dz * tPrev);
+  let hit = -1;
+  for (let t = NEAR + STEP; t <= TMAX; t += STEP) {
+    const diff = (ey + dy * t) - heightAtJS(ex + dx * t, ez + dz * t);
+    if (dPrev > 0 && diff <= 0) {
+      let lo = tPrev, hi = t;
+      for (let it = 0; it < 14; it++) {
+        const tm = (lo + hi) * 0.5;
+        if ((ey + dy * tm) - heightAtJS(ex + dx * tm, ez + dz * tm) > 0) lo = tm;
+        else hi = tm;
+      }
+      hit = (lo + hi) * 0.5;
+      break;
+    }
+    dPrev = diff; tPrev = t;
+  }
+  if (hit < 0) return -1;
+
+  // plan radius at the hit (mirrors the shader's baseR + warp), then nearest ring
+  const hx = ex + dx * hit, hz = ez + dz * hit;
+  const dxp = hx, dzp = hz - PEAK_Z;
+  const baseR = Math.sqrt(dxp * dxp * 1.05 + dzp * dzp * 0.58);
+  const warp =
+    (fbm2(hx * 0.00026 + 47.0, hz * 0.00023 + 47.0) - 0.5) * 980 +
+    (fbm2(hx * 0.0009 + 12.0, hz * 0.00078 + 12.0) - 0.5) * 210;
+  const rw = baseR + warp;
+
+  const RINGS = [720, 1300, 1980, 2750, 3600, 4550, 5600]; // newest → oldest (STATIONS order)
+  if (rw > RINGS[6] + 700) return -1; // past the widest ring → foreground dunes, no slice
+  let best = -1, bestD = Infinity;
+  for (let k = 0; k < 7; k++) {
+    const d = Math.abs(rw - RINGS[k]);
+    if (d < bestD) { bestD = d; best = k; }
+  }
+  return best;
+}
+
 export class RidgelineScene {
   private g: GPUCtx;
   private canvas: HTMLCanvasElement;
