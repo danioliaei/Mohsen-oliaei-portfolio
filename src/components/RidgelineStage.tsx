@@ -397,12 +397,16 @@ export default function RidgelineStage() {
         }
 
         // ---- resolve the hovered slice: a label hit wins; else cast the camera ray
-        // through the pointer and take the slice band its terrain hit falls on, but
-        // only if that station is currently facing the camera (its label visible) ---
+        // through the pointer and take the slice band its terrain hit lands on. The
+        // ray-pick (pickBand) is rotation-independent and respects terrain occlusion,
+        // and the shader lights the FULL 360° ring by plan-radius — so a hover lights
+        // its slice from ANY orbit angle, even after the camera has spun past the rest
+        // pose and the callout anchors (pinned to the near face) have rounded out of
+        // view. The glow is no longer gated on the label still facing the camera. ----
         let foundHover = labelHover;
         if (foundHover < 0 && !dragging && hx >= 0) {
           const cand = pickBand(yaw, pitch, W / H, t, hx, hy, W, H);
-          if (cand >= 0 && visA[cand] > 0.12) foundHover = cand;
+          if (cand >= 0) foundHover = cand;
         }
 
         // ---- pass 2: EASE each callout toward its target opacity (highlight / dim /
@@ -410,7 +414,11 @@ export default function RidgelineStage() {
         // recede over OP_TAU instead of snapping; opacity also eases to/from 0 as a
         // station faces in or rounds out of view. Layout (transform / leader points)
         // is refreshed only while the station is laid out this frame.
-        const anyHover = foundHover >= 0;
+        // dim the resting callouts only when the lit slice's OWN label is on screen.
+        // Hovering a back-flank slice (its callout rounded out of view) still lights the
+        // band, but shouldn't make the front-facing labels recede with nothing visibly
+        // highlighted — that would read as the survey fading for no reason.
+        const anyHover = foundHover >= 0 && visA[foundHover] > 0.004;
         const opK = 1 - Math.exp(-dt / OP_TAU);
         for (let k = 0; k < STATIONS.length; k++) {
           const label = labels[k];
