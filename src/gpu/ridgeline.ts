@@ -76,6 +76,10 @@ export interface RidgeFrame {
    *  dolly-in toward the summit). MUST match the value the survey overlay projects
    *  with, or the callouts slide off the mountain during the zoom. */
   radiusScale?: number;
+  /** Horizontal lens shift in NDC: 0 at rest, eased to ~+0.42 while a slice is
+   *  focused (desktop only) so the massif pans into the clear RIGHT of the dossier.
+   *  MUST match the value the survey overlay projects with (same vp). */
+  focusShift?: number;
 }
 
 /* ---- orbit camera: drag to spin a full turn around the summit -------------
@@ -188,6 +192,7 @@ export function ridgeCamera(
   aspect: number,
   time = 0,
   radiusScale = 1,
+  shiftX = 0,
 ): { vp: Float32Array; eye: [number, number, number] } {
   const azim = ORBIT.azim + yaw + Math.sin(time * 0.05) * 0.0045;
   const p = Math.min(Math.max(pitch, PITCH_LO), PITCH_HI);
@@ -201,7 +206,19 @@ export function ridgeCamera(
   const ey = TGT[1] + R * se;
   const ez = TGT[2] + R * ce * Math.cos(azim);
   const view = lookAt(ex, ey, ez, TGT[0], TGT[1], TGT[2], 0, 1, 0);
-  return { vp: mul(persp(FOVY, aspect, NEAR, FAR), view), eye: [ex, ey, ez] };
+  const vp = mul(persp(FOVY, aspect, NEAR, FAR), view);
+  // off-axis LENS SHIFT: add `shiftX` to clip-x (cx += shiftX·cw), i.e. NDC_x += shiftX
+  // at every depth — slides the whole image horizontally with NO rotation or
+  // perspective distortion. Used while a slice is focused to pan the massif into the
+  // clear right of the dossier (positive = image moves right). pickBand + the survey
+  // projection consume this same vp, so the labels stay welded through the slide.
+  if (shiftX !== 0) {
+    vp[0] += shiftX * vp[3];
+    vp[4] += shiftX * vp[7];
+    vp[8] += shiftX * vp[11];
+    vp[12] += shiftX * vp[15];
+  }
+  return { vp, eye: [ex, ey, ez] };
 }
 
 /** Project a world point through `vp` to CSS-pixel screen coords. `visible` is
@@ -657,7 +674,7 @@ export class RidgelineScene {
     // in RidgelineStage projects its anchors from the exact same eye — the labels
     // stay welded to the mountain as it spins. (Breathing lives inside the helper:
     // a whisper of sub-degree drift so an untouched mountain still feels alive.)
-    const { vp, eye } = ridgeCamera(s.yaw, s.pitch, aspect, s.time, s.radiusScale ?? 1);
+    const { vp, eye } = ridgeCamera(s.yaw, s.pitch, aspect, s.time, s.radiusScale ?? 1, s.focusShift ?? 0);
     const [ex, ey, ez] = eye;
 
     const u = this.uArr;
