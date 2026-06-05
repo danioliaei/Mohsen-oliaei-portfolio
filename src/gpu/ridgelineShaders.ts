@@ -13,7 +13,7 @@
      then BRIGHT → BLUR (a faint snow-glow) and COMPOSITE (box-AA + grade + grain).
 
    Everything is greyscale: black fill, grey rock/dune strokes, near-white snow on
-   the summit. No road / factory / embers / warm grade — this is a separate look.
+   the summit — no colour and no warm grade, pure light on black.
    ========================================================================= */
 
 /** Shared per-frame uniform block. Field order MUST match ridgeline.ts's writer. */
@@ -222,7 +222,7 @@ struct VsOut {
   // plan radius about the summit axis is domain-warped by low-frequency noise, so
   // each ring wanders like a real cut-line carved into the slope rather than a
   // compass-drawn circle — yet, being level-sets of one single field, the rings
-  // bend and pinch but never cross. Keep RINGS in sync with RING_RADII (ridgeline.ts).
+  // bend and pinch but never cross. Keep RINGS in sync with STATIONS (RidgelineStage).
   let dxp = i.wpos.x - PEAK_X;
   let dzp = i.wpos.z - PEAK_Z;
   // the height field's own anisotropy (a touch wider in depth) so the rings are the
@@ -234,8 +234,8 @@ struct VsOut {
   // The slice plan-radius rw is kept only to centre the HOVER wash below; the
   // dividing ring contours (and their flanking moat) are no longer painted, so
   // the career borders are invisible at rest. A slice surfaces only as a soft glow
-  // when the pointer rests anywhere on its band. Radii stay in sync with RING_RADII
-  // (ridgeline.ts) for the hover lookup.
+  // when the pointer rests anywhere on its band. Radii stay in sync with STATIONS
+  // (RidgelineStage) for the hover lookup.
   var RINGS = array<f32, 7>(720.0, 1300.0, 1980.0, 2750.0, 3600.0, 4550.0, 5600.0);
 
   // ---- monochrome shading: form from a soft key light, snow from elevation --
@@ -329,6 +329,50 @@ fn hash12(p : vec2<f32>) -> f32 {
   col = col + vec3<f32>(g * F.post.z);
 
   col = max(col, vec3<f32>(0.0));
+  return vec4<f32>(col, 1.0);
+}
+`;
+
+/* --------------------------------------------------- POST: BRIGHT/BLUR ---- */
+/* Generic half-resolution bright-pass + separable blur, shared by the bloom
+   chain. PassU packs the target texel size, the (unit) blur direction, and a
+   spread/threshold param. Both passes share the same fullscreen-triangle VS. */
+const POST_VS = /* wgsl */ `
+struct PassU { texel : vec4<f32>, params : vec4<f32> };  // xy texel, zw dir
+@group(0) @binding(0) var<uniform> P : PassU;
+@group(0) @binding(1) var samp : sampler;
+@group(0) @binding(2) var tex : texture_2d<f32>;
+struct VsOut { @builtin(position) pos : vec4<f32>, @location(0) uv : vec2<f32> };
+@vertex fn vs(@builtin(vertex_index) vid : u32) -> VsOut {
+  var p = array<vec2<f32>, 3>(vec2<f32>(-1.0,-1.0), vec2<f32>(3.0,-1.0), vec2<f32>(-1.0,3.0));
+  var o : VsOut;
+  let xy = p[vid];
+  o.pos = vec4<f32>(xy, 0.0, 1.0);
+  o.uv = vec2<f32>(xy.x * 0.5 + 0.5, 1.0 - (xy.y * 0.5 + 0.5));
+  return o;
+}
+`;
+
+export const BRIGHT_WGSL = POST_VS + /* wgsl */ `
+@fragment fn fs(i : VsOut) -> @location(0) vec4<f32> {
+  let c = textureSample(tex, samp, i.uv).rgb;
+  let l = max(c.r, max(c.g, c.b));
+  let t = P.params.x;                       // bloom threshold
+  let k = max(l - t, 0.0) / max(l, 1e-4);   // keep colour, soft knee
+  return vec4<f32>(c * k, 1.0);
+}
+`;
+
+export const BLUR_WGSL = POST_VS + /* wgsl */ `
+@fragment fn fs(i : VsOut) -> @location(0) vec4<f32> {
+  let step = P.texel.xy * P.texel.zw * P.params.x;   // per-tap uv offset
+  var w = array<f32, 5>(0.227, 0.194, 0.121, 0.054, 0.016);
+  var col = textureSample(tex, samp, i.uv).rgb * w[0];
+  for (var k : i32 = 1; k < 5; k = k + 1) {
+    let o = step * f32(k);
+    col += textureSample(tex, samp, i.uv + o).rgb * w[k];
+    col += textureSample(tex, samp, i.uv - o).rgb * w[k];
+  }
   return vec4<f32>(col, 1.0);
 }
 `;

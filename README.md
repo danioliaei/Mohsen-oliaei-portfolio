@@ -1,13 +1,16 @@
 # Mohsèn Oliaei — Portfolio
 
-> _The road so far._ — a scroll-driven 3D road through a professional path, rendered on `<canvas>` with a warm sunset palette.
+> _A mountain, drawn in light._ — a monochrome WebGPU homepage: a single peak
+> built from stacked contour lines, orbitable by drag, with surveyor callouts
+> that map a professional path up the slope.
 
 Built with the 2026 flagship frontend stack:
 
 - **React 19** + **TypeScript** (strict)
 - **Vite 6** for dev/build
-- **Motion** (Framer Motion) for UI entrance transitions
-- A hand-rolled perspective canvas engine for the road, milestones, embers, and light pulses
+- **Motion** (Framer Motion) for the header entrance
+- **WebGPU** — a hand-rolled real-time renderer (height-field mesh, hidden-line
+  removal, bloom, and a composite grade/grain pass)
 
 ## Run
 
@@ -18,17 +21,20 @@ npm run build    # type-check + production bundle to dist/
 npm run preview  # preview the production build
 ```
 
+> Requires a WebGPU-capable browser (recent Chrome, Edge, Safari, or Firefox).
+> Without it the page shows a graceful notice.
+
 ## Structure
 
 ```
 src/
-  data/milestones.ts     # the timeline content (edit here)
-  road/engine.ts         # camera / perspective projection math (pure)
-  road/embers.ts         # drifting sunset ember particle field
+  gpu/
+    device.ts           # WebGPU device bootstrap + resource helpers
+    ridgeline.ts        # RidgelineScene renderer, orbit camera, terrain ray-pick
+    ridgelineShaders.ts # all WGSL (backdrop halo, terrain, composite, bloom)
   components/
-    Header.tsx           # wordmark + nav
-    Footer.tsx           # discipline tags
-    RoadStage.tsx        # canvas + cards + HUD, the rAF render loop
+    Header.tsx          # wordmark + nav
+    RidgelineStage.tsx  # canvas + survey callouts + orbit controls (the rAF loop)
   App.tsx
   main.tsx
   index.css
@@ -36,16 +42,20 @@ src/
 
 ## Editing the timeline
 
-Open [`src/data/milestones.ts`](src/data/milestones.ts) and edit the `MILESTONES` array.
-`z` is distance down the road (smaller = sooner); keep entries in ascending `z` order.
+The surveyor callouts live in the `STATIONS` array in
+[`src/components/RidgelineStage.tsx`](src/components/RidgelineStage.tsx). Each
+entry pairs a ring `radius` (its plan radius about the summit — keep these in
+sync with the `RINGS` array in `ridgelineShaders.ts`) with a `label`, listed
+newest (the tight summit ring) → oldest (the wide near-dune ring).
 
-## Enhancements over the original static page
+## Highlights
 
-- Frame-rate-independent scroll easing (exponential smoothing on a time constant)
-- Drifting ember particle field + breathing, speed-reactive vanishing-point halo
-- Light pulses that flow down the road toward the camera
-- Depth-of-field blur and subtle float on distant milestone cards
-- Animated nav underlines and staggered Motion entrances
-- Working `01 → 05` milestone counter (the original never advanced past `01`)
+- Drag (mouse / touch) or the arrow keys orbit the summit, with eased motion and
+  a capped release-flick
+- Hovering a callout (or its slope) lights that career slice with a breathing glow
+- Callouts are projected from the exact render camera each frame, so the labels
+  stay welded to the mountain as it spins
+- Haptic detents on capable phones; a "drag to rotate" affordance that retires
+  after first use
 - `prefers-reduced-motion` support and `:focus-visible` styles
-- High-DPI canvas rendering capped at 2× for performance
+- High-DPI rendering capped at 2× (with a supersample for clean hairlines)

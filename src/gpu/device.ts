@@ -2,9 +2,9 @@
    WebGPU device bootstrap + tiny resource helpers.
 
    Newest-generation path for the homepage. We request a device, configure the
-   canvas swap-chain, and expose a couple of allocation helpers so scene.ts can
-   stay focused on the actual passes. If the browser has no `navigator.gpu`,
-   `createGPU()` resolves to null and RoadStage shows a graceful notice.
+   canvas swap-chain, and expose a couple of allocation helpers so ridgeline.ts
+   can stay focused on the actual passes. If the browser has no `navigator.gpu`,
+   `createGPU()` resolves to null and RidgelineStage shows a graceful notice.
    ========================================================================= */
 
 export interface GPUCtx {

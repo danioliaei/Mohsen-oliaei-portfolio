@@ -1,14 +1,14 @@
 /* =========================================================================
-   RidgelineScene — the monochrome "Unknown Pleasures" mountain experiment.
+   RidgelineScene — the monochrome "Unknown Pleasures" mountain, the homepage hero.
 
-   A self-contained WebGPU renderer, intentionally decoupled from the warm-dusk
-   road scene (scene.ts): its own eye-level camera, its own height field, and a
-   tiny pass chain. One HDR target is drawn (backdrop halo → solid contour mesh
+   A self-contained WebGPU renderer: its own eye-level camera, its own height
+   field, and a tiny pass chain. One HDR target is drawn (backdrop halo → solid contour mesh
    that writes depth for hidden-line removal); a faint bloom adds a snow-glow;
    the composite box-AA's, grades and grains it to the swap-chain.
 
-   Reuses device.ts for the GPU bootstrap and the generic BRIGHT/BLUR post
-   shaders from shaders.ts, so this stays focused on the look.
+   Reuses device.ts for the GPU bootstrap; all of its WGSL (the ridge passes plus
+   the generic BRIGHT/BLUR post chain) lives in ridgelineShaders.ts, so this file
+   stays focused on the look.
    ========================================================================= */
 
 import {
@@ -22,8 +22,9 @@ import {
   RIDGE_BACKDROP_WGSL,
   RIDGE_TERRAIN_WGSL,
   RIDGE_COMPOSITE_WGSL,
+  BRIGHT_WGSL,
+  BLUR_WGSL,
 } from "./ridgelineShaders";
-import { BRIGHT_WGSL, BLUR_WGSL } from "./shaders";
 
 const HDR: GPUTextureFormat = "rgba16float";
 
@@ -70,7 +71,7 @@ export interface RidgeFrame {
    the summit pivot (TGT). At yaw = pitch = 0 the eye lands back on EYE exactly —
    the rest composition is untouched — and the stage then layers a free YAW (a
    full 360°) and a clamped PITCH from the viewer's pointer drag on top. */
-export const ORBIT = (() => {
+const ORBIT = (() => {
   const rx = EYE[0] - TGT[0];
   const ry = EYE[1] - TGT[1];
   const rz = EYE[2] - TGT[2];
@@ -85,7 +86,7 @@ export const ORBIT = (() => {
 /** Absolute elevation clamp (rad): the floor keeps the eye above the dune plain
  *  when tilting up under the peak; the ceiling stops shy of a top-down survey so
  *  the silhouette never flattens out. The stage maps these to pitch-offset walls. */
-export const ELEV_RANGE: readonly [number, number] = [-0.12, 1.0];
+const ELEV_RANGE: readonly [number, number] = [-0.12, 1.0];
 
 /** The ELEV_RANGE clamp expressed as pitch-OFFSET walls (since pitch is added to
  *  ORBIT.elev). Exported so the stage's inertia stops dead at the same walls. */
@@ -136,13 +137,12 @@ function mul(a: Mat4, b: Mat4): Mat4 {
   return o;
 }
 
-/* ---- survey stations (B1): the seven index contours as career callouts ------
-   The index contours are now concentric RINGS (the RINGS array in
-   ridgelineShaders.ts), so each career station is the plan RADIUS of one surveyed
-   ring about the summit axis, oldest (widest, near the dunes) → newest (the tight
-   summit ring). RidgelineStage pins a DOM callout to where each ring crosses the
-   mountain's near, camera-facing face. Keep RING_RADII in sync with the shader. */
-export const RING_RADII = [5600, 4550, 3600, 2750, 1980, 1300, 720] as const; // oldest → newest
+/* ---- survey-station geometry: where a ring's callout pins to the massif ------
+   The index contours are concentric RINGS (the RINGS array in
+   ridgelineShaders.ts) — each career station is the plan RADIUS of one surveyed
+   ring about the summit axis. RidgelineStage (its STATIONS array) carries the
+   radii and pins a DOM callout to where each ring crosses the mountain's near,
+   camera-facing face; ringAnchor() below resolves that world point. */
 const PEAK_Z = 8200; // summit depth (mirrors TGT.z and the shader's PEAK_Z)
 const PEAK_H = 3300; // summit height (mirrors the shader's PEAK_H)
 const RING_ANISO_Z = Math.sqrt(0.58); // on x = 0, baseR = |dz|·√0.58 (shader anisotropy)
@@ -150,7 +150,7 @@ const RING_ANISO_Z = Math.sqrt(0.58); // on x = 0, baseR = |dz|·√0.58 (shader
 /** Dominant ridge height on the central axis (x = 0) at depth z — the smooth cone
  *  part of heightAt(); the painted index contour sits ~here. The small ridged /
  *  fbm relief is folded in as a mean lift so the leader tip grazes the lit band. */
-export function ridgeCrestHeight(z: number): number {
+function ridgeCrestHeight(z: number): number {
   const dz = z - PEAK_Z;
   const rad = Math.sqrt(dz * dz * 0.58) / 3300;
   const sharp = Math.max(0, 1 - rad * 1.3);
