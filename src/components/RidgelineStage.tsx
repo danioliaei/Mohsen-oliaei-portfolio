@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { AnimatePresence } from "motion/react";
 import {
   RidgelineScene,
   PITCH_LO,
@@ -9,6 +9,8 @@ import {
   ringAnchor,
   pickBand,
 } from "../gpu/ridgeline";
+import RoleOverlay from "./RoleOverlay";
+import { STATIONS } from "../data/stations";
 
 /* =========================================================================
    RidgelineStage — mounts the monochrome ridgeline experiment.
@@ -30,91 +32,10 @@ import {
    labels are the only words in the piece: tracked small-caps surveyor annotations —
    ORG · CITY · YEAR — all of them held on the camera-facing flank at once, the one
    under the pointer lit while the rest recede. */
-// Each station carries the floating callout `label` (the full ORG · CITY · YEAR
-// surveyor line, used on desktop and as the panel eyebrow), a `short` ORG 'YY form
-// shown on the narrow mobile flank so the seven labels stay tidy and unclipped, and
-// the copy that fills the focused panel when its slice is clicked: a `role` title, a
-// one-breath `body`, a tracked `meta` line, and the `cta` label for the liquid button
-// (its action comes later). `radius` stays the source of truth for the seven ring
-// radii (see the header note above).
-type Station = {
-  radius: number;
-  label: string;
-  short: string;
-  role: string;
-  body: string;
-  meta: string;
-  cta: string;
-};
-const STATIONS: Station[] = [
-  {
-    radius: 720,
-    label: "STEGRA · STOCKHOLM · 2025",
-    short: "STEGRA '25",
-    role: "BIM Specialist",
-    body: "Shaping BIM strategy and building the Power BI dashboards that keep the project legible. Trains stakeholders and supports the coordination team.",
-    meta: "Now · BIM strategy, Power BI",
-    cta: "View role",
-  },
-  {
-    radius: 1300,
-    label: "NEOBUILT · GOTHENBURG · 2025",
-    short: "NEOBUILT '25",
-    role: "BIM Developer · Founder",
-    body: "Founded a practice building bespoke tooling on the Revit and Navisworks APIs, turning repetitive modelling work into automation.",
-    meta: "Now · C#/.NET, Python, Revit API",
-    cta: "View role",
-  },
-  {
-    radius: 1980,
-    label: "NORTHVOLT · SKELLEFTEÅ · 2023",
-    short: "NORTHVOLT '23",
-    role: "BIM Coordinator",
-    body: "Ran ISO 19650 information management and clash coordination across disciplines, with heavy emphasis on mentoring and training the wider team.",
-    meta: "2023–2024 · ISO 19650, Navisworks",
-    cta: "View role",
-  },
-  {
-    radius: 2750,
-    label: "COLLECTIVE ARCHITECTURE · LOS ANGELES · 2023",
-    short: "COLLECTIVE '23",
-    role: "BIM Modeler",
-    body: "Drove energy and daylight studies in Rhino and Grasshopper, feeding the analysis back into the architectural model.",
-    meta: "2023 · Rhino, Grasshopper",
-    cta: "View role",
-  },
-  {
-    radius: 3600,
-    label: "WHITE ARKITEKTER · GOTHENBURG · 2022",
-    short: "WHITE ARK. '22",
-    role: "BIM Modeler",
-    body: "Modelled Revit healthcare projects and prepared the IFC deliveries the wider design team relied on.",
-    meta: "2022 · Revit, IFC",
-    cta: "View role",
-  },
-  {
-    radius: 4550,
-    label: "CHALMERS · GOTHENBURG · 2020",
-    short: "CHALMERS '20",
-    role: "M.Sc. Architectural Engineering",
-    body: "A master's grounded in computational design, exploring geometry and performance through Rhino and Grasshopper.",
-    meta: "2020–2023 · Computational design, Rhino",
-    cta: "View studies",
-  },
-  {
-    radius: 5600,
-    label: "SHAHID BEHESHTI · TEHRAN · 2014",
-    short: "SHAHID B. '14",
-    role: "B.Sc. Architectural Engineering",
-    body: "Where it began — undergraduate studies alongside the first BIM modelling at Boomshahr Paydar, the start of the whole climb.",
-    meta: "2014–2019 · ArchiCAD, first BIM",
-    cta: "View studies",
-  },
-];
-
-// shared motion language: the project's signature ease, used across the header and
-// the focused-panel choreography.
-const PANEL_EASE = [0.22, 1, 0.36, 1] as const;
+// The seven stations (radii — the source of truth synced with the shader RINGS —
+// plus the callout labels and the focused-overlay dossier copy) now live in
+// ../data/stations.ts, shared with RoleOverlay. `radius`/`label`/`short` drive the
+// survey overlay below; the rest feeds the click-to-focus dossier.
 
 // All seven callouts are held on the camera-facing flank together — no per-station
 // reveal window. A single FACING fade (FACE_NEAR..FACE_FAR, in radians of orbit off
@@ -152,9 +73,7 @@ export default function RidgelineStage() {
   const selectRef = useRef<(i: number | null) => void>(() => {});
   const lastFocusRef = useRef<HTMLElement | null>(null);
   const wasOpenRef = useRef(false);
-  const panelRef = useRef<HTMLElement>(null);
   const closeBtnRef = useRef<HTMLButtonElement>(null);
-  const reduce = useReducedMotion();
 
   const select = useCallback((i: number | null) => {
     selectedRef.current = i;
@@ -178,45 +97,6 @@ export default function RidgelineStage() {
       (lastFocusRef.current ?? hintRef.current)?.focus?.();
     }
   }, [selected]);
-
-  // trap Tab within the open dialog so keyboard focus can't wander onto the dimmed
-  // scene behind it; Escape (closing) is handled by the window keydown in the effect.
-  const onPanelKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key !== "Tab") return;
-    const root = panelRef.current;
-    if (!root) return;
-    const f = root.querySelectorAll<HTMLElement>(
-      'button, [href], input, [tabindex]:not([tabindex="-1"])',
-    );
-    if (!f.length) return;
-    const first = f[0];
-    const last = f[f.length - 1];
-    if (e.shiftKey && document.activeElement === first) {
-      e.preventDefault();
-      last.focus();
-    } else if (!e.shiftKey && document.activeElement === last) {
-      e.preventDefault();
-      first.focus();
-    }
-  };
-
-  // panel motion: a soft scale/blur "grow from the callout" on enter, eased exit;
-  // reduced-motion collapses every layer to a plain cross-fade.
-  const itemVariants = reduce
-    ? { hide: { opacity: 0 }, show: { opacity: 1, transition: { duration: 0.4 } } }
-    : {
-        hide: { opacity: 0, y: 12, filter: "blur(6px)" },
-        show: {
-          opacity: 1,
-          y: 0,
-          filter: "blur(0px)",
-          transition: { duration: 0.5, ease: PANEL_EASE },
-        },
-      };
-  const staggerVariants = {
-    hide: {},
-    show: { transition: { staggerChildren: 0.06, delayChildren: 0.12 } },
-  };
 
   useEffect(() => {
     const cvs = canvasRef.current;
@@ -536,6 +416,7 @@ export default function RidgelineStage() {
         t: number,
         dt: number,
         radiusScale: number,
+        focusShift: number,
       ) => {
         const overlay = overlayRef.current;
         if (!overlay) return;
@@ -568,7 +449,7 @@ export default function RidgelineStage() {
           }
         }
 
-        const { vp } = ridgeCamera(yaw, pitch, W / H, t, radiusScale);
+        const { vp } = ridgeCamera(yaw, pitch, W / H, t, radiusScale, focusShift);
         // one FACING fade for the whole survey: all seven anchors live on the x = 0
         // near ridge, so they face the camera together. Fold the signed orbit to its
         // magnitude (spinning either way surveys the same flank) and fade the lot out
@@ -738,6 +619,13 @@ export default function RidgelineStage() {
         if (focused) focusBand = selectedRef.current as number;
         else if (focusAmt < 0.01) focusBand = -1;
 
+        // pan the massif into the clear RIGHT of the dossier while focused — but only
+        // on a wide (desktop) viewport, where the overlay is a left column beside the
+        // mountain; on a tall phone the overlay stacks vertically, so keep it centred.
+        // Eased by focusAmt so the slide tracks the dolly in and out.
+        const wide = smooth(1.0, 1.4, aspectNow);
+        const focusShift = focusAmt * 0.42 * wide;
+
         gpu.render({
           time: t,
           yaw,
@@ -747,8 +635,9 @@ export default function RidgelineStage() {
           focusBand,
           focusAmt,
           radiusScale,
+          focusShift,
         });
-        updateSurvey(yaw, pitch, t, dt, radiusScale);
+        updateSurvey(yaw, pitch, t, dt, radiusScale, focusShift);
         raf = requestAnimationFrame(frame);
       };
       raf = requestAnimationFrame(frame);
@@ -819,77 +708,20 @@ export default function RidgelineStage() {
         <span className="ridge-hint-label">Drag to rotate</span>
       </button>
 
-      {/* focused experience: clicking a slice dims the rest, dollies the camera in,
-          and grows this glass panel in from the right — the lit ring stays the hero
-          on the left while a breath of detail appears beside it. The scrim captures
-          a click anywhere outside the panel to dismiss (Escape + ✕ also close). */}
+      {/* focused experience: clicking a slice dims the rest of the massif and dollies
+          the camera in (GPU), while this full-screen liquid-glass dossier grows in —
+          the lit slice reads through a light-frost plate on the left, the written
+          record scrolls on the heavy frost to the right. Escape, ✕, or a click on the
+          plate dismiss; prev/next walk the career. */}
       <AnimatePresence>
         {selected !== null && (
-          <motion.div
-            key="ridge-scrim"
-            className="ridge-scrim"
-            aria-hidden="true"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.5, ease: PANEL_EASE }}
-            onClick={() => select(null)}
+          <RoleOverlay
+            key="role-overlay"
+            ref={closeBtnRef}
+            index={selected}
+            onClose={() => select(null)}
+            onNavigate={(i) => select(i)}
           />
-        )}
-        {selected !== null && (
-          <motion.aside
-            key="ridge-panel"
-            ref={panelRef}
-            className="ridge-panel"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="ridge-panel-role"
-            onKeyDown={onPanelKeyDown}
-            initial={reduce ? { opacity: 0 } : { opacity: 0, scale: 0.94, y: 14, filter: "blur(8px)" }}
-            animate={reduce ? { opacity: 1 } : { opacity: 1, scale: 1, y: 0, filter: "blur(0px)" }}
-            exit={reduce ? { opacity: 0 } : { opacity: 0, scale: 0.96, y: 10, filter: "blur(6px)" }}
-            transition={{ duration: 0.62, ease: PANEL_EASE }}
-          >
-            <button
-              type="button"
-              className="ridge-panel-close"
-              ref={closeBtnRef}
-              onClick={() => select(null)}
-              aria-label="Close"
-            >
-              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-              </svg>
-            </button>
-            <motion.div
-              className="ridge-panel-body"
-              variants={staggerVariants}
-              initial="hide"
-              animate="show"
-            >
-              <motion.p className="ridge-eyebrow" variants={itemVariants}>
-                {STATIONS[selected].label}
-              </motion.p>
-              <motion.h2 id="ridge-panel-role" className="ridge-role" variants={itemVariants}>
-                {STATIONS[selected].role}
-              </motion.h2>
-              <motion.p className="ridge-body" variants={itemVariants}>
-                {STATIONS[selected].body}
-              </motion.p>
-              <motion.p className="ridge-meta-line" variants={itemVariants}>
-                {STATIONS[selected].meta}
-              </motion.p>
-              <motion.div variants={itemVariants}>
-                {/* liquid CTA — same recipe as the drag hint; its action comes later */}
-                <button className="ridge-cta" type="button">
-                  <span className="ridge-cta-label">{STATIONS[selected].cta}</span>
-                  <svg className="ridge-cta-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                    <path d="M5 12h14M13 6l6 6-6 6" />
-                  </svg>
-                </button>
-              </motion.div>
-            </motion.div>
-          </motion.aside>
         )}
       </AnimatePresence>
     </div>
