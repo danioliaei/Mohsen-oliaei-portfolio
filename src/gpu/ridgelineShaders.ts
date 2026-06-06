@@ -174,7 +174,7 @@ const TWO_PI : f32 = 6.28318530718;
   // intro globe (the "Home" ball of lines & letters) and fades in as the massif forms,
   // so the spinning ball reads as a clean tangle in empty black. morph 0 = globe → no
   // halo; morph 1 = mountain → full halo.
-  halo = halo * smoothstep(0.55, 0.95, F.mph.x);
+  halo = halo * smoothstep(0.62, 0.90, F.mph.x);  // the sky rises with the settling mountain and lands BEFORE the survey/beacon (0.85-1.0) → a led finish, no halo pop (full halo by 0.90 < 1.0; absent at morph 0)
   return vec4<f32>(vec3<f32>(halo), 1.0);
 }
 `;
@@ -341,7 +341,7 @@ struct VsOut {
   // sweep is freed.)
   // the realistic sweep is the FINISHING flourish: absent on the globe, ramped in over the
   // last of the morph, and exactly 1.0 at vmF = 1 → the endpoint equals today's mountain.
-  let calm = smoothstep(0.55, 1.0, vmF);
+  let calm = smoothstep(0.50, 1.0, vmF);         // realistic rock/snow grows WITH the emerging contour model, not bunched in the tail (endpoint pinned: =1 at vmF=1)
   // ping-pong PHASE from unbounded time via cos() (no fract precision drift at large t)
   let SWEEP_W = 0.52;                              // rad/s -> ~12.1s for a full there-and-back cycle
   let ph = 0.5 - 0.5 * cos(F.a.x * SWEEP_W);       // 0 -> 1 -> 0, symmetric, smooth turn-arounds
@@ -454,7 +454,7 @@ struct VsOut {
   // by vmF = 0.85 (and calm reaches 1 by vmF = 1), so at vmF = 1 finalC = c EXACTLY — the
   // finished mountain is byte-identical to today. Below that the contour model fades up out of
   // black behind the dissolving filament ball (the separate additive globe pass). =====
-  let finalC = c * smoothstep(0.0, 0.85, vmF);   // emerge from black as each vertex lands (the globe is the filament pass)
+  let finalC = c * smoothstep(0.0, 0.72, vmF);   // emerge from black as each vertex lands — knee pulled in so the contour model reads while the funnel still feeds it (endpoint pinned: =c at vmF=1)
   return vec4<f32>(vec3<f32>(finalC), 1.0);                // opaque → writes depth, occludes
 }
 `;
@@ -549,6 +549,21 @@ struct FOut {
   // interior / near-core lines collapse first, the outer shell follows.
   let drainT = clamp(smoothstep(0.12, 0.45, morph) * (1.4 - clamp(at.w, 0.0, 1.0) * 0.8), 0.0, 1.0);
   world = mix(world, vec3<f32>(0.0, world.y, 8200.0), drainT);
+  // POUR (0.32→0.66): the collapsed column now runs DOWN the summit axis and settles onto the
+  // band the mountain occupies, so the streams visibly feed the rising peak instead of hanging
+  // as a fixed-height pillar that just crossfades out — the literal "the centre becomes the
+  // peak" gesture. isCore is EXCLUDED (the nucleus lifts to the apex below). The crust lands low
+  // and the interior lands high → a sheet/waterfall rather than a spike. Saturates by 0.66, which
+  // is < the 0.70 fade ceiling < the 0.72 draw gate, so morph = 1 (filament pass skipped) is
+  // untouched. SIL_Y is the on-axis cone crest, a visual landing target only. No pow / no fwidth.
+  let SIL_Y : f32 = 4422.0;
+  let pourT = smoothstep(0.32, 0.66, morph) * (1.0 - isCore);
+  // landing band kept LOW (≈970..2740) so every shell dissolves onto terrain that has actually
+  // emerged by then — the summit crest (y→4422, key→1) emerges LAST, so pouring the deep/interior
+  // shells up there would land them on still-black mesh (they'd read as draining into a void). The
+  // crust lands lowest, the interior a touch higher → the sheet/waterfall spread is kept.
+  let landY = mix(SIL_Y * 0.22, SIL_Y * 0.62, 1.0 - clamp(at.w, 0.0, 1.0));
+  world = mix(world, vec3<f32>(0.0, landY, 8200.0), pourT);
   // NUCLEUS LIFT (0.30→0.62): the bright core rises up the axis to the summit seed (APEX =
   // 0,5230,8200 in RidgelineStage), handing off to the apex beacon that fades in at morph 0.85.
   let lift = smoothstep(0.3, 0.62, morph) * isCore;
@@ -558,9 +573,9 @@ struct FOut {
   // drained; inner / lower lines fade first, matching the terrain's bottom-up assembly so the web
   // reads as CONSUMED by the rising mountain. The nucleus holds until its lift completes. Max
   // (fadeStart + width) = 0.70 < the 0.72 draw gate → every vertex is provably gone first.
-  var fadeStart = 0.3 + 0.16 * clamp(at.w, 0.0, 1.0);
-  fadeStart = mix(fadeStart, 0.55, isCore);
-  let globeFade = 1.0 - smoothstep(fadeStart, fadeStart + 0.15, morph);
+  var fadeStart = 0.46 + 0.09 * clamp(at.w, 0.0, 1.0);   // 0.46..0.55 — held LATER so a thread survives its descent and dissolves once the rock beneath it has emerged (was 0.30..0.46, which vanished mid-flight)
+  fadeStart = mix(fadeStart, 0.55, isCore);               // nucleus unchanged at 0.55, continuous with the crust
+  let globeFade = 1.0 - smoothstep(fadeStart, fadeStart + 0.15, morph); // MAX end = 0.55 + 0.15 = 0.70 (the existing ceiling, < the 0.72 draw gate)
 
   // ---- BRIGHTNESS — all computed here; the FS just emits it (additive over black). ----
   // DEPTH-DIM by frontness: the back of the ball recedes, the front reads crisp → real VOLUME
