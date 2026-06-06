@@ -174,7 +174,7 @@ const TWO_PI : f32 = 6.28318530718;
   // intro globe (the "Home" ball of lines & letters) and fades in as the massif forms,
   // so the spinning ball reads as a clean tangle in empty black. morph 0 = globe → no
   // halo; morph 1 = mountain → full halo.
-  halo = halo * smoothstep(0.62, 0.90, F.mph.x);  // the sky rises with the settling mountain and lands BEFORE the survey/beacon (0.85-1.0) → a led finish, no halo pop (full halo by 0.90 < 1.0; absent at morph 0)
+  halo = halo * smoothstep(0.66, 0.92, F.mph.x);  // the sky rises WITH the settling massif and lands before the survey (0.80-1.0) → a continuous crescendo, no halo pop (full halo by 0.92 < 1.0; absent at morph 0)
   return vec4<f32>(vec3<f32>(halo), 1.0);
 }
 `;
@@ -547,7 +547,7 @@ struct FOut {
   // morph >= 0.72 (and every fade below terminates by 0.70), so the morph = 1 mountain is untouched.
   // DRAIN (0.12→0.45): collapse each vertex horizontally onto the axis at its own height — the
   // interior / near-core lines collapse first, the outer shell follows.
-  let drainT = clamp(smoothstep(0.12, 0.45, morph) * (1.4 - clamp(at.w, 0.0, 1.0) * 0.8), 0.0, 1.0);
+  let drainT = clamp(smoothstep(0.06, 0.34, morph) * (1.4 - clamp(at.w, 0.0, 1.0) * 0.8), 0.0, 1.0);
   world = mix(world, vec3<f32>(0.0, world.y, 8200.0), drainT);
   // POUR (0.32→0.66): the collapsed column now runs DOWN the summit axis and settles onto the
   // band the mountain occupies, so the streams visibly feed the rising peak instead of hanging
@@ -557,7 +557,7 @@ struct FOut {
   // is < the 0.70 fade ceiling < the 0.72 draw gate, so morph = 1 (filament pass skipped) is
   // untouched. SIL_Y is the on-axis cone crest, a visual landing target only. No pow / no fwidth.
   let SIL_Y : f32 = 4422.0;
-  let pourT = smoothstep(0.32, 0.66, morph) * (1.0 - isCore);
+  let pourT = smoothstep(0.30, 0.62, morph) * (1.0 - isCore);
   // landing band kept LOW (≈970..2740) so every shell dissolves onto terrain that has actually
   // emerged by then — the summit crest (y→4422, key→1) emerges LAST, so pouring the deep/interior
   // shells up there would land them on still-black mesh (they'd read as draining into a void). The
@@ -566,7 +566,7 @@ struct FOut {
   world = mix(world, vec3<f32>(0.0, landY, 8200.0), pourT);
   // NUCLEUS LIFT (0.30→0.62): the bright core rises up the axis to the summit seed (APEX =
   // 0,5230,8200 in RidgelineStage), handing off to the apex beacon that fades in at morph 0.85.
-  let lift = smoothstep(0.3, 0.62, morph) * isCore;
+  let lift = smoothstep(0.36, 0.66, morph) * isCore;
   world = mix(world, vec3<f32>(0.0, 5230.0, 8200.0), lift);
 
   // per-vertex, drain-aware FADE (replaces the old flat globeFade): a line fades only AFTER it has
