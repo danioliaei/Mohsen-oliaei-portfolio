@@ -318,139 +318,7 @@ canvas#ridge:active {
   }
 }
 
-/* ---- rotate affordance (ridgeline) — two minimal CURVED arrows on the side edges -----
-   Replaces the old bottom pill: no plate, no border, no backdrop blur — just a bare ivory
-   swoosh with a soft drop-shadow for legibility over the scene. One per side; they serve
-   BOTH views (spin the globe / orbit the mountain) and stay live as click + keyboard
-   controls. Each gently breathes a nudge toward its own side to invite the drag, and that
-   invitation alone retires (.is-quiet) the first time the viewer rotates — the arrows
-   themselves remain. Wordless: the direction is in the aria-label, never on screen. */
-.ridge-arrow {
-  position: absolute;
-  top: 50%;
-  z-index: 6;
-  display: grid;
-  place-items: center;
-  width: 56px;
-  height: 84px;
-  padding: 0;
-  border: 0;
-  background: none;
-  color: rgba(244, 241, 234, 0.6);
-  cursor: pointer;
-  -webkit-tap-highlight-color: transparent;
-  opacity: 0;
-  animation: ridge-arrow-in 0.9s 0.8s ease forwards;
-  transition:
-    color 0.3s ease,
-    opacity 0.5s ease,
-    transform 0.4s cubic-bezier(0.22, 1, 0.36, 1);
-}
-.ridge-arrow--left {
-  left: clamp(4px, 1.6vw, 26px);
-  transform: translateY(-50%);
-}
-.ridge-arrow--right {
-  right: clamp(4px, 1.6vw, 26px);
-  transform: translateY(-50%);
-}
-.ridge-arrow:hover,
-.ridge-arrow:focus-visible {
-  color: var(--ink);
-  /* keep the global :focus-visible ring (no outline:none) so keyboard focus stays visible */
-}
-.ridge-arrow:active {
-  transform: translateY(-50%) scale(0.9);
-}
-/* an open overlay (a focused slice OR the "Your Assignment?" brief) sits over the scene —
-   hide the arrows beneath it so they never show through the frost on the open flank. */
-.ridge-stage.is-overlay-open .ridge-arrow {
-  opacity: 0;
-  pointer-events: none;
-  animation: none;
-}
-.ridge-stage.is-overlay-open .ridge-arrow .ridge-arrow-icon {
-  animation: none;
-}
-.ridge-arrow-icon {
-  width: 30px;
-  height: 32px;
-  stroke: currentColor;
-  stroke-width: 1.7;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  fill: none;
-  overflow: visible;
-  /* legibility over the bright summit / the dense tangle — no plate needed */
-  filter:
-    drop-shadow(0 0 7px rgba(0, 0, 0, 0.65))
-    drop-shadow(0 1px 2px rgba(0, 0, 0, 0.6));
-}
-/* the breathing invitation lives on the ICON's transform/opacity so it never fights the
-   button's translateY centring or :active scale. Each side drifts toward its own edge. */
-.ridge-arrow--left .ridge-arrow-icon {
-  animation: ridge-arrow-nudge-l 3.8s 1.6s ease-in-out infinite;
-}
-.ridge-arrow--right .ridge-arrow-icon {
-  animation: ridge-arrow-nudge-r 3.8s 1.6s ease-in-out infinite;
-}
-.ridge-arrow.is-quiet .ridge-arrow-icon {
-  animation: none;
-}
-
-@keyframes ridge-arrow-in {
-  to {
-    opacity: 1;
-  }
-}
-@keyframes ridge-arrow-nudge-l {
-  0%,
-  100% {
-    transform: translateX(0);
-    opacity: 0.7;
-  }
-  50% {
-    transform: translateX(-5px);
-    opacity: 1;
-  }
-}
-@keyframes ridge-arrow-nudge-r {
-  0%,
-  100% {
-    transform: translateX(0);
-    opacity: 0.7;
-  }
-  50% {
-    transform: translateX(5px);
-    opacity: 1;
-  }
-}
-
-@media (max-width: 760px) {
-  .ridge-arrow {
-    width: 44px;
-    height: 68px;
-  }
-  .ridge-arrow--left {
-    left: clamp(2px, 1vw, 10px);
-  }
-  .ridge-arrow--right {
-    right: clamp(2px, 1vw, 10px);
-  }
-  .ridge-arrow-icon {
-    width: 23px;
-    height: 25px;
-    stroke-width: 1.8;
-  }
-}
-
 @media (prefers-reduced-motion: reduce) {
-  .ridge-arrow {
-    animation: ridge-arrow-in 0.4s ease forwards;
-  }
-  .ridge-arrow .ridge-arrow-icon {
-    animation: none; /* no breathing nudge — the arrows still show + work as controls */
-  }
   /* reduced motion snaps the focus camera (no pan), so the slice never sweeps the
      seam — drop the frost delay and just show it. */
   .role-frost {
@@ -461,7 +329,7 @@ canvas#ridge:active {
 
 /* ---- bottom drag hint (globe only) ---------------------------------------------
    A tracked small-caps cue centred under the globe, flanked by two little curved
-   arrows. Bare ivory + dark drop-shadow (no plate), matching .ridge-arrow. Opacity
+   arrows. Bare ivory + dark drop-shadow (no plate). Opacity
    is OWNED by the rAF loop (shown only at mc≈0 while still inviting); CSS sets the
    resting colour + a gentle breathing DRIFT (transform only, never opacity, so it
    can't fight the loop). pointer-events:none — drags pass straight through. */
@@ -474,7 +342,7 @@ canvas#ridge:active {
   align-items: center;
   gap: 12px;
   transform: translateX(-50%);
-  color: rgba(244, 241, 234, 0.62);
+  color: rgba(244, 241, 234, 0.75); /* ~4.5:1 on black (AA) — the dark drop-shadow keeps it a whisper */
   opacity: 0; /* the rAF loop owns this */
   pointer-events: none;
   -webkit-user-select: none;
@@ -1585,76 +1453,65 @@ canvas#ridge:active {
 }
 
 /* ===========================================================================
-   Projects timeline overlay — "The Survey Line"
-   A full-screen liquid-glass dialog (composes .role-overlay for the shared base
-   frost + --mono + z-index). An ember datum line across the middle of the frame,
-   a wall of ivory lines rising to a mountain-range silhouette, with a vertical
-   MONTH+YEAR date that drops on hover/focus. Motion owns the entrance; these
-   classes own every hover/focus state, so the two never fight the same property.
+   Projects — "The Dial".
+   Not a frosted modal: a transparent layer welded over the LIVE globe. The globe
+   parks LEFT and calms (its chaotic filaments settle); ~20 organized project lines
+   fan out to the RIGHT from its rim, the selected project resting at 3 o'clock.
+   Dragging the globe (a rotary knob) scrolls projects through the selected slot.
+   The SVG spokes + labels are written imperatively from the rAF loop in
+   RidgelineStage (like the survey + letter cloud), so they stay welded to the
+   projected globe. Same Inter / --mono / tracked-caps grammar as the site headers.
+   pointer-events:none on the root so a drag on empty space falls through to the
+   canvas (the knob); only the controls catch clicks.
    =========================================================================== */
+.projects-dial-root {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  color: var(--ink);
+  pointer-events: none; /* the empty field stays a drag surface for the globe-knob */
+  --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Fira Code", Menlo, Consolas, monospace;
+}
+.projects-dial-root .role-close {
+  pointer-events: auto; /* the root is click-through; the close control is not */
+}
 
-/* a top + bottom vignette frost (the centred timeline needs symmetric framing,
-   NOT the left-masked .role-frost). Delayed ramp so the baseline draws over a
-   near-clear scene, mirroring the role-frost trick. */
-.projects-frost {
+/* a whisper-soft top+bottom scrim so the masthead + labels stay legible — NOT the
+   old heavy centre frost; the live globe must read through clear in the middle. */
+.projects-dial-frost {
   position: absolute;
   inset: 0;
   z-index: 0;
   pointer-events: none;
   background: linear-gradient(
     180deg,
-    rgba(6, 7, 10, 0.66) 0%,
-    rgba(6, 7, 10, 0.42) 20%,
-    rgba(6, 7, 10, 0) 44%,
-    rgba(6, 7, 10, 0) 60%,
-    rgba(6, 7, 10, 0.46) 86%,
-    rgba(6, 7, 10, 0.66) 100%
-  );
-  -webkit-backdrop-filter: blur(20px) saturate(1.05) brightness(0.86);
-  backdrop-filter: blur(20px) saturate(1.05) brightness(0.86);
-  -webkit-mask-image: linear-gradient(
-    180deg,
-    #000 0%,
-    #000 22%,
-    transparent 46%,
-    transparent 58%,
-    #000 84%,
-    #000 100%
-  );
-  mask-image: linear-gradient(
-    180deg,
-    #000 0%,
-    #000 22%,
-    transparent 46%,
-    transparent 58%,
-    #000 84%,
-    #000 100%
+    rgba(6, 7, 10, 0.5) 0%,
+    rgba(6, 7, 10, 0) 26%,
+    rgba(6, 7, 10, 0) 70%,
+    rgba(6, 7, 10, 0.5) 100%
   );
   opacity: 0;
-  animation: projects-frost-in 0.34s cubic-bezier(0.22, 1, 0.36, 1) 0.2s forwards;
+  animation: dial-frost-in 0.5s cubic-bezier(0.22, 1, 0.36, 1) 0.1s forwards;
 }
-@keyframes projects-frost-in {
+@keyframes dial-frost-in {
   to {
     opacity: 1;
   }
 }
 
-/* masthead — the surveyor spine, top-left, floating clear above the peaks */
-.projects-masthead {
+/* masthead — the surveyor spine, top-left, in the shared site grammar */
+.projects-dial-masthead {
   position: absolute;
   z-index: 4;
-  top: clamp(90px, 12vh, 128px);
+  top: clamp(92px, 12vh, 128px);
   left: clamp(34px, 6vw, 84px);
   right: clamp(34px, 6vw, 84px);
   display: flex;
   flex-direction: column;
   gap: clamp(8px, 1.4vh, 16px);
-  pointer-events: none; /* only the back button inside catches clicks */
+  pointer-events: none;
 }
-.projects-masthead .role-back {
-  pointer-events: auto;
-}
-.projects-eyebrow {
+.projects-dial-eyebrow {
   margin: 0;
   font-size: 11px;
   font-weight: 500;
@@ -1663,7 +1520,7 @@ canvas#ridge:active {
   color: rgba(244, 241, 234, 0.62);
   text-shadow: 0 1px 16px rgba(0, 0, 0, 0.5);
 }
-.projects-title {
+.projects-dial-title {
   margin: 0;
   font-size: clamp(38px, 6.2vw, 80px);
   font-weight: 600;
@@ -1674,7 +1531,7 @@ canvas#ridge:active {
     0 2px 28px rgba(0, 0, 0, 0.55),
     0 1px 2px rgba(0, 0, 0, 0.5);
 }
-.projects-coords {
+.projects-dial-coords {
   margin: 2px 0 0;
   font-family: var(--mono);
   font-size: 11px;
@@ -1685,302 +1542,258 @@ canvas#ridge:active {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.projects-coords-head {
+.projects-dial-coords .plate {
   color: rgba(244, 241, 234, 0.7);
 }
-.projects-coords-live {
-  color: var(--c-education);
-  animation: projects-readout-in 0.4s cubic-bezier(0.22, 1, 0.36, 1);
-}
-@keyframes projects-readout-in {
-  from {
-    opacity: 0.2;
-  }
-  to {
-    opacity: 1;
-  }
+.projects-dial-coords .live {
+  color: rgba(244, 241, 234, 0.6);
 }
 
-/* the stage centres the timeline plate in the middle of the screen, with top room
-   reserved for the floating masthead */
-.projects-stage {
+/* the spoke layer — geometry written each frame; pointer-events off so the canvas
+   stays a drag surface (the label buttons below catch the clicks) */
+.projects-dial-svg {
   position: absolute;
   inset: 0;
-  z-index: 2;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: clamp(150px, 19vh, 226px) clamp(20px, 4vw, 48px) clamp(56px, 9vh, 92px);
-}
-.projects-timeline {
-  position: relative;
-  width: 92vw;
-  max-width: 1240px;
-  height: clamp(320px, 52vh, 560px);
-  --pool-x: -9999px;
-  --pool-o: 0;
-}
-.projects-svg {
-  position: absolute;
-  inset: 0;
-  display: block;
+  z-index: 1;
   overflow: visible;
-}
-
-/* the ember baseline — the reference's red datum, warm-dusk amber */
-.projects-baseline {
-  fill: none;
-  stroke: var(--c-education);
-  stroke-width: 1.5;
-  stroke-linecap: round;
-  filter: drop-shadow(0 0 5px rgba(255, 196, 92, 0.32));
-}
-.projects-baseline-head {
-  fill: var(--c-education);
-  filter: drop-shadow(0 0 7px rgba(255, 196, 92, 0.7));
-}
-/* the "you-are-here" ember pool that trails the pointer along the axis */
-.projects-pool {
-  position: absolute;
-  left: 0;
-  right: 0;
-  height: 14px;
   pointer-events: none;
-  opacity: var(--pool-o);
-  transition: opacity 0.4s ease;
-  background: radial-gradient(
-    120px 7px at var(--pool-x) center,
-    rgba(255, 196, 92, 0.22),
-    rgba(255, 196, 92, 0) 70%
-  );
 }
-
-/* year ticks — the lane the vertical date drops into */
-.projects-axis-tick {
-  fill: rgba(244, 241, 234, 0.3);
-  font-family: var(--mono);
-  font-size: 10px;
-  letter-spacing: 0.06em;
-  transition: fill 0.25s ease;
-}
-.projects-axis-tick.is-near {
-  fill: rgba(244, 241, 234, 0.66);
-}
-
-/* the wall of lines */
-.projects-line {
+.dial-line {
   fill: none;
+  stroke: rgba(244, 241, 234, 0.3);
+  stroke-width: 1;
+  stroke-linecap: round;
+  transition:
+    stroke 0.3s ease,
+    stroke-width 0.3s ease;
+}
+.dial-line.is-near {
   stroke: rgba(244, 241, 234, 0.5);
-  stroke-width: 1;
-  stroke-linecap: round;
-  transition:
-    stroke 0.25s ease,
-    stroke-width 0.25s ease,
-    opacity 0.25s ease;
+  stroke-width: 1.1;
 }
-.projects-line.is-lit {
+.dial-line.is-selected {
   stroke: var(--ink);
-  stroke-width: 1.6;
+  stroke-width: 1.7;
 }
-.projects-line.is-dim {
-  opacity: 0.28;
-}
-.projects-line-glow {
-  fill: none;
-  stroke: var(--c-education);
-  stroke-width: 2.6;
-  stroke-linecap: round;
-  opacity: 0;
-  filter: blur(3px);
-  transition: opacity 0.25s ease;
-}
-.projects-line-glow.is-lit {
-  opacity: 0.5;
-}
-.projects-line-glow.is-dim {
-  opacity: 0;
-}
-
-/* node / benchmark dot at each tip */
-.projects-node {
-  fill: var(--ink);
-  /* grow via transform (animatable in every engine) rather than the SVG `r`
-     attribute, which Firefox/Gecko does not transition; the JSX sets r=2.5 */
-  transform-box: fill-box;
-  transform-origin: center;
-  transition:
-    transform 0.2s cubic-bezier(0.22, 1, 0.36, 1),
-    opacity 0.25s ease;
-}
-.projects-node.is-lit {
-  transform: scale(1.5);
-}
-.projects-node.is-dim {
-  opacity: 0.32;
-}
-.projects-node-ring {
-  fill: none;
-  stroke: var(--c-education);
-  stroke-width: 1;
-  opacity: 0;
-  transition: opacity 0.25s ease;
-}
-.projects-node-ring.is-lit {
-  opacity: 0.9;
-}
-
-/* the resting labels — small tracked caps fanning off the tips (the reference's
-   overlapping textwall); the lit one brightens, its neighbours recede */
-.projects-label {
+.dial-node {
   fill: rgba(244, 241, 234, 0.55);
-  font-family: var(--sans);
-  font-size: 9px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  pointer-events: none;
-  paint-order: stroke;
-  stroke: rgba(0, 0, 0, 0.55);
-  stroke-width: 2.4px;
-  transition:
-    fill 0.25s ease,
-    opacity 0.25s ease;
+  transition: fill 0.3s ease;
 }
-.projects-label.is-lit {
-  fill: var(--ink);
-  opacity: 1;
+.dial-node.is-near {
+  fill: rgba(244, 241, 234, 0.72);
 }
-.projects-label.is-dim {
+.dial-node.is-selected {
+  fill: var(--c-education);
+  filter: drop-shadow(0 0 6px rgba(255, 196, 92, 0.55));
+}
+.dial-node-glow {
+  fill: none;
+  stroke: var(--c-education);
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+.dial-node-glow.is-selected {
   opacity: 0.22;
 }
 
-/* the plumb-line + the vertical date drop (the signature) */
-.projects-date-leader {
-  fill: none;
-  stroke: var(--c-education);
-  stroke-width: 1;
-  stroke-linecap: round;
-}
-.projects-date-anchor {
-  position: absolute;
-  z-index: 3;
-  /* centring + entrance transform are owned by motion (x: "-50%") so they don't
-     fight here; this element only carries position + stacking */
-  pointer-events: none;
-}
-.projects-date {
-  display: inline-block;
-  writing-mode: vertical-rl;
-  text-orientation: sideways;
-  font-family: var(--mono);
-  font-size: 11px;
-  font-weight: 500;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  color: var(--ink);
-  white-space: nowrap;
-  text-shadow:
-    0 0 14px rgba(0, 0, 0, 0.7),
-    0 1px 3px rgba(0, 0, 0, 0.6);
-  text-rendering: geometricPrecision;
-}
-
-/* the interaction + a11y layer — one focusable transparent strip per project */
-.projects-hits {
+/* the label layer — each project is a positioned button (its own hit target) */
+.projects-dial-labels {
   position: absolute;
   inset: 0;
-  margin: 0;
-  padding: 0;
-  list-style: none;
+  z-index: 2;
 }
-.projects-hit {
+.dial-label {
   position: absolute;
+  top: 0;
+  left: 0;
   margin: 0;
   padding: 0;
   border: 0;
-  background: transparent;
+  background: none;
+  color: inherit;
+  text-align: left;
   cursor: pointer;
+  pointer-events: auto;
+  opacity: 0; /* the rAF loop owns transform + opacity */
   -webkit-tap-highlight-color: transparent;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  white-space: nowrap;
+  will-change: transform, opacity;
+  text-shadow:
+    0 0 12px rgba(0, 0, 0, 0.75),
+    0 1px 3px rgba(0, 0, 0, 0.6);
 }
-/* the lit line + dropped date ARE the focus indicator — suppress the default box
-   on the invisible strip (the visual change is unmistakable) */
-.projects-hit:focus-visible {
-  outline: none;
+.dial-label:focus-visible {
+  outline: 2px solid rgba(255, 250, 240, 0.85);
+  outline-offset: 5px;
+  border-radius: 3px;
 }
-
-.projects-counter {
-  position: absolute;
-  right: 2px;
-  bottom: -28px;
+/* per-state children: far / near show the compact name; selected blooms to the record */
+.dial-label-title,
+.dial-label-desc,
+.dial-label-meta {
+  display: none;
+}
+.dial-label-short {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgba(244, 241, 234, 0.62);
+}
+.dial-label.is-near .dial-label-short {
+  color: rgba(244, 241, 234, 0.82);
+}
+.dial-label.is-selected {
+  gap: 9px;
+  white-space: normal;
+}
+.dial-label.is-selected .dial-label-short {
+  display: none;
+}
+.dial-label.is-selected .dial-label-title {
+  display: block;
+}
+.dial-label.is-selected .dial-label-desc {
+  display: block;
+}
+.dial-label.is-selected .dial-label-meta {
+  display: flex;
+}
+.dial-label-title {
+  font-size: clamp(20px, 2.6vw, 27px);
+  font-weight: 600;
+  line-height: 1.12;
+  letter-spacing: -0.015em;
+  color: var(--ink);
+  max-width: min(34vw, 360px);
+  white-space: normal;
+}
+.dial-label-desc {
+  font-size: 13.5px;
+  font-weight: 300;
+  line-height: 1.5;
+  color: rgba(244, 241, 234, 0.82);
+  max-width: min(30vw, 320px);
+  white-space: normal;
+}
+.dial-label-meta {
+  align-items: center;
+  gap: 8px;
+  margin-top: 1px;
   font-family: var(--mono);
-  font-size: 10px;
-  letter-spacing: 0.16em;
-  color: rgba(244, 241, 234, 0.4);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(244, 241, 234, 0.6);
+}
+.dial-label-meta .date {
+  color: var(--c-education);
+}
+.dial-label-meta .dot {
+  color: rgba(244, 241, 234, 0.3);
 }
 
-/* ---- responsive ---------------------------------------------------------- */
-/* tablet + mobile: node-only resting state (titles reveal on hover/focus) —
-   keeps the wall clean where labels would collide, closest to the wordless
-   direction of the rest of the site */
-@media (max-width: 1023px) {
-  .projects-label:not(.is-lit) {
-    opacity: 0;
-  }
+/* a visually-hidden live region announces the selected project to screen readers */
+.dial-live {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
 }
-/* narrow: the wall keeps its spacing and the stage scrolls horizontally so the
-   whole 2014–2026 range stays swipeable rather than crushed */
+
+/* the mobile fallback — a compact vertical list; the GPU globe stays behind it */
+.dial-list {
+  display: none;
+}
+
 @media (max-width: 860px) {
-  .projects-stage {
-    justify-content: flex-start;
-    overflow-x: auto;
-    overflow-y: hidden;
-    padding: clamp(132px, 20vh, 188px) 16px clamp(48px, 8vh, 72px);
+  .projects-dial-svg,
+  .projects-dial-labels {
+    display: none;
+  }
+  .projects-dial-masthead {
+    top: clamp(70px, 10vh, 96px);
+    left: 16px;
+    right: 16px;
+  }
+  .projects-dial-title {
+    font-size: clamp(30px, 8.5vw, 46px);
+  }
+  .dial-list {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    top: 44vh;
+    z-index: 3;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    padding: 0 16px calc(24px + env(safe-area-inset-bottom));
+    overflow-y: auto;
     -webkit-overflow-scrolling: touch;
+    pointer-events: auto;
+    /* fade the top edge so rows dissolve up under the masthead */
+    -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 40px);
+    mask-image: linear-gradient(180deg, transparent 0, #000 40px);
   }
-  .projects-timeline {
-    width: 760px;
-    min-width: 760px;
-    flex: 0 0 auto;
+  .dial-list-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+    margin: 0;
+    padding: 12px 14px;
+    border: 1px solid rgba(244, 241, 234, 0.08);
+    border-radius: 7px;
+    background: rgba(8, 9, 12, 0.28);
+    color: inherit;
+    text-align: left;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    transition:
+      background 0.25s ease,
+      border-color 0.25s ease;
   }
-  .projects-title {
-    font-size: clamp(30px, 9vw, 46px);
+  .dial-list-item.is-selected {
+    background: rgba(22, 24, 30, 0.6);
+    border-color: rgba(244, 241, 234, 0.34);
   }
-  .projects-coords {
-    font-size: 10px;
+  .dial-list-item .short {
+    font-size: 12px;
+    font-weight: 500;
     letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: rgba(244, 241, 234, 0.84);
+  }
+  .dial-list-item .year {
+    margin-left: auto;
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    color: rgba(244, 241, 234, 0.5);
+  }
+  .dial-list-item.is-selected .year {
+    color: var(--c-education);
   }
 }
 
-/* ---- contrast + reduced motion ------------------------------------------- */
-@media (prefers-contrast: more) {
-  .projects-line {
-    stroke: rgba(244, 241, 234, 0.7);
-  }
-  .projects-line.is-dim {
-    opacity: 0.5;
-  }
-  .projects-node.is-dim {
-    opacity: 0.55;
-  }
-  .projects-label {
-    fill: rgba(244, 241, 234, 0.82);
-  }
-  .projects-label.is-dim {
-    opacity: 0.45;
-  }
-  .projects-axis-tick {
-    fill: rgba(244, 241, 234, 0.5);
-  }
-}
 @media (prefers-reduced-motion: reduce) {
-  .projects-frost {
+  .projects-dial-frost {
     animation: none;
     opacity: 1;
   }
-  .projects-pool {
-    display: none;
-  }
-  .projects-coords-live {
-    animation: none;
+  .dial-line,
+  .dial-node,
+  .dial-node-glow {
+    transition: none;
   }
 }

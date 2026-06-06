@@ -437,6 +437,11 @@ export interface RidgeFrame {
   /** Motion gate 0..1 for the intro filament flow: 1 = the threads shimmer/stream, 0 =
    *  the web holds still (set to 0 on prefers-reduced-motion). Defaults to 1. */
   motion?: number;
+  /** Projects-dial CALM 0..1 (mph.w): 0 = the chaotic globe; 1 = the filament threads
+   *  settle toward near-stillness as the Projects dial opens. INERT unless the globe is
+   *  showing — the shader gates it by (morph→0) and the filament pass is skipped at
+   *  morph>=0.72, so it can never alter the finished mountain. Defaults to 0. */
+  projAmt?: number;
 }
 
 /* ---- orbit camera: drag to spin a full turn around the summit -------------
@@ -1115,10 +1120,11 @@ export class RidgelineScene {
     // z/w recede every OTHER band so the focused (clicked) slice reads as the hero.
     u[32] = s.hoverBand ?? -1; u[33] = s.hoverGlow ?? 0;
     u[34] = s.focusBand ?? -1; u[35] = s.focusAmt ?? 0;
-    // mph = (morph, globeSpin, motion, spare). morph DEFAULTS to 1 (full mountain) so any path
+    // mph = (morph, globeSpin, motion, projAmt). morph DEFAULTS to 1 (full mountain) so any path
     // that forgets the field renders the finished mountain, never a stuck globe. motion gates the
-    // filament flow (0 on reduced-motion → the web holds still), defaulting to 1.
-    u[36] = s.morph ?? 1; u[37] = s.globeSpin ?? 0; u[38] = s.motion ?? 1; u[39] = 0;
+    // filament flow (0 on reduced-motion → the web holds still), defaulting to 1. projAmt calms the
+    // filaments as the Projects dial opens (globe-only; defaults to 0 → today's chaotic ball).
+    u[36] = s.morph ?? 1; u[37] = s.globeSpin ?? 0; u[38] = s.motion ?? 1; u[39] = s.projAmt ?? 0;
     this.g.device.queue.writeBuffer(this.uBuf, 0, u.buffer, 0, 256);
   }
 
