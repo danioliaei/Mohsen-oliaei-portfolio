@@ -15,6 +15,7 @@ import {
 } from "../gpu/ridgeline";
 import RoleOverlay from "./RoleOverlay";
 import AssignmentOverlay from "./AssignmentOverlay";
+import ProjectsOverlay from "./ProjectsOverlay";
 import { STATIONS } from "../data/stations";
 
 /* =========================================================================
@@ -126,6 +127,20 @@ export default function RidgelineStage() {
   // effect then leaves focus for the contact target rather than yanking it to the beacon.
   const assignNavigatingRef = useRef(false);
 
+  // ---- Projects timeline overlay -------------------------------------------
+  // A third focused surface, a sibling of the assignment brief: the "Projects" nav
+  // link / #projects route opens the survey-line timeline OVER whichever scene
+  // (globe or mountain) is live — no morph change. `projectsOpenRef` is the value
+  // the rAF loop reads each frame to quiet the scene behind it; `closeProjectsRef`
+  // is the stable handle the once-registered window keydown listener reaches the
+  // close setter through (same indirection as closeAssignRef).
+  const [projectsOpen, setProjectsOpen] = useState(false);
+  const projectsOpenRef = useRef(false);
+  const closeProjectsRef = useRef<() => void>(() => {});
+  const projectsCloseBtnRef = useRef<HTMLButtonElement>(null);
+  const projectsLastFocusRef = useRef<HTMLElement | null>(null);
+  const projectsWasOpenRef = useRef(false);
+
   const openAssignment = useCallback(() => {
     // drop focus off the beacon BEFORE the next commit makes it aria-hidden, so the
     // focused element is never momentarily inside an aria-hidden subtree; the
@@ -143,6 +158,23 @@ export default function RidgelineStage() {
     assignNavigatingRef.current = true;
     assignmentOpenRef.current = false;
     setAssignmentOpen(false);
+  }, []);
+
+  const openProjects = useCallback(() => {
+    // drop focus off the beacon first (same defensiveness as openAssignment) so it
+    // never sits inside an aria-hidden subtree once the overlay commits.
+    beaconRef.current?.blur();
+    projectsOpenRef.current = true;
+    setProjectsOpen(true);
+  }, []);
+  const closeProjects = useCallback(() => {
+    projectsOpenRef.current = false;
+    setProjectsOpen(false);
+    // restore the route to whatever scene sits behind the timeline (globe or mountain)
+    if (typeof location !== "undefined" && location.hash === "#projects") {
+      const hash = morphTargetRef.current === 1 ? "#cv" : "#home";
+      history.replaceState(null, "", hash);
+    }
   }, []);
 
   const select = useCallback((i: number | null) => {
@@ -176,26 +208,37 @@ export default function RidgelineStage() {
   useEffect(() => {
     selectRef.current = select;
     closeAssignRef.current = closeAssignment;
+    closeProjectsRef.current = closeProjects;
     navToRef.current = navTo;
   });
 
-  // hash routing: the header's Home/CV links (and the browser back/forward button) drive the
-  // view through the URL hash. #cv assembles the mountain, #home returns to the globe. A #cv
-  // deep-link on mount assembles straight away; an empty hash stays the clean globe landing.
-  // Other hashes (#works/#about/#contact) are left untouched here.
+  // hash routing: the header's Home/CV/Projects links (and the browser back/forward button)
+  // drive the view through the URL hash. #cv assembles the mountain, #home returns to the
+  // globe, #projects opens the timeline OVER whichever scene is live. A #cv or #projects
+  // deep-link on mount lands straight on it; an empty hash stays the clean globe landing.
+  // Other hashes (#about/#contact) are left untouched here.
   useEffect(() => {
     if (location.hash === "#cv") {
       morphTargetRef.current = 1;
       setViewState("cv");
+    } else if (location.hash === "#projects") {
+      projectsOpenRef.current = true;
+      setProjectsOpen(true);
     }
     const onHash = () => {
       const h = location.hash;
-      if (h === "#cv") navTo("cv");
-      else if (h === "#home" || h === "") navTo("home");
+      if (h === "#projects") openProjects();
+      else if (h === "#cv") {
+        closeProjects();
+        navTo("cv");
+      } else if (h === "#home" || h === "") {
+        closeProjects();
+        navTo("home");
+      }
     };
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
-  }, [navTo]);
+  }, [navTo, openProjects, closeProjects]);
 
   // focus management: on open, remember what was focused and move focus into the
   // dialog; on close (only after an actual open), restore it to the trigger. The
@@ -231,6 +274,25 @@ export default function RidgelineStage() {
       }
     }
   }, [assignmentOpen]);
+
+  // the same focus dance for the Projects timeline: remember what held focus (the
+  // Projects nav link), move focus to its close control on open, restore on close —
+  // falling back to the nav link when nothing meaningful held it.
+  useEffect(() => {
+    if (projectsOpen) {
+      projectsLastFocusRef.current = document.activeElement as HTMLElement | null;
+      projectsCloseBtnRef.current?.focus();
+      projectsWasOpenRef.current = true;
+    } else if (projectsWasOpenRef.current) {
+      projectsWasOpenRef.current = false;
+      const prev = projectsLastFocusRef.current;
+      const navLink =
+        typeof document !== "undefined"
+          ? document.querySelector<HTMLElement>('nav a[href="#projects"]')
+          : null;
+      (prev && prev !== document.body ? prev : navLink)?.focus?.();
+    }
+  }, [projectsOpen]);
 
   useEffect(() => {
     const cvs = canvasRef.current;
@@ -553,8 +615,21 @@ export default function RidgelineStage() {
       };
 
       const onKey = (e: KeyboardEvent) => {
-        // Escape dismisses an open surface before any orbit handling — the summit
-        // brief first, then a focused career slice
+        // Escape dismisses an open surface before any orbit handling — the Projects
+        // timeline first, then the summit brief, then a focused career slice
+        if (e.key === "Escape" && projectsOpenRef.current) {
+          closeProjectsRef.current();
+          e.preventDefault();
+          return;
+        }
+        // the Projects timeline owns arrow / Home / End while it's open (it walks the
+        // survey); never let those leak to the canvas orbit / globe-spin beneath.
+        if (
+          projectsOpenRef.current &&
+          (e.key.startsWith("Arrow") || e.key === "Home" || e.key === "End")
+        ) {
+          return;
+        }
         if (e.key === "Escape" && assignmentOpenRef.current) {
           closeAssignRef.current();
           e.preventDefault();
@@ -679,13 +754,22 @@ export default function RidgelineStage() {
         if (m < 0.85) {
           if (labelEls) labelEls.forEach((el) => { el.style.opacity = "0"; });
           if (leaderEls) leaderEls.forEach((el) => { (el as SVGElement).style.opacity = "0"; });
-          if (beaconRef.current) beaconRef.current.style.opacity = "0";
+          if (beaconRef.current) {
+            // also kill pointer events so the rAF loop — not just React's aria-hidden
+            // / tabindex — is authoritative for the hidden beacon (no stray click-through
+            // behind an overlay opened during the globe phase)
+            beaconRef.current.style.opacity = "0";
+            beaconRef.current.style.pointerEvents = "none";
+          }
           return;
         }
         const surveyFade = smooth(0.85, 1.0, m);
         // while a slice is focused the survey words recede behind the panel — only
         // the selected callout stays lit, and the per-frame hover pick is skipped.
-        const focusActive = selectedRef.current != null || assignmentOpenRef.current;
+        const focusActive =
+          selectedRef.current != null ||
+          assignmentOpenRef.current ||
+          projectsOpenRef.current;
         const fsel = selectedRef.current ?? -1;
         if (!labelEls) {
           labelEls = overlay.querySelectorAll<HTMLElement>(".survey-callout");
@@ -862,7 +946,10 @@ export default function RidgelineStage() {
           // (left) and nav (right). Only fade if it would ride right up under the very
           // top edge (an extreme tilt the bounded pitch never actually reaches).
           const clearHeader = ap.y > (mobile ? 20 : 28);
-          const open = selectedRef.current != null || assignmentOpenRef.current;
+          const open =
+            selectedRef.current != null ||
+            assignmentOpenRef.current ||
+            projectsOpenRef.current;
           const target = open || !inFrame || !clearHeader ? 0 : 1;
           const bk = reduceMotion ? 1 : 1 - Math.exp(-dt / BEACON_TAU);
           beaconOp += (target - beaconOp) * bk;
@@ -1119,7 +1206,7 @@ export default function RidgelineStage() {
     );
   }
 
-  const overlayOpen = selected !== null || assignmentOpen;
+  const overlayOpen = selected !== null || assignmentOpen || projectsOpen;
 
   return (
     <div
@@ -1247,6 +1334,18 @@ export default function RidgelineStage() {
             ref={assignCloseBtnRef}
             onClose={closeAssignment}
             onNavigate={closeAssignmentNavigating}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* the Projects timeline — "The Survey Line", opened by the Projects nav link
+          / #projects route. Sits over whichever scene is live. */}
+      <AnimatePresence>
+        {projectsOpen && (
+          <ProjectsOverlay
+            key="projects-overlay"
+            ref={projectsCloseBtnRef}
+            onClose={closeProjects}
           />
         )}
       </AnimatePresence>
