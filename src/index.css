@@ -1506,3 +1506,404 @@ canvas#ridge:active {
   text-transform: uppercase;
   color: rgba(244, 241, 234, 0.86);
 }
+
+/* ===========================================================================
+   Projects timeline overlay — "The Survey Line"
+   A full-screen liquid-glass dialog (composes .role-overlay for the shared base
+   frost + --mono + z-index). An ember datum line across the middle of the frame,
+   a wall of ivory lines rising to a mountain-range silhouette, with a vertical
+   MONTH+YEAR date that drops on hover/focus. Motion owns the entrance; these
+   classes own every hover/focus state, so the two never fight the same property.
+   =========================================================================== */
+
+/* a top + bottom vignette frost (the centred timeline needs symmetric framing,
+   NOT the left-masked .role-frost). Delayed ramp so the baseline draws over a
+   near-clear scene, mirroring the role-frost trick. */
+.projects-frost {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    180deg,
+    rgba(6, 7, 10, 0.66) 0%,
+    rgba(6, 7, 10, 0.42) 20%,
+    rgba(6, 7, 10, 0) 44%,
+    rgba(6, 7, 10, 0) 60%,
+    rgba(6, 7, 10, 0.46) 86%,
+    rgba(6, 7, 10, 0.66) 100%
+  );
+  -webkit-backdrop-filter: blur(20px) saturate(1.05) brightness(0.86);
+  backdrop-filter: blur(20px) saturate(1.05) brightness(0.86);
+  -webkit-mask-image: linear-gradient(
+    180deg,
+    #000 0%,
+    #000 22%,
+    transparent 46%,
+    transparent 58%,
+    #000 84%,
+    #000 100%
+  );
+  mask-image: linear-gradient(
+    180deg,
+    #000 0%,
+    #000 22%,
+    transparent 46%,
+    transparent 58%,
+    #000 84%,
+    #000 100%
+  );
+  opacity: 0;
+  animation: projects-frost-in 0.34s cubic-bezier(0.22, 1, 0.36, 1) 0.2s forwards;
+}
+@keyframes projects-frost-in {
+  to {
+    opacity: 1;
+  }
+}
+
+/* masthead — the surveyor spine, top-left, floating clear above the peaks */
+.projects-masthead {
+  position: absolute;
+  z-index: 4;
+  top: clamp(90px, 12vh, 128px);
+  left: clamp(34px, 6vw, 84px);
+  right: clamp(34px, 6vw, 84px);
+  display: flex;
+  flex-direction: column;
+  gap: clamp(8px, 1.4vh, 16px);
+  pointer-events: none; /* only the back button inside catches clicks */
+}
+.projects-masthead .role-back {
+  pointer-events: auto;
+}
+.projects-eyebrow {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: rgba(244, 241, 234, 0.62);
+  text-shadow: 0 1px 16px rgba(0, 0, 0, 0.5);
+}
+.projects-title {
+  margin: 0;
+  font-size: clamp(38px, 6.2vw, 80px);
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: -0.025em;
+  color: var(--ink);
+  text-shadow:
+    0 2px 28px rgba(0, 0, 0, 0.55),
+    0 1px 2px rgba(0, 0, 0, 0.5);
+}
+.projects-coords {
+  margin: 2px 0 0;
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  color: rgba(244, 241, 234, 0.5);
+  text-shadow: 0 1px 16px rgba(0, 0, 0, 0.5);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.projects-coords-head {
+  color: rgba(244, 241, 234, 0.7);
+}
+.projects-coords-live {
+  color: var(--c-education);
+  animation: projects-readout-in 0.4s cubic-bezier(0.22, 1, 0.36, 1);
+}
+@keyframes projects-readout-in {
+  from {
+    opacity: 0.2;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* the stage centres the timeline plate in the middle of the screen, with top room
+   reserved for the floating masthead */
+.projects-stage {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: clamp(150px, 19vh, 226px) clamp(20px, 4vw, 48px) clamp(56px, 9vh, 92px);
+}
+.projects-timeline {
+  position: relative;
+  width: 92vw;
+  max-width: 1240px;
+  height: clamp(320px, 52vh, 560px);
+  --pool-x: -9999px;
+  --pool-o: 0;
+}
+.projects-svg {
+  position: absolute;
+  inset: 0;
+  display: block;
+  overflow: visible;
+}
+
+/* the ember baseline — the reference's red datum, warm-dusk amber */
+.projects-baseline {
+  fill: none;
+  stroke: var(--c-education);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  filter: drop-shadow(0 0 5px rgba(255, 196, 92, 0.32));
+}
+.projects-baseline-head {
+  fill: var(--c-education);
+  filter: drop-shadow(0 0 7px rgba(255, 196, 92, 0.7));
+}
+/* the "you-are-here" ember pool that trails the pointer along the axis */
+.projects-pool {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 14px;
+  pointer-events: none;
+  opacity: var(--pool-o);
+  transition: opacity 0.4s ease;
+  background: radial-gradient(
+    120px 7px at var(--pool-x) center,
+    rgba(255, 196, 92, 0.22),
+    rgba(255, 196, 92, 0) 70%
+  );
+}
+
+/* year ticks — the lane the vertical date drops into */
+.projects-axis-tick {
+  fill: rgba(244, 241, 234, 0.3);
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  transition: fill 0.25s ease;
+}
+.projects-axis-tick.is-near {
+  fill: rgba(244, 241, 234, 0.66);
+}
+
+/* the wall of lines */
+.projects-line {
+  fill: none;
+  stroke: rgba(244, 241, 234, 0.5);
+  stroke-width: 1;
+  stroke-linecap: round;
+  transition:
+    stroke 0.25s ease,
+    stroke-width 0.25s ease,
+    opacity 0.25s ease;
+}
+.projects-line.is-lit {
+  stroke: var(--ink);
+  stroke-width: 1.6;
+}
+.projects-line.is-dim {
+  opacity: 0.28;
+}
+.projects-line-glow {
+  fill: none;
+  stroke: var(--c-education);
+  stroke-width: 2.6;
+  stroke-linecap: round;
+  opacity: 0;
+  filter: blur(3px);
+  transition: opacity 0.25s ease;
+}
+.projects-line-glow.is-lit {
+  opacity: 0.5;
+}
+.projects-line-glow.is-dim {
+  opacity: 0;
+}
+
+/* node / benchmark dot at each tip */
+.projects-node {
+  fill: var(--ink);
+  /* grow via transform (animatable in every engine) rather than the SVG `r`
+     attribute, which Firefox/Gecko does not transition; the JSX sets r=2.5 */
+  transform-box: fill-box;
+  transform-origin: center;
+  transition:
+    transform 0.2s cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 0.25s ease;
+}
+.projects-node.is-lit {
+  transform: scale(1.5);
+}
+.projects-node.is-dim {
+  opacity: 0.32;
+}
+.projects-node-ring {
+  fill: none;
+  stroke: var(--c-education);
+  stroke-width: 1;
+  opacity: 0;
+  transition: opacity 0.25s ease;
+}
+.projects-node-ring.is-lit {
+  opacity: 0.9;
+}
+
+/* the resting labels — small tracked caps fanning off the tips (the reference's
+   overlapping textwall); the lit one brightens, its neighbours recede */
+.projects-label {
+  fill: rgba(244, 241, 234, 0.55);
+  font-family: var(--sans);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  pointer-events: none;
+  paint-order: stroke;
+  stroke: rgba(0, 0, 0, 0.55);
+  stroke-width: 2.4px;
+  transition:
+    fill 0.25s ease,
+    opacity 0.25s ease;
+}
+.projects-label.is-lit {
+  fill: var(--ink);
+  opacity: 1;
+}
+.projects-label.is-dim {
+  opacity: 0.22;
+}
+
+/* the plumb-line + the vertical date drop (the signature) */
+.projects-date-leader {
+  fill: none;
+  stroke: var(--c-education);
+  stroke-width: 1;
+  stroke-linecap: round;
+}
+.projects-date-anchor {
+  position: absolute;
+  z-index: 3;
+  /* centring + entrance transform are owned by motion (x: "-50%") so they don't
+     fight here; this element only carries position + stacking */
+  pointer-events: none;
+}
+.projects-date {
+  display: inline-block;
+  writing-mode: vertical-rl;
+  text-orientation: sideways;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink);
+  white-space: nowrap;
+  text-shadow:
+    0 0 14px rgba(0, 0, 0, 0.7),
+    0 1px 3px rgba(0, 0, 0, 0.6);
+  text-rendering: geometricPrecision;
+}
+
+/* the interaction + a11y layer — one focusable transparent strip per project */
+.projects-hits {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.projects-hit {
+  position: absolute;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+/* the lit line + dropped date ARE the focus indicator — suppress the default box
+   on the invisible strip (the visual change is unmistakable) */
+.projects-hit:focus-visible {
+  outline: none;
+}
+
+.projects-counter {
+  position: absolute;
+  right: 2px;
+  bottom: -28px;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  color: rgba(244, 241, 234, 0.4);
+}
+
+/* ---- responsive ---------------------------------------------------------- */
+/* tablet + mobile: node-only resting state (titles reveal on hover/focus) —
+   keeps the wall clean where labels would collide, closest to the wordless
+   direction of the rest of the site */
+@media (max-width: 1023px) {
+  .projects-label:not(.is-lit) {
+    opacity: 0;
+  }
+}
+/* narrow: the wall keeps its spacing and the stage scrolls horizontally so the
+   whole 2014–2026 range stays swipeable rather than crushed */
+@media (max-width: 860px) {
+  .projects-stage {
+    justify-content: flex-start;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: clamp(132px, 20vh, 188px) 16px clamp(48px, 8vh, 72px);
+    -webkit-overflow-scrolling: touch;
+  }
+  .projects-timeline {
+    width: 760px;
+    min-width: 760px;
+    flex: 0 0 auto;
+  }
+  .projects-title {
+    font-size: clamp(30px, 9vw, 46px);
+  }
+  .projects-coords {
+    font-size: 10px;
+    letter-spacing: 0.1em;
+  }
+}
+
+/* ---- contrast + reduced motion ------------------------------------------- */
+@media (prefers-contrast: more) {
+  .projects-line {
+    stroke: rgba(244, 241, 234, 0.7);
+  }
+  .projects-line.is-dim {
+    opacity: 0.5;
+  }
+  .projects-node.is-dim {
+    opacity: 0.55;
+  }
+  .projects-label {
+    fill: rgba(244, 241, 234, 0.82);
+  }
+  .projects-label.is-dim {
+    opacity: 0.45;
+  }
+  .projects-axis-tick {
+    fill: rgba(244, 241, 234, 0.5);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .projects-frost {
+    animation: none;
+    opacity: 1;
+  }
+  .projects-pool {
+    display: none;
+  }
+  .projects-coords-live {
+    animation: none;
+  }
+}
