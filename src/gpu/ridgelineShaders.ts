@@ -169,7 +169,12 @@ const TWO_PI : f32 = 6.28318530718;
 
   // dim the halo by the focus amount (hov.w) so the sky recedes with the slopes
   // when a slice is selected, keeping the lit ring the sole bright element
-  let halo = (ring * dots * env * 0.66 + circ * 0.58 + env * dots * 0.07) * (1.0 - 0.62 * F.hov.w);
+  var halo = (ring * dots * env * 0.66 + circ * 0.58 + env * dots * 0.07) * (1.0 - 0.62 * F.hov.w);
+  // the dotted halo belongs to the MOUNTAIN (the CV view) only — it is absent on the
+  // intro globe (the "Home" ball of lines & letters) and fades in as the massif forms,
+  // so the spinning ball reads as a clean tangle in empty black. morph 0 = globe → no
+  // halo; morph 1 = mountain → full halo.
+  halo = halo * smoothstep(0.55, 0.95, F.mph.x);
   return vec4<f32>(vec3<f32>(halo), 1.0);
 }
 `;
@@ -490,29 +495,48 @@ struct FOut {
   let sseed   = fract(at.y);
   let isArm   = step(1.0, kindRaw);              // spoke OR nucleus → the rigid armature (flows less)
   let isCore  = step(2.0, kindRaw);              // nucleus only → rises to the summit during the morph
+  // sub-class flags decoded from the radial shell + seed (no new attributes): a RING is armature
+  // (NOT core) carrying a top-decile seed; a HALO is nucleus sitting OUTSIDE the < 0.10 core sparks.
+  let isRing  = isArm * (1.0 - isCore) * step(0.90, sseed); // great-circle gimbal ring
+  let isHalo  = isCore * step(0.12, at.w);                  // nucleus orbital halo (not a core spark)
+  let depth01 = clamp(at.w, 0.0, 1.0);                      // 0 = deep core … 1 = crust (the parallax key)
 
   var d = normalize(mdir);
   // CONSTANT MOVEMENT: a flow that travels ALONG each thread (phase keyed to t) and over time,
   // projected onto the tangent plane so the ball keeps its round silhouette. Three offset lobes →
   // an organic, non-repeating shimmer. The rigid armature (spokes/nucleus) flows far less than the
   // organic curl, so the cage reads stable against the silk — the "sophisticated" contrast.
-  let ph = at.x * 9.0 + sseed * F_TAU;
+  let ph = at.x * 9.0 + sseed * F_TAU + tt * mix(0.9, 0.35, depth01); // inner silk shimmers faster (more life deep)
   let w = vec3<f32>(
     sin(ph + tt * 0.85),
     sin(ph * 1.27 + tt * 1.10 + 2.1),
     sin(ph * 0.73 + tt * 0.65 + 4.2),
   );
   let tang = w - d * dot(w, d);                  // tangential component only (preserve radius)
-  let flowAmt = mix(0.068, 0.020, isArm) * motion;
+  let flowAmt = mix(0.068, 0.020, isArm) * mix(1.35, 1.0, depth01) * motion; // interior silk more alive
   d = normalize(d + tang * flowAmt);
 
   // a tiny BREATHING PUMP so the whole web gently inhales (frozen on reduced motion)
   let pumpR = at.w * (1.0 + 0.01 * sin(tt * 0.4 + at.x * F_TAU) * motion);
 
-  // spin about Y by globeSpin — matches the terrain sphere (lon += F.mph.y) and rotY() for the
-  // DOM letters, so threads, surface and words all co-rotate welded to the same ball.
-  let cs = cos(F.mph.y); let sn = sin(F.mph.y);
-  let sd = vec3<f32>(d.x * cs + d.z * sn, d.y, -d.x * sn + d.z * cs);
+  // COUNTER-ROTATING DEPTH: the crust (depth01→1) rides the globe spin (lon += F.mph.y, matching the
+  // terrain sphere + the DOM letters); the deep interior (→0) spins BACKWARD a touch faster, so the
+  // interior shears against the crust → strong motion-parallax volume. The rigid armature (spokes +
+  // nucleus) is pinned to +1× so the cage and core stay welded to the same ball as surface and words.
+  let counter = mix(-0.55, 1.0, depth01);        // inner: reversed & 0.55×; crust: +1×
+  let spinAng = F.mph.y * mix(counter, 1.0, isArm);
+  let cs = cos(spinAng); let sn = sin(spinAng);
+  var sd = vec3<f32>(d.x * cs + d.z * sn, d.y, -d.x * sn + d.z * cs);
+
+  // GIMBAL RINGS precess on their own axis, and the nucleus HALO sweeps slowly about Y — both keyed
+  // off the sub-class flags, so they are identity (zero angle) for every other vertex. Frozen on
+  // reduced motion (motion = 0).
+  let prAng = (sseed - 0.95) * 2.0 * tt * 0.12 * motion * isRing; // per-ring signed precession
+  let pc = cos(prAng); let ps = sin(prAng);
+  sd = vec3<f32>(sd.x, sd.y * pc - sd.z * ps, sd.y * ps + sd.z * pc); // tip the ring plane through the viewer
+  let ho = tt * 0.6 * isHalo * motion;           // halo: its own slow orbital spin about Y
+  let hc = cos(ho); let hs = sin(ho);
+  sd = vec3<f32>(sd.x * hc + sd.z * hs, sd.y, -sd.x * hs + sd.z * hc);
 
   var world = F_GLOBE_C + F_GLOBE_R * pumpR * sd;
 
@@ -553,15 +577,40 @@ struct FOut {
   let ta = fract(at.x - p + 0.06) * 9.0;                     // a short comet afterglow trailing behind
   let tail = 0.42 * exp(-ta * ta);
   glow = glow * mix(1.0, 0.55 + 2.2 * (pulse + tail), motion);
-  // NODE / RIM TWINKLE — scintillation, small amplitude to stay tasteful
-  let tw = 0.86 + 0.14 * sin(tt * 3.0 + sseed * 40.0);
+  // CONVERGENCE VOLLEY: every ~3.3s a wave makes beads on ~1/3 of the curl threads rush to their node
+  // end (at.x → 0) together → you repeatedly see sparks race inward and a node flare. Curl/mote-only
+  // (1 - isArm), additive; q*q (never pow on a maybe-negative) keeps it NaN-safe.
+  let inVolley = step(0.66, fract(sseed * 7.0));     // ~1/3 of threads join each volley
+  let volley   = fract(tt * 0.30);                   // 0..1 every ~3.33s
+  let q        = at.x - (1.0 - volley);              // bead racing toward the node end at.x = 0
+  let conv     = exp(-q * q * 26.0);
+  glow = glow + (1.0 - isArm) * inVolley * conv * 1.3 * motion;
+  // NODE / RIM TWINKLE — scintillation, small amplitude to stay tasteful. The deep interior dust
+  // (organic + small radial) glitters faster, so the volume sparkles as it counter-rotates.
+  let dust = (1.0 - isArm) * (1.0 - smoothstep(0.18, 0.30, depth01)); // ~1 for deep motes / inner silk
+  let tw = 0.86 + 0.14 * sin(tt * 3.0 + sseed * 40.0) + dust * 0.18 * sin(tt * 7.0 + sseed * 90.0);
   glow = glow * mix(1.0, tw, motion);
-  // depth volume
-  glow = glow * mix(0.34, 1.08, frontness);
+  // depth volume — widen the recession so the back of the deep tangle sinks further, and darken the
+  // interior a touch vs the crust (a light-falloff cue that reads as a luminous WELL)
+  glow = glow * mix(0.22, 1.14, frontness);
+  glow = glow * mix(0.7, 1.0, depth01);
   // SPOKES FIRE OUTWARD — a wave that travels core→rim every few seconds (only for armature lines)
   let aw = (0.5 - abs(fract(tt * 0.4 - at.w) - 0.5)) * 8.0;
   let armWave = exp(-aw * aw);
   glow = mix(glow, glow * (0.5 + 2.0 * armWave), isArm * motion);
+  // RING DASH SCROLL: a dash window marches around each gimbal ring (at.x = angle 0..1), each ring at
+  // its own rate/direction (sseed), with a brighter head bead racing ahead — a calibrated "scale" cue.
+  // mix-gated on isRing so it ONLY rewrites ring verts (spokes / silk / nucleus untouched).
+  let rdir   = select(-1.0, 1.0, sseed > 0.95);
+  let rrate  = (0.06 + 0.10 * sseed) * rdir;
+  let scroll = fract(at.x + tt * rrate * motion + sseed);
+  let cells  = fract(scroll * 16.0);                 // 16 dashes around the ring
+  let dv     = 0.5 - abs(cells - 0.5);
+  let dash   = smoothstep(0.19, 0.5, dv);            // ~0.62 duty
+  let headP  = fract(tt * rrate * 4.0 * motion + sseed); // a hot head racing 4× the dash speed
+  let hd     = (0.5 - abs(fract(at.x - headP) - 0.5)) * 18.0;
+  let ringHead = exp(-hd * hd);
+  glow = mix(glow, glow * (0.3 + 1.05 * dash) + ringHead * 1.4, isRing);
   // NUCLEUS SOMA GLOW — the core burns hot and throbs (additive, NOT depth-dimmed, so the heart
   // stays lit from any angle); the bloom pass lifts it into a luminous orb with no extra pass.
   let coreK = clamp((0.18 - at.w) / 0.18, 0.0, 1.0);

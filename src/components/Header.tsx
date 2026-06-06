@@ -1,7 +1,10 @@
 import { motion } from "motion/react";
 
 const NAV = [
+  // Home = the spinning globe of lines & letters; CV = the mountain it assembles
+  // into. RidgelineStage listens for these two hashes and morphs between the views.
   { label: "Home", href: "#home" },
+  { label: "CV", href: "#cv" },
   { label: "Works", href: "#works" },
   { label: "About", href: "#about" },
   { label: "Contact", href: "#contact" },
