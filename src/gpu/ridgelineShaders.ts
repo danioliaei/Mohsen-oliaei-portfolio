@@ -274,9 +274,14 @@ struct VsOut {
   //  to compile. Designed + adversarially WGSL-reviewed via a fan-out workflow.
   // ----------------------------------------------------------------------------
   let screenX01 = i.pos.x / F.a.y;                 // 0 at the left edge -> 1 at the right edge of the (supersampled) target
-  // focus calm: 1 while free (sweep alive), eased to 0 as a slice is focused so the
-  // dossier settles to the stable contour schematic it was designed against.
-  let calm = 1.0 - smoothstep(0.0, 1.0, clamp(F.hov.w, 0.0, 1.0));
+  // the reveal sweep stays ALIVE through every state — at rest, behind a focused
+  // career dossier, and behind the "Your Assignment?" brief alike — so the mountain
+  // keeps breathing under all of them. (It used to park to a frozen contour schematic
+  // on focus via F.hov.w; that made the experience overlay static while the assignment
+  // overlay — which never raises focusAmt — kept pulsing. Decoupled so they match.
+  // The band / halo / slice dimming further down STILL keys off F.hov.w; only the
+  // sweep is freed.)
+  let calm = 1.0;
   // ping-pong PHASE from unbounded time via cos() (no fract precision drift at large t)
   let SWEEP_W = 0.52;                              // rad/s -> ~12.1s for a full there-and-back cycle
   let ph = 0.5 - 0.5 * cos(F.a.x * SWEEP_W);       // 0 -> 1 -> 0, symmetric, smooth turn-arounds

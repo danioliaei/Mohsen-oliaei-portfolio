@@ -46,6 +46,10 @@ header {
   left: 0;
   right: 0;
   z-index: 40;
+  /* the bar spans the full width but only the wordmark + nav links should catch
+     clicks — let its empty centre band fall through to the apex beacon (and the
+     orbit canvas) beneath, which otherwise sit under this z-40 stacking context */
+  pointer-events: none;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -57,6 +61,7 @@ header {
     0 2px 16px rgba(18, 8, 2, 0.34);
 }
 .wordmark {
+  pointer-events: auto; /* the bar is click-through; its links are not */
   font-family: var(--sans);
   font-size: 27px;
   font-weight: 600;
@@ -74,6 +79,7 @@ nav {
   gap: 30px;
 }
 nav a {
+  pointer-events: auto; /* the bar is click-through; its links are not */
   position: relative;
   font-size: 12px;
   font-weight: 500;
@@ -353,6 +359,15 @@ canvas#ridge:active {
   pointer-events: none;
   transform: translateX(-50%) translateY(12px);
   animation: none;
+}
+/* an open overlay (a focused career slice OR the "Your Assignment?" brief) sits over
+   the scene — suppress the drag hint beneath it so it never shows through the light
+   frost on the open flank. It returns (the entrance replays) on close, unless the
+   viewer has already orbited and retired it for good via .is-hidden. */
+.ridge-stage.is-overlay-open .ridge-hint {
+  animation: none;
+  opacity: 0;
+  pointer-events: none;
 }
 .ridge-hint-label {
   display: inline-block;
@@ -1092,5 +1107,348 @@ canvas#ridge:active {
     flex-direction: column;
     align-items: stretch;
     gap: 12px;
+  }
+}
+
+/* ---- "Your Assignment?" panel — prose + CTA on the shared role-* shell --------
+   The panel reuses .role-overlay / .role-frost / .role-scroll / .role-doc /
+   .role-title / .role-coords / .role-summary / .role-h / .role-highlights /
+   .role-tools / .role-chip wholesale; only the section lead-ins and the single
+   call-to-action need their own rules. */
+.assign-lead {
+  margin: 0;
+  font-size: clamp(14px, 1.25vw, 16px);
+  font-weight: 300;
+  line-height: 1.55;
+  color: rgba(244, 241, 234, 0.72);
+  max-width: 52ch;
+  text-shadow:
+    0 1px 16px rgba(0, 0, 0, 0.5),
+    0 1px 2px rgba(0, 0, 0, 0.4);
+}
+.assign-body {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 300;
+  line-height: 1.62;
+  color: rgba(244, 241, 234, 0.84);
+  max-width: 56ch;
+  text-shadow:
+    0 1px 16px rgba(0, 0, 0, 0.5),
+    0 1px 2px rgba(0, 0, 0, 0.4);
+}
+/* the conversion block: a single glass pill (the established affordance vocabulary)
+   over a quiet fallback line */
+.assign-cta-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin-top: clamp(14px, 2.4vh, 28px);
+}
+.assign-cta {
+  display: inline-flex;
+  align-self: flex-start;
+  align-items: center;
+  gap: 11px;
+  padding: 15px 26px;
+  border: 1px solid rgba(244, 241, 234, 0.24);
+  border-radius: 999px;
+  background: rgba(8, 9, 12, 0.34);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  text-decoration: none;
+  line-height: 1;
+  cursor: pointer;
+  text-shadow: 0 1px 14px rgba(0, 0, 0, 0.55);
+  box-shadow:
+    0 10px 34px rgba(0, 0, 0, 0.34),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  transition:
+    color 0.3s ease,
+    border-color 0.3s ease,
+    background 0.3s ease,
+    gap 0.3s ease,
+    box-shadow 0.3s ease;
+}
+.assign-cta:hover {
+  border-color: rgba(244, 241, 234, 0.46);
+  background: rgba(20, 22, 28, 0.5);
+  gap: 16px;
+  box-shadow:
+    0 12px 38px rgba(0, 0, 0, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 0 22px 1px rgba(244, 241, 234, 0.07);
+}
+.assign-cta-arrow {
+  font-size: 15px;
+  transition: transform 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.assign-cta:hover .assign-cta-arrow {
+  transform: translateX(3px);
+}
+.assign-foot {
+  margin: clamp(12px, 1.8vh, 18px) 0 0;
+  font-size: 12.5px;
+  font-weight: 300;
+  line-height: 1.6;
+  color: rgba(244, 241, 234, 0.54);
+  max-width: 50ch;
+  text-shadow: 0 1px 14px rgba(0, 0, 0, 0.5);
+}
+.assign-foot a {
+  color: rgba(244, 241, 234, 0.82);
+  text-decoration: none;
+  border-bottom: 1px solid rgba(244, 241, 234, 0.28);
+  transition:
+    color 0.25s ease,
+    border-color 0.25s ease;
+}
+.assign-foot a:hover {
+  color: var(--ink);
+  border-color: rgba(244, 241, 234, 0.6);
+}
+
+/* ---- apex beacon: the floating "Your Assignment?" survey datum ---------------
+   A glass benchmark disc welded above the summit every frame — its transform is
+   written imperatively by the rAF loop in RidgelineStage (projected from a world
+   point on the orbit axis), so DO NOT put a transform transition on the root, it
+   would fight the per-frame projection. The idle breath touches box-shadow only
+   (a glow halo on ::before); the press-scale lives on the inner .beacon-core;
+   opacity is eased by the loop (0 while any overlay is open). */
+.ridge-beacon {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 6;
+  display: grid;
+  place-items: center;
+  width: 50px; /* generous touch target; the visible disc is inset */
+  height: 50px;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  opacity: 0; /* the loop eases this in once the apex is projected */
+  pointer-events: none; /* the loop flips to auto while the beacon is visible */
+  will-change: transform, opacity;
+  -webkit-tap-highlight-color: transparent;
+}
+/* the breathing glow lives on its own halo behind the disc, so a hover/focus glow
+   can cleanly override it (animation:none) without fighting the disc's static
+   seating shadow */
+.ridge-beacon::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  top: 50%;
+  left: 50%;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  box-shadow: 0 0 0 0 rgba(244, 241, 234, 0);
+  animation: ridge-beacon-breath 4.8s 0.4s ease-in-out infinite;
+}
+.ridge-beacon:hover::before,
+.ridge-beacon:focus-visible::before {
+  animation: none;
+  box-shadow: 0 0 26px 3px rgba(244, 241, 234, 0.16);
+}
+/* the glass datum disc + its machined double-bezel, the stamped "?" the only mark */
+.beacon-core {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 1px solid rgba(244, 241, 234, 0.34);
+  background: radial-gradient(
+    120% 120% at 50% 35%,
+    rgba(244, 241, 234, 0.12),
+    rgba(8, 9, 12, 0.46) 70%
+  );
+  -webkit-backdrop-filter: blur(8px) saturate(1.05);
+  backdrop-filter: blur(8px) saturate(1.05);
+  color: rgba(244, 241, 234, 0.92);
+  font-family: var(--sans);
+  font-size: 21px;
+  font-weight: 500;
+  line-height: 1;
+  text-shadow: 0 1px 12px rgba(0, 0, 0, 0.7);
+  box-shadow:
+    0 6px 22px rgba(0, 0, 0, 0.45),
+    inset 0 1px 0 rgba(255, 255, 255, 0.07);
+  transition:
+    color 0.3s ease,
+    border-color 0.3s ease,
+    transform 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+}
+/* the "?" — nudged up a hair for optical centring, and given a slow, gentle
+   float + sway so the mark feels alive and inquisitive (it invites a click). The
+   motion lives on the GLYPH, not the welded root (the rAF loop owns that transform)
+   nor the disc (whose :active press-scale would clash). */
+.beacon-glyph {
+  display: block;
+  animation: beacon-glyph-float 3.9s ease-in-out infinite;
+}
+/* a four-tick sighting reticle just outside the disc (drawn with four hairline
+   gradients on one pseudo-element — cheap, crisp, unmistakably an instrument) */
+.beacon-core::before {
+  content: "";
+  position: absolute;
+  inset: -7px;
+  pointer-events: none;
+  opacity: 0.55;
+  transition: opacity 0.3s ease;
+  background-repeat: no-repeat;
+  background-image:
+    linear-gradient(rgba(244, 241, 234, 0.6), rgba(244, 241, 234, 0.6)),
+    linear-gradient(rgba(244, 241, 234, 0.6), rgba(244, 241, 234, 0.6)),
+    linear-gradient(rgba(244, 241, 234, 0.6), rgba(244, 241, 234, 0.6)),
+    linear-gradient(rgba(244, 241, 234, 0.6), rgba(244, 241, 234, 0.6));
+  background-size: 1px 5px, 1px 5px, 5px 1px, 5px 1px;
+  background-position: top center, bottom center, left center, right center;
+}
+/* the machined inner bezel ring */
+.beacon-core::after {
+  content: "";
+  position: absolute;
+  inset: 4px;
+  border-radius: 50%;
+  border: 1px solid rgba(244, 241, 234, 0.16);
+  pointer-events: none;
+}
+/* a 1px plumb leader dropping from the disc toward the crest it marks */
+.beacon-leader {
+  position: absolute;
+  top: calc(50% + 18px);
+  left: 50%;
+  width: 1px;
+  height: 16px;
+  transform: translateX(-50%);
+  pointer-events: none;
+  background: linear-gradient(
+    180deg,
+    rgba(244, 241, 234, 0.5),
+    rgba(244, 241, 234, 0)
+  );
+}
+/* the invitation, a small glass PILL centred just below the disc (toward the snowy
+   summit — its own dark frosted plate keeps it crisp over the bright peak and reads
+   as an intentional tooltip rather than loose text lost in the contour weave). The
+   floating disc sits in the header's empty centre band, so the pill drops downward,
+   clear of the wordmark + nav. Revealed on hover / focus, sliding up into place. */
+.beacon-label {
+  position: absolute;
+  top: calc(50% + 30px);
+  left: 50%;
+  transform: translateX(-50%) translateY(-7px);
+  white-space: nowrap;
+  padding: 6px 13px;
+  border: 1px solid rgba(244, 241, 234, 0.2);
+  border-radius: 999px;
+  background: rgba(8, 9, 12, 0.5);
+  -webkit-backdrop-filter: blur(7px);
+  backdrop-filter: blur(7px);
+  font-family: var(--sans);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: rgba(244, 241, 234, 0.88);
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.6);
+  box-shadow:
+    0 8px 22px rgba(0, 0, 0, 0.36),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  opacity: 0;
+  filter: blur(4px);
+  pointer-events: none;
+  transition:
+    opacity 0.34s cubic-bezier(0.22, 1, 0.36, 1),
+    transform 0.34s cubic-bezier(0.22, 1, 0.36, 1),
+    filter 0.34s ease;
+}
+.ridge-beacon:hover .beacon-core,
+.ridge-beacon:focus-visible .beacon-core {
+  border-color: rgba(244, 241, 234, 0.6);
+  color: var(--ink);
+}
+.ridge-beacon:hover .beacon-core::before,
+.ridge-beacon:focus-visible .beacon-core::before {
+  opacity: 0.85;
+}
+.ridge-beacon:active .beacon-core {
+  transform: scale(0.96);
+}
+.ridge-beacon:hover .beacon-label,
+.ridge-beacon:focus-visible .beacon-label {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+  filter: blur(0px);
+}
+
+@keyframes ridge-beacon-breath {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(244, 241, 234, 0);
+  }
+  50% {
+    box-shadow: 0 0 20px 2px rgba(244, 241, 234, 0.1);
+  }
+}
+/* a slow buoy-like float + a small inquisitive sway for the "?" (centred on the
+   -0.5px optical nudge) */
+@keyframes beacon-glyph-float {
+  0%,
+  100% {
+    transform: translateY(-2px) rotate(-3.5deg);
+  }
+  50% {
+    transform: translateY(1px) rotate(3.5deg);
+  }
+}
+
+@media (max-width: 760px) {
+  .ridge-beacon {
+    width: 48px;
+    height: 48px;
+  }
+  .beacon-core {
+    width: 34px;
+    height: 34px;
+    font-size: 19px;
+  }
+  .beacon-label {
+    font-size: 9px;
+    letter-spacing: 0.16em;
+  }
+  .assign-cta {
+    align-self: stretch;
+    justify-content: center;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* no breath / no float / no slide — a single static glow + a plain label fade */
+  .ridge-beacon::before {
+    animation: none;
+    box-shadow: 0 0 14px 1px rgba(244, 241, 234, 0.08);
+  }
+  .beacon-glyph {
+    animation: none;
+    transform: translateY(-0.5px);
+  }
+  .beacon-label {
+    filter: none;
+    transform: translateX(-50%);
+    transition: opacity 0.2s ease;
   }
 }
