@@ -25,6 +25,7 @@ struct Frame {
   post : vec4<f32>,   // x bloomAmt, y vignette, z grain, w exposure
   eye  : vec4<f32>,   // xyz camera eye (world), w unused
   hov  : vec4<f32>,   // x hovered slice index (-1 none), y pulse 0..1, zw unused
+  mph  : vec4<f32>,   // x morph 0..1 (0 = intro globe, 1 = finished mountain), y globeSpin (rad), zw spare
 };
 @group(0) @binding(0) var<uniform> F : Frame;
 `;
@@ -181,28 +182,121 @@ const TWO_PI : f32 = 6.28318530718;
    profiles), brightening to near-white on the high snowy summit and along the
    grazing ridge silhouettes. */
 export const RIDGE_TERRAIN_WGSL = RIDGE_FRAME_WGSL + RIDGE_FIELD_WGSL + /* wgsl */ `
+// ---- INTRO GLOBE constants: a giant slowly-spun ball the mesh is wrapped onto at
+// morph=0, that unravels into the terrain as morph→1. GLOBE_C MUST mirror the GLOBE
+// const in ridgeline.ts (the DOM letter-cloud projects against the same sphere). ----
+const TAU : f32 = 6.28318530718;
+const HALF_PI : f32 = 1.57079632679;
+const GLOBE_C : vec3<f32> = vec3<f32>(0.0, 2120.0, 8200.0); // = GLOBE.{cx,cy,cz} in ridgeline.ts
+const GLOBE_R : f32 = 3600.0;                                // = GLOBE.r
+const MORPH_SPREAD : f32 = 0.6;   // < 1 so EVERY vertex provably reaches vm = 1 at morph = 1
+
 struct VsOut {
   @builtin(position) pos : vec4<f32>,
-  @location(0) wy  : f32,        // world height → snow / tone
+  @location(0) wy  : f32,        // world height → snow / tone (follows the morph)
   @location(1) nrm : vec3<f32>,
   @location(2) wpos : vec3<f32>, // world position → terrain-locked scan-lines + shading
+  @location(3) gdir : vec3<f32>, // UNIT sphere dir — seam/pole/morph-stable, independent of wpos
+  @location(4) vm  : f32,        // interpolated per-vertex morph → drives the FS globe↔mountain gate
 };
 @vertex fn vs(@location(0) uv : vec2<f32>) -> VsOut {
+  // ---- terrain end state (UNCHANGED from today) ----
   let x = -XW + 2.0 * XW * uv.x;
   let z = ZN + (ZF - ZN) * uv.y;
   let y = heightAt(x, z);
-  let world = vec3<f32>(x, y, z);
-  var o : VsOut;
-  o.pos = F.vp * vec4<f32>(world, 1.0);
-  o.wy = y;
+  let terrain = vec3<f32>(x, y, z);
   let e = 16.0;
   let hx = heightAt(x + e, z) - heightAt(x - e, z);
   let hz = heightAt(x, z + e) - heightAt(x, z - e);
-  o.nrm = normalize(vec3<f32>(-hx / (2.0 * e), 1.0, -hz / (2.0 * e)));
+  let terrainNrm = normalize(vec3<f32>(-hx / (2.0 * e), 1.0, -hz / (2.0 * e)));
+
+  // ---- sphere end state: uv → lon/lat on a lumpy globe (lat clamped off the exact
+  // poles to avoid a fully degenerate top/bottom row). lon carries the spin (F.mph.y). ----
+  let lon = uv.x * TAU + F.mph.y;
+  let lat = clamp((0.5 - uv.y) * 3.14159265359, -HALF_PI + 0.01, HALF_PI - 0.01);
+  let cl = cos(lat); let sl = sin(lat);
+  let sphereDir = vec3<f32>(cl * sin(lon), sl, cl * cos(lon));
+  // cheap single-tap lumpiness (NO fbm — this runs per vertex over a 760×420 grid) so the
+  // ball reads as a rolled-up piece of terrain rather than a sterile billiard sphere
+  let lump = 1.0 + 0.06 * (vnoise(vec2<f32>(uv.x * 40.0, uv.y * 22.0)) - 0.5);
+  let sphere = GLOBE_C + GLOBE_R * lump * sphereDir;
+
+  // ---- staggered morph, bottom-up: a vertex's final height keys WHEN it lands, so the
+  // mountain assembles from its base to its summit. Compressed (not offset) so the upper
+  // smoothstep edge key*SPREAD + (1-SPREAD) ≤ 1 for all key∈[0,1] → vm = 1 everywhere at
+  // morph = 1, making the end state byte-identical to today's mountain. ----
+  let key = clamp(y / PEAK_H, 0.0, 1.0);
+  let lo  = key * MORPH_SPREAD;
+  let vm  = smoothstep(lo, lo + (1.0 - MORPH_SPREAD), F.mph.x);
+
+  let world = mix(sphere, terrain, vm);
+  // antipodal-safe normal blend (a tiny +y bias means the sum is never exactly zero → no
+  // normalize(0) NaN flashes on steep back faces mid-morph)
+  let nb = mix(sphereDir, terrainNrm, vm) + vec3<f32>(0.0, 1e-4, 0.0);
+
+  var o : VsOut;
+  o.pos = F.vp * vec4<f32>(world, 1.0);
+  o.wy = mix(GLOBE_C.y + GLOBE_R * sphereDir.y, y, vm); // height tone follows the morph (snow lands last)
+  o.nrm = normalize(nb);
   o.wpos = world;
+  o.gdir = sphereDir;
+  o.vm = vm;
   return o;
 }
+// even points on a sphere (Fibonacci lattice) — the constellation's NODES (in material space)
+fn fibDir(i : f32, n : f32) -> vec3<f32> {
+  let y = 1.0 - (i + 0.5) * (2.0 / n);
+  let r = sqrt(max(0.0, 1.0 - y * y));
+  let th = 2.39996323 * i;                 // golden angle
+  return vec3<f32>(cos(th) * r, y, sin(th) * r);
+}
 @fragment fn fs(i : VsOut) -> @location(0) vec4<f32> {
+  let vmF = clamp(i.vm, 0.0, 1.0);
+
+  // ===== INTRO GLOBE — a dense organic CONSTELLATION: bright NODES wound together by many
+  // sweeping great-circle THREADS (a tangled ball of light, like a 3-D force graph). Keyed off
+  // the UNIT sphere dir gdir (never the blended wpos), un-spun into material space so the whole
+  // web co-rotates welded to the ball. Soft FIXED-WIDTH lines (no fwidth → legal inside loops;
+  // the bloom pass makes them luminous). Computed only while the globe is still showing. =====
+  let gd0 = normalize(i.gdir);
+  let nG = normalize(i.nrm);
+  let VG = normalize(F.eye.xyz - i.wpos);
+  let gRim = pow(1.0 - clamp(abs(dot(nG, VG)), 0.0, 1.0), 1.7);
+  var globeLook = 0.0;
+  if (vmF < 0.985) {
+    // material direction (un-spin gd0 by the globe spin) so nodes/threads are fixed on the surface
+    let cs = cos(F.mph.y); let sn = sin(F.mph.y);
+    let md = vec3<f32>(gd0.x * cs - gd0.z * sn, gd0.y, gd0.x * sn + gd0.z * cs);
+    // one cheap organic warp per fragment so the threads waver like real filaments rather than
+    // reading as perfect compass circles (a soft flow pushing the whole web)
+    let warp = (vnoise(md.xy * 3.1 + 17.0) + vnoise(md.yz * 3.7 + 5.0) - 1.0) * 0.045;
+    let KN = 28;
+    var nodes = 0.0;
+    for (var k = 0; k < KN; k = k + 1) {
+      let dd = clamp(dot(md, fibDir(f32(k), f32(KN))), -1.0, 1.0);
+      nodes = nodes + smoothstep(0.9955, 1.0, dd) * 1.5 + smoothstep(0.95, 1.0, dd) * 0.16; // core + halo
+    }
+    var threads = 0.0;
+    var strides = array<i32, 4>(1, 5, 9, 16);       // short → long weave: a dense net between nodes
+    for (var k = 0; k < KN; k = k + 1) {
+      let a = fibDir(f32(k), f32(KN));
+      for (var s = 0; s < 4; s = s + 1) {
+        let b = fibDir(f32((k + strides[s]) % KN), f32(KN));
+        let nrm = normalize(cross(a, b));
+        let g = dot(md, nrm) + warp;                 // 0 on the great circle through a & b, wavered
+        let m = normalize(a + b);                    // arc midpoint
+        let core = 1.0 - smoothstep(0.0, 0.0065, abs(g));          // delicate soft thread
+        let arc = smoothstep(dot(a, m) - 0.20, dot(a, m) + 0.04, dot(md, m)); // window to the short arc
+        let vary = 0.6 + 0.4 * fract(f32(k) * 0.37 + f32(s) * 0.19); // per-thread brightness
+        threads = threads + core * arc * vary;
+      }
+    }
+    // shell illusion: front-centre threads recede, the limb glows, so the opaque ball still
+    // reads as a see-through tangle of light. Bloom (threshold 0.82) lifts the hot nodes to glow.
+    let shell = 0.28 + 0.72 * gRim;
+    globeLook = threads * 0.46 * shell + nodes * 0.62 + gRim * 0.26;
+  }
+
   // ---- base hairlines: constant-DEPTH iso-lines (the stacked horizontal weave) -
   // UNCHANGED in direction — keyed to world Z, a FIXED plane in the terrain, so the
   // signature stacked profiles stay painted on the surface and glued to the same
@@ -281,7 +375,9 @@ struct VsOut {
   // overlay — which never raises focusAmt — kept pulsing. Decoupled so they match.
   // The band / halo / slice dimming further down STILL keys off F.hov.w; only the
   // sweep is freed.)
-  let calm = 1.0;
+  // the realistic sweep is the FINISHING flourish: absent on the globe, ramped in over the
+  // last of the morph, and exactly 1.0 at vmF = 1 → the endpoint equals today's mountain.
+  let calm = smoothstep(0.55, 1.0, vmF);
   // ping-pong PHASE from unbounded time via cos() (no fract precision drift at large t)
   let SWEEP_W = 0.52;                              // rad/s -> ~12.1s for a full there-and-back cycle
   let ph = 0.5 - 0.5 * cos(F.a.x * SWEEP_W);       // 0 -> 1 -> 0, symmetric, smooth turn-arounds
@@ -390,7 +486,12 @@ struct VsOut {
     let dim = mix(0.18, 1.0, inBand);               // others fall to 18% — recessed, not deleted
     c = c * mix(1.0, dim, F.hov.w);
   }
-  return vec4<f32>(vec3<f32>(c), 1.0);                     // opaque → writes depth, occludes
+  // ===== CROSS-FADE the intro globe graticule into the mountain scalar c. The weight
+  // reaches 1 by vmF = 0.85 (and calm reaches 1 by vmF = 1), so at vmF = 1 finalC = c
+  // EXACTLY — the finished mountain is byte-identical to today. Below that the surface is
+  // the white-on-black globe grid resolving into the contour model. =====
+  let finalC = mix(globeLook, c, smoothstep(0.0, 0.85, vmF));
+  return vec4<f32>(vec3<f32>(finalC), 1.0);                // opaque → writes depth, occludes
 }
 `;
 
