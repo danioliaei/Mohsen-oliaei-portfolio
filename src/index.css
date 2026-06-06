@@ -229,20 +229,47 @@ canvas#ridge:active {
   opacity: 0;
   white-space: nowrap;
   font-family: var(--sans);
+  color: var(--ink);
+  /* a crisp, dark halo so the whole block stays legible over the bright summit */
+  text-shadow:
+    0 0 12px rgba(0, 0, 0, 0.8),
+    0 1px 3px rgba(0, 0, 0, 0.72);
+  will-change: transform, opacity;
+}
+/* desktop: the role title with the company beneath it. A leader runs from the ring
+   to the SIDE of the title. Exactly this block OR the compact .survey-short below is
+   laid out (the other is display:none), so offsetWidth/Height read the visible
+   variant for the leader layout. */
+.survey-full {
+  display: block;
+}
+.sc-title {
+  display: block;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  line-height: 1.16;
+  color: var(--ink);
+}
+.sc-org {
+  display: block;
+  margin-top: 4px;
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 1.1;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgba(244, 241, 234, 0.7);
+}
+/* the compact ORG 'YY — only on the narrow mobile flank (toggled below) */
+.survey-short {
+  display: none;
   font-size: 11px;
   font-weight: 500;
   line-height: 1;
   letter-spacing: 0.22em;
   text-transform: uppercase;
   color: rgba(244, 241, 234, 0.88);
-  text-shadow: 0 0 12px rgba(0, 0, 0, 0.7);
-  will-change: transform, opacity;
-}
-/* full ORG · CITY · YEAR on desktop; the compact ORG 'YY appears only on the
-   narrow mobile flank (toggled in the media query below). Exactly one is ever
-   laid out, so the leader-width measurement reads the visible one. */
-.survey-short {
-  display: none;
 }
 @media (max-width: 760px) {
   .survey-full {
@@ -253,9 +280,11 @@ canvas#ridge:active {
   }
   /* compact + a tighter, darker halo so the short label stays crisp over the
      dense contour weave on the zoomed-out mobile flank */
-  .survey-callout {
+  .survey-short {
     font-size: 9.5px;
     letter-spacing: 0.14em;
+  }
+  .survey-callout {
     text-shadow:
       0 0 8px rgba(0, 0, 0, 0.92),
       0 1px 3px rgba(0, 0, 0, 0.95);
