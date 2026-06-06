@@ -21,6 +21,7 @@ import {
 import {
   RIDGE_BACKDROP_WGSL,
   RIDGE_TERRAIN_WGSL,
+  RIDGE_FILAMENT_WGSL,
   RIDGE_COMPOSITE_WGSL,
   BRIGHT_WGSL,
   BLUR_WGSL,
@@ -69,6 +70,123 @@ function fibSphere(n: number, phase: number): Float32Array {
 }
 export const decorBaseDirs = (): Float32Array => fibSphere(CLOUD_DECOR.length, 0);
 export const protagonistBaseDirs = (): Float32Array => fibSphere(CLOUD_PROTAGONISTS.length, 1.7);
+
+/* ---- INTRO FILAMENT BALL geometry --------------------------------------------
+   The transparent tangle the intro globe is "full of": flowing line-threads that
+   wrap a spinning sphere plus a few bright sparks at each convergence NODE, built
+   ONCE as additive 3-D line-list vertices (drawn by RIDGE_FILAMENT_WGSL — front &
+   back overlap into a true see-through ball). Each thread starts at a Fibonacci
+   node and walks a curl-bent path across the sphere, so the web reads as turbulent
+   silk rather than tidy great circles. Fully deterministic (a seeded PRNG, never
+   Math.random) so the tangle is identical across StrictMode remounts / reloads —
+   like the letter lattice. Vertex = (x,y,z material dir, t, seed, brightness,
+   radial shell) → 7 floats; stride 28 B, matching the pipeline's attributes. ---- */
+export const FILAMENT_FLOATS_PER_VERT = 7;
+const FIL_NODES = 34;       // bright convergence points (Fibonacci lattice)
+const FIL_PER_NODE = 26;    // threads spun out from each node
+const FIL_STEPS = 28;       // points sampled per thread
+const FIL_STEP_ANG = 0.082; // radians advanced per step → a long sweeping arc (~2.2 rad)
+const FIL_SPARKS = 5;       // short bright segments crossing each node
+
+type V3 = [number, number, number];
+const v3norm = (x: number, y: number, z: number): V3 => {
+  const l = Math.hypot(x, y, z) || 1;
+  return [x / l, y / l, z / l];
+};
+/** Rodrigues rotation of v about UNIT axis k by angle a. */
+function v3rot(v: V3, k: V3, a: number): V3 {
+  const c = Math.cos(a), s = Math.sin(a);
+  const dt = k[0] * v[0] + k[1] * v[1] + k[2] * v[2];
+  const cx = k[1] * v[2] - k[2] * v[1];
+  const cy = k[2] * v[0] - k[0] * v[2];
+  const cz = k[0] * v[1] - k[1] * v[0];
+  const om = 1 - c;
+  return [
+    v[0] * c + cx * s + k[0] * dt * om,
+    v[1] * c + cy * s + k[1] * dt * om,
+    v[2] * c + cz * s + k[2] * dt * om,
+  ];
+}
+
+/** Build the filament line-list. Returns the flat vertex buffer. */
+export function buildFilamentGeometry(): Float32Array<ArrayBuffer> {
+  // mulberry32 — a tiny deterministic PRNG (stable layout, no Math.random)
+  let st = 0x1a2b3c4d >>> 0;
+  const rnd = (): number => {
+    st = (st + 0x6d2b79f5) >>> 0;
+    let t = st;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  const rsym = (): number => rnd() * 2 - 1;
+
+  const nodes = fibSphere(FIL_NODES, 0.0); // flat xyz unit dirs
+  // smooth 3-vector noise sampled from a direction (re-uses the JS fbm twin)
+  const noiseVec = (d: V3, seed: number): V3 => [
+    fbm2(d[0] * 2.3 + seed * 7 + 11, d[1] * 2.3 + 4) - 0.5,
+    fbm2(d[1] * 2.3 + 23, d[2] * 2.3 + seed * 3 + 9) - 0.5,
+    fbm2(d[2] * 2.3 + 31, d[0] * 2.3 + seed * 5 + 17) - 0.5,
+  ];
+  // extra glow where a thread point grazes ANY node → threads light up as they weave through
+  const nearNodeGlow = (d: V3): number => {
+    let g = 0;
+    for (let n = 0; n < FIL_NODES; n++) {
+      const dd = d[0] * nodes[n * 3] + d[1] * nodes[n * 3 + 1] + d[2] * nodes[n * 3 + 2];
+      if (dd > 0.985) g = Math.max(g, (dd - 0.985) / 0.015);
+    }
+    return g;
+  };
+
+  const out: number[] = [];
+  const push = (d: V3, t: number, seed: number, bright: number, radial: number): void => {
+    out.push(d[0], d[1], d[2], t, seed, bright, radial);
+  };
+
+  // ---- threads: curl-bent streamlines fanning out from every node ----
+  for (let n = 0; n < FIL_NODES; n++) {
+    const base: V3 = [nodes[n * 3], nodes[n * 3 + 1], nodes[n * 3 + 2]];
+    for (let f = 0; f < FIL_PER_NODE; f++) {
+      const seed = rnd();
+      const radial = 0.88 + 0.12 * rnd(); // a thin shell with depth so the tangle layers
+      // start at the node with a small jitter so the threads don't perfectly overlap
+      let d = v3norm(base[0] + rsym() * 0.045, base[1] + rsym() * 0.045, base[2] + rsym() * 0.045);
+      let axis = v3norm(rsym(), rsym(), rsym()); // the thread's dominant swirl axis
+      let prev: V3 | null = null;
+      let prevB = 0, prevT = 0;
+      for (let i = 0; i < FIL_STEPS; i++) {
+        const t = i / (FIL_STEPS - 1);
+        // bright at the node, tapering to a faint wisp; lit again where it grazes another node
+        const taper = 0.16 + 0.84 * Math.pow(1 - t, 1.15);
+        const bright = (0.38 + 0.44 * seed) * taper + nearNodeGlow(d) * 0.62;
+        if (prev) { push(prev, prevT, seed, prevB, radial); push(d, t, seed, bright, radial); }
+        prev = d; prevB = bright; prevT = t;
+        // bend the swirl axis by smooth noise so the path meanders like a real filament
+        const nb = noiseVec(d, seed);
+        const la = v3norm(axis[0] + nb[0] * 1.3, axis[1] + nb[1] * 1.3, axis[2] + nb[2] * 1.3);
+        axis = la;
+        d = v3rot(d, la, FIL_STEP_ANG);
+      }
+    }
+  }
+
+  // ---- node sparks: a few short bright crossing segments at each node so the convergence
+  // point reads as a hot, blooming star (sits on the outer shell with the letters) ----
+  for (let n = 0; n < FIL_NODES; n++) {
+    const base: V3 = [nodes[n * 3], nodes[n * 3 + 1], nodes[n * 3 + 2]];
+    for (let b = 0; b < FIL_SPARKS; b++) {
+      const r: V3 = [rsym(), rsym(), rsym()];
+      const dp = r[0] * base[0] + r[1] * base[1] + r[2] * base[2];
+      const tang = v3norm(r[0] - base[0] * dp, r[1] - base[1] * dp, r[2] - base[2] * dp);
+      const e1 = v3norm(base[0] + tang[0] * 0.028, base[1] + tang[1] * 0.028, base[2] + tang[2] * 0.028);
+      const e2 = v3norm(base[0] - tang[0] * 0.028, base[1] - tang[1] * 0.028, base[2] - tang[2] * 0.028);
+      push(e1, 0, 0.5, 2.2, 1.0);
+      push(e2, 1, 0.5, 2.2, 1.0);
+    }
+  }
+
+  return new Float32Array(out);
+}
 
 // ---- camera (eye-level, looking across the dune plain toward the summit) ----
 // Set high enough above the dunes that the foreground reads as densely-packed
@@ -135,6 +253,9 @@ export interface RidgeFrame {
   /** Globe SPIN in radians about Y during the intro (the planet's slow rotation); the
    *  DOM letter-cloud co-rotates with the exact same value. Ignored once morph hits 1. */
   globeSpin?: number;
+  /** Motion gate 0..1 for the intro filament flow: 1 = the threads shimmer/stream, 0 =
+   *  the web holds still (set to 0 on prefers-reduced-motion). Defaults to 1. */
+  motion?: number;
 }
 
 /* ---- orbit camera: drag to spin a full turn around the summit -------------
@@ -486,6 +607,7 @@ export class RidgelineScene {
 
   private backdropPipe!: GPURenderPipeline;
   private terrainPipe!: GPURenderPipeline;
+  private filamentPipe!: GPURenderPipeline;
   private brightPipe!: GPURenderPipeline;
   private blurPipe!: GPURenderPipeline;
   private compositePipe!: GPURenderPipeline;
@@ -498,6 +620,9 @@ export class RidgelineScene {
   private gridVBO: GPUBuffer;
   private gridIBO: GPUBuffer;
   private indexCount = 0;
+
+  private filaVBO: GPUBuffer;
+  private filaVertexCount = 0;
 
   private rw = 1;
   private rh = 1;
@@ -553,6 +678,15 @@ export class RidgelineScene {
       usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST,
     });
     d.queue.writeBuffer(this.gridIBO, 0, idx);
+
+    // ---- intro filament-ball line geometry, built once (deterministic) ----
+    const fil = buildFilamentGeometry();
+    this.filaVertexCount = fil.length / FILAMENT_FLOATS_PER_VERT;
+    this.filaVBO = d.createBuffer({
+      size: fil.byteLength,
+      usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
+    });
+    d.queue.writeBuffer(this.filaVBO, 0, fil);
   }
 
   static async create(canvas: HTMLCanvasElement): Promise<RidgelineScene | null> {
@@ -583,9 +717,10 @@ export class RidgelineScene {
       console.error("[ridgeline] uncaptured:", (ev as GPUUncapturedErrorEvent).error.message);
     });
 
-    const [backdrop, terrain, composite, bright, blur] = await Promise.all([
+    const [backdrop, terrain, filament, composite, bright, blur] = await Promise.all([
       compileModule(d, "ridge-backdrop", RIDGE_BACKDROP_WGSL),
       compileModule(d, "ridge-terrain", RIDGE_TERRAIN_WGSL),
+      compileModule(d, "ridge-filament", RIDGE_FILAMENT_WGSL),
       compileModule(d, "ridge-composite", RIDGE_COMPOSITE_WGSL),
       compileModule(d, "bright", BRIGHT_WGSL),
       compileModule(d, "blur", BLUR_WGSL),
@@ -638,6 +773,41 @@ export class RidgelineScene {
         depthStencil: { format: "depth24plus", depthWriteEnabled: true, depthCompare: "less" },
       }),
     ]);
+
+    // intro FILAMENT ball: additive 3-D lines over the (discarded-at-morph-0) sphere — a true
+    // see-through tangle. Depth-TESTED against the terrain so the forming mountain occludes it,
+    // but never depth-WRITING, so every thread (front AND back) accumulates as light, no z-fight.
+    this.filamentPipe = await d.createRenderPipelineAsync({
+      layout: framePL,
+      vertex: {
+        module: filament,
+        entryPoint: "vs",
+        buffers: [
+          {
+            arrayStride: 28, // 7 floats: vec3 dir + vec4 (t, seed, brightness, radial)
+            attributes: [
+              { shaderLocation: 0, offset: 0, format: "float32x3" },
+              { shaderLocation: 1, offset: 12, format: "float32x4" },
+            ],
+          },
+        ],
+      },
+      fragment: {
+        module: filament,
+        entryPoint: "fs",
+        targets: [
+          {
+            format: HDR,
+            blend: {
+              color: { srcFactor: "one", dstFactor: "one", operation: "add" },
+              alpha: { srcFactor: "one", dstFactor: "one", operation: "add" },
+            },
+          },
+        ],
+      },
+      primitive: { topology: "line-list" },
+      depthStencil: { format: "depth24plus", depthWriteEnabled: false, depthCompare: "less-equal" },
+    });
 
     [this.brightPipe, this.blurPipe] = await Promise.all([
       d.createRenderPipelineAsync({
@@ -755,9 +925,10 @@ export class RidgelineScene {
     // z/w recede every OTHER band so the focused (clicked) slice reads as the hero.
     u[32] = s.hoverBand ?? -1; u[33] = s.hoverGlow ?? 0;
     u[34] = s.focusBand ?? -1; u[35] = s.focusAmt ?? 0;
-    // mph = (morph, globeSpin, spare, spare). morph DEFAULTS to 1 (full mountain) so any
-    // path that forgets the field renders the finished mountain, never a stuck globe.
-    u[36] = s.morph ?? 1; u[37] = s.globeSpin ?? 0; u[38] = 0; u[39] = 0;
+    // mph = (morph, globeSpin, motion, spare). morph DEFAULTS to 1 (full mountain) so any path
+    // that forgets the field renders the finished mountain, never a stuck globe. motion gates the
+    // filament flow (0 on reduced-motion → the web holds still), defaulting to 1.
+    u[36] = s.morph ?? 1; u[37] = s.globeSpin ?? 0; u[38] = s.motion ?? 1; u[39] = 0;
     this.g.device.queue.writeBuffer(this.uBuf, 0, u.buffer, 0, 256);
   }
 
@@ -785,6 +956,13 @@ export class RidgelineScene {
     pass.setVertexBuffer(0, this.gridVBO);
     pass.setIndexBuffer(this.gridIBO, "uint32");
     pass.drawIndexed(this.indexCount);
+    // the intro filament ball — additive flowing threads over the sphere. Drawn only while the
+    // globe is still showing (it has fully faded by morph 0.70); skipped on the finished mountain.
+    if ((s.morph ?? 1) < 0.72) {
+      pass.setPipeline(this.filamentPipe);
+      pass.setVertexBuffer(0, this.filaVBO);
+      pass.draw(this.filaVertexCount);
+    }
     pass.end();
 
     // ---- bloom: bright-pass then one separable blur iteration (→ bloomA) ----
@@ -839,6 +1017,7 @@ export class RidgelineScene {
     this.blurVU.destroy();
     this.gridVBO.destroy();
     this.gridIBO.destroy();
+    this.filaVBO.destroy();
     this.g.device.destroy();
   }
 }

@@ -243,59 +243,18 @@ struct VsOut {
   o.vm = vm;
   return o;
 }
-// even points on a sphere (Fibonacci lattice) — the constellation's NODES (in material space)
-fn fibDir(i : f32, n : f32) -> vec3<f32> {
-  let y = 1.0 - (i + 0.5) * (2.0 / n);
-  let r = sqrt(max(0.0, 1.0 - y * y));
-  let th = 2.39996323 * i;                 // golden angle
-  return vec3<f32>(cos(th) * r, y, sin(th) * r);
-}
 @fragment fn fs(i : VsOut) -> @location(0) vec4<f32> {
   let vmF = clamp(i.vm, 0.0, 1.0);
 
-  // ===== INTRO GLOBE — a dense organic CONSTELLATION: bright NODES wound together by many
-  // sweeping great-circle THREADS (a tangled ball of light, like a 3-D force graph). Keyed off
-  // the UNIT sphere dir gdir (never the blended wpos), un-spun into material space so the whole
-  // web co-rotates welded to the ball. Soft FIXED-WIDTH lines (no fwidth → legal inside loops;
-  // the bloom pass makes them luminous). Computed only while the globe is still showing. =====
-  let gd0 = normalize(i.gdir);
-  let nG = normalize(i.nrm);
-  let VG = normalize(F.eye.xyz - i.wpos);
-  let gRim = pow(1.0 - clamp(abs(dot(nG, VG)), 0.0, 1.0), 1.7);
-  var globeLook = 0.0;
-  if (vmF < 0.985) {
-    // material direction (un-spin gd0 by the globe spin) so nodes/threads are fixed on the surface
-    let cs = cos(F.mph.y); let sn = sin(F.mph.y);
-    let md = vec3<f32>(gd0.x * cs - gd0.z * sn, gd0.y, gd0.x * sn + gd0.z * cs);
-    // one cheap organic warp per fragment so the threads waver like real filaments rather than
-    // reading as perfect compass circles (a soft flow pushing the whole web)
-    let warp = (vnoise(md.xy * 3.1 + 17.0) + vnoise(md.yz * 3.7 + 5.0) - 1.0) * 0.045;
-    let KN = 28;
-    var nodes = 0.0;
-    for (var k = 0; k < KN; k = k + 1) {
-      let dd = clamp(dot(md, fibDir(f32(k), f32(KN))), -1.0, 1.0);
-      nodes = nodes + smoothstep(0.9955, 1.0, dd) * 1.5 + smoothstep(0.95, 1.0, dd) * 0.16; // core + halo
-    }
-    var threads = 0.0;
-    var strides = array<i32, 4>(1, 5, 9, 16);       // short → long weave: a dense net between nodes
-    for (var k = 0; k < KN; k = k + 1) {
-      let a = fibDir(f32(k), f32(KN));
-      for (var s = 0; s < 4; s = s + 1) {
-        let b = fibDir(f32((k + strides[s]) % KN), f32(KN));
-        let nrm = normalize(cross(a, b));
-        let g = dot(md, nrm) + warp;                 // 0 on the great circle through a & b, wavered
-        let m = normalize(a + b);                    // arc midpoint
-        let core = 1.0 - smoothstep(0.0, 0.0065, abs(g));          // delicate soft thread
-        let arc = smoothstep(dot(a, m) - 0.20, dot(a, m) + 0.04, dot(md, m)); // window to the short arc
-        let vary = 0.6 + 0.4 * fract(f32(k) * 0.37 + f32(s) * 0.19); // per-thread brightness
-        threads = threads + core * arc * vary;
-      }
-    }
-    // shell illusion: front-centre threads recede, the limb glows, so the opaque ball still
-    // reads as a see-through tangle of light. Bloom (threshold 0.82) lifts the hot nodes to glow.
-    let shell = 0.28 + 0.72 * gRim;
-    globeLook = threads * 0.46 * shell + nodes * 0.62 + gRim * 0.26;
-  }
+  // ===== INTRO GLOBE — no longer painted on this OPAQUE sphere (which could only ever show its
+  // near hemisphere). The globe is now a separate additive FILAMENT pass (RIDGE_FILAMENT_WGSL):
+  // a true see-through tangle of flowing threads + bright nodes, front and back overlapping. So
+  // while the surface is still mostly un-formed we simply DISCARD it — writing no colour and,
+  // crucially, no DEPTH — so it can't occlude the back of the filament ball; the tangle + the DOM
+  // letters ARE the globe. The mountain then rises THROUGH the fading tangle as each vertex lands
+  // (vm climbs bottom-up). At vmF → 1 nothing discards and finalC = c, so the finished mountain is
+  // byte-identical to before. =====
+  if (vmF < 0.035) { discard; }
 
   // ---- base hairlines: constant-DEPTH iso-lines (the stacked horizontal weave) -
   // UNCHANGED in direction — keyed to world Z, a FIXED plane in the terrain, so the
@@ -486,12 +445,76 @@ fn fibDir(i : f32, n : f32) -> vec3<f32> {
     let dim = mix(0.18, 1.0, inBand);               // others fall to 18% — recessed, not deleted
     c = c * mix(1.0, dim, F.hov.w);
   }
-  // ===== CROSS-FADE the intro globe graticule into the mountain scalar c. The weight
-  // reaches 1 by vmF = 0.85 (and calm reaches 1 by vmF = 1), so at vmF = 1 finalC = c
-  // EXACTLY — the finished mountain is byte-identical to today. Below that the surface is
-  // the white-on-black globe grid resolving into the contour model. =====
-  let finalC = mix(globeLook, c, smoothstep(0.0, 0.85, vmF));
+  // ===== EMERGE the mountain scalar c from black as each vertex lands. The weight reaches 1
+  // by vmF = 0.85 (and calm reaches 1 by vmF = 1), so at vmF = 1 finalC = c EXACTLY — the
+  // finished mountain is byte-identical to today. Below that the contour model fades up out of
+  // black behind the dissolving filament ball (the separate additive globe pass). =====
+  let finalC = c * smoothstep(0.0, 0.85, vmF);   // emerge from black as each vertex lands (the globe is the filament pass)
   return vec4<f32>(vec3<f32>(finalC), 1.0);                // opaque → writes depth, occludes
+}
+`;
+
+/* --------------------------------------------------------- FILAMENT ------- */
+/* The intro GLOBE itself: a transparent ball "full of lines" — thousands of fine threads
+   that flow and shimmer over a slowly spinning sphere, with bright nodes where they converge,
+   exactly the reference look. Drawn as ADDITIVE 3-D line-list geometry (built once on the CPU
+   in ridgeline.ts) into the HDR scene AFTER the terrain: depth-TESTED so the forming mountain
+   occludes it, but never depth-WRITING, so every thread — front AND back of the sphere — simply
+   accumulates as light → a genuine see-through tangle (impossible on the old opaque sphere). The
+   whole web fades out as the mountain assembles (the terrain rises through it). Greyscale out;
+   the bloom pass lifts the hot nodes to a glow and the composite supplies the grade. ----------
+
+   Per-vertex inputs: mdir = the thread point's UNIT direction in MATERIAL space (before spin);
+   at = (t along the thread 0..1, per-thread seed, baseline brightness, radial shell scale). */
+export const RIDGE_FILAMENT_WGSL = RIDGE_FRAME_WGSL + /* wgsl */ `
+// GLOBE centre/radius MUST mirror GLOBE in ridgeline.ts (and GLOBE_C/GLOBE_R in the terrain
+// shader) so the threads, the morphing sphere and the DOM letter-cloud all sit on one ball.
+const F_TAU : f32 = 6.28318530718;
+const F_GLOBE_C : vec3<f32> = vec3<f32>(0.0, 2120.0, 8200.0);
+const F_GLOBE_R : f32 = 3600.0;
+
+struct FOut {
+  @builtin(position) pos  : vec4<f32>,
+  @location(0)       glow : f32,
+};
+
+@vertex fn vs(@location(0) mdir : vec3<f32>, @location(1) at : vec4<f32>) -> FOut {
+  let morph  = F.mph.x;
+  let motion = F.mph.z;                          // 0 on reduced-motion → the web holds still
+  // the ball dissolves as the mountain assembles (a touch after the decor letters start sinking),
+  // and is fully gone by morph 0.70 — by then the terrain occludes it anyway.
+  let globeFade = 1.0 - smoothstep(0.12, 0.70, morph);
+
+  var d = normalize(mdir);
+  // CONSTANT MOVEMENT: a flow that travels ALONG each thread (phase keyed to t) and over time,
+  // projected onto the tangent plane so the ball keeps its round silhouette. Three offset lobes
+  // → an organic, non-repeating shimmer, like real filaments caught in a current, not a wobble.
+  let tt = F.a.x;
+  let ph = at.x * 9.0 + at.y * F_TAU;
+  let w = vec3<f32>(
+    sin(ph + tt * 0.85),
+    sin(ph * 1.27 + tt * 1.10 + 2.1),
+    sin(ph * 0.73 + tt * 0.65 + 4.2),
+  );
+  let tang = w - d * dot(w, d);                  // tangential component only (preserve radius)
+  d = normalize(d + tang * 0.055 * motion);
+
+  // spin about Y by globeSpin — matches the terrain sphere (lon += F.mph.y) and rotY() for the
+  // DOM letters, so threads, surface and words all co-rotate welded to the same ball.
+  let cs = cos(F.mph.y); let sn = sin(F.mph.y);
+  let sd = vec3<f32>(d.x * cs + d.z * sn, d.y, -d.x * sn + d.z * cs);
+
+  let world = F_GLOBE_C + F_GLOBE_R * at.w * sd;
+  var o : FOut;
+  o.pos  = F.vp * vec4<f32>(world, 1.0);
+  o.glow = at.z * globeFade;
+  return o;
+}
+
+@fragment fn fs(i : FOut) -> @location(0) vec4<f32> {
+  // straight greyscale light (additive over black); the bloom pass turns the hot nodes to glow.
+  let g = max(i.glow, 0.0);
+  return vec4<f32>(vec3<f32>(g), g);
 }
 `;
 
