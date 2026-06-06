@@ -1468,7 +1468,7 @@ canvas#ridge:active {
   overflow: hidden;
 }
 .cloud-proto-list,
-.cloud-decor-list {
+.cloud-char-list {
   position: absolute;
   inset: 0;
   margin: 0;
@@ -1476,7 +1476,7 @@ canvas#ridge:active {
   list-style: none;
 }
 .cloud-proto,
-.cloud-decor {
+.cloud-char {
   position: absolute;
   top: 0;
   left: 0;
@@ -1484,7 +1484,7 @@ canvas#ridge:active {
   white-space: nowrap;
   font-family: var(--sans);
   color: var(--ink);
-  /* a crisp dark halo so the words stay legible over the bright limb of the ball */
+  /* a crisp dark halo so the glyphs stay legible over the bright limb of the ball */
   text-shadow:
     0 0 12px rgba(0, 0, 0, 0.85),
     0 1px 3px rgba(0, 0, 0, 0.75);
@@ -1495,12 +1495,13 @@ canvas#ridge:active {
   font-weight: 600;
   letter-spacing: 0.005em;
 }
-.cloud-decor {
-  font-size: 10.5px;
+/* a single decomposed glyph adrift in the volume — a tracked, instrument-like character */
+.cloud-char {
+  font-size: 14px;
   font-weight: 500;
-  letter-spacing: 0.18em;
+  letter-spacing: 0;
   text-transform: uppercase;
-  color: rgba(244, 241, 234, 0.72);
+  color: rgba(244, 241, 234, 0.86);
 }
 
 /* ---- the globe's CORE button: a glass benchmark disc welded to the front of the ball ----

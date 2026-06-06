@@ -40,18 +40,12 @@ export const MORPH_DUR = 2.6;        // s — globe → mountain assembly (short
 
 /* ---- letter-cloud content, drawn from the real career record (data/stations.ts): the seven
    role + company labels are PROTAGONISTS (index k ↔ STATIONS[k]; they fly to their ring anchor
-   and hand off to the survey as the mountain forms), while place / dates / tools are DECOR
-   fragments that swarm the ball then sink and fade. Deterministic order (no Math.random) so the
-   layout is stable across re-measures / StrictMode remounts. ---------------------------- */
+   and hand off to the survey as the mountain forms). The rest of the record is DECOMPOSED into
+   individual CHARACTERS scattered THROUGH the globe volume at many radii (see CLOUD_CHARS below) —
+   the "ball of letters" mixed in among the lines, rather than whole words pasted on the shell.
+   Deterministic order (no Math.random) so the layout is stable across re-measures / StrictMode
+   remounts. ---------------------------- */
 export const CLOUD_PROTAGONISTS = STATIONS.map((s) => `${s.role} · ${s.company}`);
-// a varied, dense swarm: every company, place, year-span and tool/standard across the record —
-// enough distinct words that the ball reads as the "ball of letters" it's meant to be.
-export const CLOUD_DECOR: string[] = [
-  ...STATIONS.map((s) => s.company),
-  ...STATIONS.map((s) => s.place),
-  ...STATIONS.map((s) => s.dates),
-  ...STATIONS.flatMap((s) => s.detail.tools),
-];
 
 /** Even unit directions on a sphere (Fibonacci lattice). `phase` spins the whole set so two
  *  lattices (protagonists, decor) interleave rather than overlap. Returns a flat xyz array. */
@@ -68,8 +62,60 @@ function fibSphere(n: number, phase: number): Float32Array {
   }
   return out;
 }
-export const decorBaseDirs = (): Float32Array => fibSphere(CLOUD_DECOR.length, 0);
 export const protagonistBaseDirs = (): Float32Array => fibSphere(CLOUD_PROTAGONISTS.length, 1.7);
+
+/* ---- DECOMPOSED character cloud: short, curated signatures from the record (companies, cities,
+   tools/standards, years), broken into individual CHARACTERS and scattered through the globe's
+   VOLUME at many radii so glyphs float in among the filaments at every depth. Each token also
+   carries the career station (ring) its characters rain toward as the mountain forms. Curated
+   short so the per-frame DOM-write budget stays modest (~128 chars + 7 protagonists). ------- */
+const CLOUD_CHAR_TOKENS: ReadonlyArray<{ text: string; ring: number }> = [
+  { text: "STEGRA", ring: 0 }, { text: "STOCKHOLM", ring: 0 }, { text: "2025", ring: 0 },
+  { text: "ISO19650", ring: 2 },
+  { text: "NEOBUILT", ring: 1 }, { text: "GOTHENBURG", ring: 1 }, { text: "DYNAMO", ring: 1 },
+  { text: "PYTHON", ring: 1 }, { text: "C#", ring: 1 },
+  { text: "NORTHVOLT", ring: 2 }, { text: "NAVISWORKS", ring: 2 }, { text: "BIM", ring: 2 },
+  { text: "RHINO", ring: 3 }, { text: "GIS", ring: 3 },
+  { text: "REVIT", ring: 4 }, { text: "WHITE", ring: 4 }, { text: "IFC", ring: 4 },
+  { text: "CHALMERS", ring: 5 },
+  { text: "TEHRAN", ring: 6 }, { text: "ARCHICAD", ring: 6 }, { text: "2014", ring: 6 },
+];
+
+/** Build the decomposed character cloud once: the flat list of single-character strings (for the
+ *  DOM spans), their even Fibonacci base directions, a per-char RADIAL depth (0.30..1.02 of the
+ *  globe radius, biased outward) so glyphs sit at every depth in the volume, and the ring each
+ *  char rains toward. Deterministic (seeded, no Math.random) → identical across StrictMode remounts. */
+function buildCharCloud(): {
+  chars: string[];
+  dirs: Float32Array;
+  radii: Float32Array;
+  rings: Int16Array;
+} {
+  const chars: string[] = [];
+  const ringList: number[] = [];
+  for (const tok of CLOUD_CHAR_TOKENS) {
+    for (const ch of tok.text) { chars.push(ch); ringList.push(tok.ring); }
+  }
+  const n = chars.length;
+  const dirs = fibSphere(n, 2.7);
+  // a tiny deterministic PRNG for the radial depths (mirrors the filament-geometry style)
+  let st = 0x9e3779b9 >>> 0;
+  const rnd = (): number => {
+    st = (st + 0x6d2b79f5) >>> 0;
+    let t = st;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  const radii = new Float32Array(n);
+  for (let i = 0; i < n; i++) radii[i] = 0.3 + 0.72 * Math.pow(rnd(), 0.65); // 0.30..1.02, biased out
+  return { chars, dirs, radii, rings: Int16Array.from(ringList) };
+}
+
+export const CHAR_CLOUD = buildCharCloud();
+/** The flat list of single characters the DOM renders as `.cloud-char` spans (index-aligned with
+ *  CHAR_CLOUD.dirs / radii / rings). */
+export const CLOUD_CHARS: string[] = CHAR_CLOUD.chars;
 
 /* ---- INTRO FILAMENT BALL geometry --------------------------------------------
    The transparent tangle the intro globe is "full of": flowing line-threads that
@@ -82,11 +128,22 @@ export const protagonistBaseDirs = (): Float32Array => fibSphere(CLOUD_PROTAGONI
    like the letter lattice. Vertex = (x,y,z material dir, t, seed, brightness,
    radial shell) → 7 floats; stride 28 B, matching the pipeline's attributes. ---- */
 export const FILAMENT_FLOATS_PER_VERT = 7;
-const FIL_NODES = 34;       // bright convergence points (Fibonacci lattice)
-const FIL_PER_NODE = 26;    // threads spun out from each node
+const FIL_NODES = 42;       // bright convergence points (Fibonacci lattice)
+const FIL_PER_NODE = 24;    // threads spun out from each node
 const FIL_STEPS = 28;       // points sampled per thread
 const FIL_STEP_ANG = 0.082; // radians advanced per step → a long sweeping arc (~2.2 rad)
-const FIL_SPARKS = 5;       // short bright segments crossing each node
+const FIL_SPARKS = 5;       // short bright segments crossing each surface node
+// nested radial shells the curl threads inhabit (a thread is assigned one by f % 3) so the ball
+// reads as a layered VOLUME of filaments rather than the old single thin 0.88..1.0 crust.
+const FIL_SHELLS = [0.6, 0.8, 0.98] as const;
+const CORE_TRAIL_FRAC = 0.4;  // fraction of curl threads that DIVE inward to the core near their tip
+const SPOKE_COUNT = 64;       // radial sight-lines from the nucleus out to the rim (the armature)
+const SPOKE_DASHES = 8;       // dash segments per spoke (read as travelling measurement ticks)
+const NUCLEUS_SPARKS = 56;    // short crossing sparks forming the glowing core AT the centre
+// the line CLASS is encoded as a sentinel range in the `seed` float (at.y), read in the VS via
+// step()/fract(): curl threads + surface sparks use seed ∈ [0,1) (organic, flows), radial spokes
+// use [1,2) (rigid armature), the nucleus uses [2,3) (the core that lifts to the summit). The
+// FRACTIONAL part stays the per-line phase seed the flow/twinkle math has always used.
 
 type V3 = [number, number, number];
 const v3norm = (x: number, y: number, z: number): V3 => {
@@ -143,24 +200,32 @@ export function buildFilamentGeometry(): Float32Array<ArrayBuffer> {
     out.push(d[0], d[1], d[2], t, seed, bright, radial);
   };
 
-  // ---- threads: curl-bent streamlines fanning out from every node ----
+  // ---- CLASS A — curl-bent streamlines fanning out from every node, now layered across three
+  // nested shells, and with ~40% of them DIVING inward to the core near their tip (CORE-TRAILS) so
+  // the organic tangle physically converges on the centre rather than floating as a hollow crust.
   for (let n = 0; n < FIL_NODES; n++) {
     const base: V3 = [nodes[n * 3], nodes[n * 3 + 1], nodes[n * 3 + 2]];
     for (let f = 0; f < FIL_PER_NODE; f++) {
       const seed = rnd();
-      const radial = 0.88 + 0.12 * rnd(); // a thin shell with depth so the tangle layers
+      const shellR = FIL_SHELLS[f % FIL_SHELLS.length] + 0.06 * rnd(); // which depth this thread rides
+      const dive = seed < CORE_TRAIL_FRAC; // a core-trail: plunges toward radial 0.12 over its last steps
       // start at the node with a small jitter so the threads don't perfectly overlap
       let d = v3norm(base[0] + rsym() * 0.045, base[1] + rsym() * 0.045, base[2] + rsym() * 0.045);
       let axis = v3norm(rsym(), rsym(), rsym()); // the thread's dominant swirl axis
       let prev: V3 | null = null;
-      let prevB = 0, prevT = 0;
+      let prevB = 0, prevT = 0, prevR = shellR;
       for (let i = 0; i < FIL_STEPS; i++) {
         const t = i / (FIL_STEPS - 1);
+        // radial DEPTH: ride the shell, but core-trails ramp the last ~10 steps down to the core so
+        // the line spirals inward (direction d still walks the sphere; only the depth collapses)
+        const radial = dive
+          ? shellR + (0.12 - shellR) * smoothstep01(0, 1, (i - (FIL_STEPS - 10)) / 9)
+          : shellR;
         // bright at the node, tapering to a faint wisp; lit again where it grazes another node
         const taper = 0.16 + 0.84 * Math.pow(1 - t, 1.15);
-        const bright = (0.38 + 0.44 * seed) * taper + nearNodeGlow(d) * 0.62;
-        if (prev) { push(prev, prevT, seed, prevB, radial); push(d, t, seed, bright, radial); }
-        prev = d; prevB = bright; prevT = t;
+        const bright = (0.34 + 0.4 * seed) * taper + nearNodeGlow(d) * 0.58;
+        if (prev) { push(prev, prevT, seed, prevB, prevR); push(d, t, seed, bright, radial); }
+        prev = d; prevB = bright; prevT = t; prevR = radial;
         // bend the swirl axis by smooth noise so the path meanders like a real filament
         const nb = noiseVec(d, seed);
         const la = v3norm(axis[0] + nb[0] * 1.3, axis[1] + nb[1] * 1.3, axis[2] + nb[2] * 1.3);
@@ -170,7 +235,7 @@ export function buildFilamentGeometry(): Float32Array<ArrayBuffer> {
     }
   }
 
-  // ---- node sparks: a few short bright crossing segments at each node so the convergence
+  // ---- node sparks: a few short bright crossing segments at each surface node so the convergence
   // point reads as a hot, blooming star (sits on the outer shell with the letters) ----
   for (let n = 0; n < FIL_NODES; n++) {
     const base: V3 = [nodes[n * 3], nodes[n * 3 + 1], nodes[n * 3 + 2]];
@@ -183,6 +248,36 @@ export function buildFilamentGeometry(): Float32Array<ArrayBuffer> {
       push(e1, 0, 0.5, 2.2, 1.0);
       push(e2, 1, 0.5, 2.2, 1.0);
     }
+  }
+
+  // ---- CLASS B — RADIAL SIGHT-LINE SPOKES: a rigid armature of dashed rays from the nucleus
+  // (radial 0.06) out to the rim (radial 1.0), brightest at the inner end so light reads as
+  // emanating FROM the centre. Their own Fibonacci set (not the node dirs) so they form a distinct
+  // cage. seed sentinel ∈ [1,2) marks the class; t runs 0→1 inner→outer to steer the flow outward. */
+  const spokeDirs = fibSphere(SPOKE_COUNT, 2.1);
+  for (let s = 0; s < SPOKE_COUNT; s++) {
+    const dir: V3 = [spokeDirs[s * 3], spokeDirs[s * 3 + 1], spokeDirs[s * 3 + 2]];
+    const sentinel = 1.0 + rnd() * 0.999; // class = spoke; fract() = per-spoke phase seed
+    for (let i = 0; i < SPOKE_DASHES; i++) {
+      const u0 = i / SPOKE_DASHES;
+      const u1 = (i + 0.7) / SPOKE_DASHES; // 70% dash, 30% gap → a measurement-tick rhythm
+      const rA = 0.06 + 0.94 * u0;
+      const rB = 0.06 + 0.94 * u1;
+      push(dir, u0, sentinel, 1.7 + (0.42 - 1.7) * u0, rA);
+      push(dir, u1, sentinel, 1.7 + (0.42 - 1.7) * u1, rB);
+    }
+  }
+
+  // ---- CLASS C — NUCLEUS: short crossing sparks INSIDE radial 0.02..0.10 whose midline passes
+  // through the exact globe centre (= F_GLOBE_C = the morph-sphere centre = the summit axis), at a
+  // brightness that crosses the 0.82 bloom threshold so the additive heap blooms into a luminous
+  // core with no extra pass. seed sentinel ∈ [2,3) marks the class (the VS lifts these to the summit). */
+  for (let b = 0; b < NUCLEUS_SPARKS; b++) {
+    const dir = v3norm(rsym(), rsym(), rsym());
+    const rad = 0.02 + 0.08 * rnd();
+    const sentinel = 2.0 + rnd() * 0.999;
+    push([-dir[0], -dir[1], -dir[2]], 0, sentinel, 3.0, rad); // one side of the crossing…
+    push(dir, 1, sentinel, 3.0, rad);                          // …to the other, through the centre
   }
 
   return new Float32Array(out);

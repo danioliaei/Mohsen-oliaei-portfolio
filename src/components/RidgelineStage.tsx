@@ -12,8 +12,8 @@ import {
   GLOBE_SPIN_RATE,
   MORPH_DUR,
   CLOUD_PROTAGONISTS,
-  CLOUD_DECOR,
-  decorBaseDirs,
+  CLOUD_CHARS,
+  CHAR_CLOUD,
   protagonistBaseDirs,
 } from "../gpu/ridgeline";
 import RoleOverlay from "./RoleOverlay";
@@ -323,10 +323,19 @@ export default function RidgelineStage() {
       const easeOutQuint = (x: number) => 1 - Math.pow(1 - x, 5);
       const mix01 = (a: number, b: number, t: number) => a + (b - a) * t;
 
-      // letter-cloud geometry: fixed Fibonacci dirs (built once) + cached label nodes.
-      const decorDirs = decorBaseDirs();
+      // letter-cloud geometry: the protagonists' Fibonacci dirs + the DECOMPOSED character cloud
+      // (even dirs, per-char radial depth, and the ring each char rains toward — all built once in
+      // ridgeline.ts), plus cached DOM node lists. On a narrow flank / reduced motion the char
+      // count is trimmed (charCount) to keep the per-frame DOM writes light.
+      const charDirs = CHAR_CLOUD.dirs;
+      const charRadii = CHAR_CLOUD.radii;
+      const charRings = CHAR_CLOUD.rings;
+      const charCount =
+        reduceMotion || cvs.clientWidth < 760
+          ? Math.min(CLOUD_CHARS.length, 68)
+          : CLOUD_CHARS.length;
       const protoDirs = protagonistBaseDirs();
-      let decorEls: NodeListOf<HTMLElement> | null = null;
+      let charEls: NodeListOf<HTMLElement> | null = null;
       let protoEls: NodeListOf<HTMLElement> | null = null;
       // rotate a base dir about Y by `spin`, matching the shader's lon += globeSpin (a point at
       // base-longitude φ ends at φ+spin, measured from +z toward +x) so letters weld to the lines.
@@ -827,32 +836,49 @@ export default function RidgelineStage() {
         const wrap = cloudRef.current;
         if (!wrap) return;
         if (wrap.style.visibility === "hidden") wrap.style.visibility = "visible";
-        if (!decorEls) decorEls = wrap.querySelectorAll<HTMLElement>(".cloud-decor");
+        if (!charEls) charEls = wrap.querySelectorAll<HTMLElement>(".cloud-char");
         if (!protoEls) protoEls = wrap.querySelectorAll<HTMLElement>(".cloud-proto");
 
-        // DECOR: present on the globe, then sink (rain into the terrain) + fade out by ~m 0.62
-        const decorVis = 1 - smooth(0.42, 0.62, m);
-        const sinkY = smooth(0.35, 0.95, m) * 320; // downward drift in px as it dissolves
-        for (let i = 0; i < decorEls.length; i++) {
-          const el = decorEls[i];
-          if (decorVis <= 0.002) { el.style.opacity = "0"; continue; }
-          const [rx, ry, rz] = rotY(decorDirs[i * 3], decorDirs[i * 3 + 1], decorDirs[i * 3 + 2], spin);
-          const Px = GLOBE.cx + GLOBE.r * rx, Py = GLOBE.cy + GLOBE.r * ry, Pz = GLOBE.cz + GLOBE.r * rz;
+        // CHARS: individual glyphs scattered THROUGH the volume at many radii (cr) — deep glyphs sit
+        // near the core, outer ones near the rim, so the letters are MIXED IN among the filaments at
+        // every depth. As the mountain forms they rain toward their ring anchor and fade — the
+        // decomposed "ball of letters" settling onto the contour bands.
+        // fade the glyphs out a touch EARLIER than they rain home (fall completes ~0.62), so they
+        // are mostly gone before the GPU drain funnel peaks → the additive climax stays one source.
+        const charVis = 1 - smooth(0.46, 0.64, m);
+        const fall = smooth(0.28, 0.62, m); // 0 on the globe → 1 raining onto the ring band
+        for (let i = 0; i < charEls.length; i++) {
+          const el = charEls[i];
+          // trimmed on a narrow flank / reduced motion → drop the layer entirely (not just opacity 0)
+          if (i >= charCount) { el.style.display = "none"; continue; }
+          if (charVis <= 0.002) { el.style.opacity = "0"; continue; }
+          const cr = charRadii[i];
+          const [rx, ry, rz] = rotY(charDirs[i * 3], charDirs[i * 3 + 1], charDirs[i * 3 + 2], spin);
+          const Px = GLOBE.cx + GLOBE.r * cr * rx, Py = GLOBE.cy + GLOBE.r * cr * ry, Pz = GLOBE.cz + GLOBE.r * cr * rz;
           const vx = eye[0] - Px, vy = eye[1] - Py, vz = eye[2] - Pz;
           const vl = Math.hypot(vx, vy, vz) || 1;
           const facing = (rx * vx + ry * vy + rz * vz) / vl; // outward normal · view (>0 = front)
-          const faceFade = smooth(-0.06, 0.3, facing); // let limb words linger → a fuller ball
+          const faceFade = 0.22 + 0.78 * smooth(-0.25, 0.45, facing); // back glyphs DISSOLVE (no muddy floor)
           const cw = vp[3] * Px + vp[7] * Py + vp[11] * Pz + vp[15];
-          if (cw <= 1e-6 || faceFade <= 0.002) { el.style.opacity = "0"; continue; }
+          if (cw <= 1e-6) { el.style.opacity = "0"; continue; }
+          const depth = smooth(0.0, 1.0, ((2 * GLOBE.r) / cw) * 0.85); // 0 far → 1 near (the globe
+          // sits dollied back at rest, so this is boosted to keep the front glyphs clearly legible)
+          const op = charVis * faceFade * (0.5 + 0.5 * depth) * (0.52 + 0.48 * cr);
+          if (op < 0.04) { el.style.opacity = "0"; continue; } // soft cull → thins the far smear AND skips the write
           const cx = vp[0] * Px + vp[4] * Py + vp[8] * Pz + vp[12];
           const cy = vp[1] * Px + vp[5] * Py + vp[9] * Pz + vp[13];
-          const sx = ((cx / cw) * 0.5 + 0.5) * W;
-          const sy = (1 - ((cy / cw) * 0.5 + 0.5)) * H + sinkY;
-          const depth = smooth(0.0, 1.0, ((2 * GLOBE.r) / cw) * 0.5); // 0 far → 1 near
-          const scale = 0.66 + 0.42 * depth;
+          let sx = ((cx / cw) * 0.5 + 0.5) * W;
+          let sy = (1 - ((cy / cw) * 0.5 + 0.5)) * H;
+          // rain toward this char's ring anchor (the same anchors the survey + protagonists use)
+          if (fall > 0.001) {
+            const a = ringAnchor(STATIONS[charRings[i]].radius);
+            const tp = projectToScreen(vp, a.x, a.y, a.z, W, H);
+            if (tp.visible) { sx += (tp.x - sx) * fall; sy += (tp.y - sy) * fall; }
+          }
+          const scale = 0.55 + 0.62 * depth * (0.6 + 0.4 * cr);
           el.style.transform =
             `translate3d(${sx.toFixed(1)}px, ${sy.toFixed(1)}px, 0) translate(-50%, -50%) scale(${scale.toFixed(3)})`;
-          el.style.opacity = (decorVis * faceFade * (0.32 + 0.5 * depth)).toFixed(3);
+          el.style.opacity = op.toFixed(3);
         }
 
         // PROTAGONISTS: fly sphere → ring anchor (same vp the survey uses → seamless handoff).
@@ -1062,20 +1088,20 @@ export default function RidgelineStage() {
     >
       <canvas id="ridge" ref={canvasRef} />
 
-      {/* the intro "ball of letters" — real career words projected onto the spinning globe
-          and co-rotated with the GPU lines, written imperatively from the rAF loop. Decorative
-          fragments swarm then sink into the terrain; the seven role·company labels fly to their
-          ring anchors and hand off to the survey. aria-hidden: the survey carries the readable
-          copy once the mountain forms; this is the same words mid-flight. */}
+      {/* the intro "ball of lines & letters" — real career words projected onto the spinning globe
+          and co-rotated with the GPU lines, written imperatively from the rAF loop. The record is
+          DECOMPOSED into individual characters scattered through the volume at every depth; the seven
+          role·company labels stay whole and fly to their ring anchors, handing off to the survey.
+          aria-hidden: the survey carries the readable copy once the mountain forms. */}
       <div className="ridge-cloud" ref={cloudRef} aria-hidden="true">
         <ul className="cloud-proto-list">
           {CLOUD_PROTAGONISTS.map((txt, k) => (
             <li className="cloud-proto" key={`cp-${k}`}>{txt}</li>
           ))}
         </ul>
-        <ul className="cloud-decor-list">
-          {CLOUD_DECOR.map((txt, k) => (
-            <li className="cloud-decor" key={`cd-${k}`}>{txt}</li>
+        <ul className="cloud-char-list">
+          {CLOUD_CHARS.map((ch, k) => (
+            <li className="cloud-char" key={`cc-${k}`}>{ch}</li>
           ))}
         </ul>
       </div>
