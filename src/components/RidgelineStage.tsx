@@ -400,6 +400,12 @@ export default function RidgelineStage() {
       let labelEls: NodeListOf<HTMLElement> | null = null;
       let leaderEls: NodeListOf<SVGPolylineElement> | null = null;
       const labelW = new Array<number>(STATIONS.length).fill(0);
+      // the callout is a title + company stack, so we track its full HEIGHT (for the
+      // hover hit-test) and the TITLE line's height separately: the leader meets the
+      // SIDE of the title, so the block is offset up by half the title height to put
+      // the title's centre on the leader's horizontal run.
+      const labelH = new Array<number>(STATIONS.length).fill(0);
+      const titleH = new Array<number>(STATIONS.length).fill(0);
       let measured = false;
       // per-frame layout scratch (hoisted so the rAF loop never allocates): each
       // station's projected anchor, computed leader path, label origin, and how
@@ -409,6 +415,13 @@ export default function RidgelineStage() {
       const ptsA = new Array<string>(STATIONS.length).fill("");
       const lxA = new Array<number>(STATIONS.length).fill(0);
       const eyA = new Array<number>(STATIONS.length).fill(0);
+      // block TOP (translateY): the title centre is pulled onto the leader's run, so
+      // the block hangs a half-title-height below eyA.
+      const tyA = new Array<number>(STATIONS.length).fill(0);
+      // which side each callout splays to this frame (even → left, odd → right,
+      // flipped near an edge). Pass 2 right-aligns left-splayed blocks so their
+      // lines hug the leader, and left-aligns right-splayed ones.
+      const toLeftA = new Array<boolean>(STATIONS.length).fill(false);
       // the eased, currently-DISPLAYED opacity of each callout — pass 2 nudges these
       // toward their target (highlight / dim / rest) every frame so the survey never
       // snaps; the lit slice rises and its neighbours recede over a beat.
@@ -457,6 +470,11 @@ export default function RidgelineStage() {
           measured = true;
           for (let k = 0; k < STATIONS.length; k++) {
             labelW[k] = labels[k].offsetWidth;
+            labelH[k] = labels[k].offsetHeight;
+            // the visible title line — the desktop .sc-title, or (when it's hidden on
+            // the mobile flank) the whole compact label
+            const t = labels[k].querySelector<HTMLElement>(".sc-title");
+            titleH[k] = t && t.offsetHeight > 0 ? t.offsetHeight : labelH[k];
             if (labelW[k] <= 0) measured = false; // fonts not ready — retry next frame
           }
         }
@@ -489,26 +507,37 @@ export default function RidgelineStage() {
             continue;
           }
 
-          // splay the leader up and out, then clamp it clear of the header band and
-          // the viewport edges. Alternate the splay side by parity (even → left, odd
-          // → right) so vertically-stacked neighbours never collide; fall back to
-          // whichever side fits when the column drifts near an edge.
-          const shelf = labelW[k] + 14;
+          // splay the block to one side and run a leader from the ring anchor UP to
+          // the SIDE of the role title (a short horizontal tick meeting the title's
+          // inner edge — no underline beneath the block). Alternate the splay side by
+          // parity (even → left, odd → right) so vertically-stacked neighbours never
+          // collide; fall back to whichever side fits when the column nears an edge.
           const pad = mobile ? 12 : 16;
           const outX = mobile ? W * 0.16 : Math.min(W * 0.12, 150);
           const outY = mobile ? 92 : Math.min(H * 0.1, 78);
-          const fitLeft = a.x - outX >= pad + shelf;
-          const fitRight = a.x + outX <= W - pad - shelf;
+          const stub = 14; // short horizontal tick that meets the title's side
+          const fitLeft = a.x - outX >= pad + labelW[k];
+          const fitRight = a.x + outX <= W - pad - labelW[k];
           const preferLeft = (k % 2) === 0;
           const toLeft = preferLeft ? fitLeft || !fitRight : !(fitRight || !fitLeft);
-          let ex = a.x + (toLeft ? -outX : outX); // elbow
-          ex = toLeft ? Math.max(ex, pad + shelf) : Math.min(ex, W - pad - shelf);
-          const ey = Math.max(a.y - outY, headerSafe); // sit below the site header
-          const sx = ex + (toLeft ? -shelf : shelf); // far end of the underline shelf
-          const lx = toLeft ? ex - labelW[k] : ex; // text hugs the elbow (inner) end
-          ptsA[k] = `${a.x.toFixed(1)},${a.y.toFixed(1)} ${ex.toFixed(1)},${ey.toFixed(1)} ${sx.toFixed(1)},${ey.toFixed(1)}`;
+          // innerX = the title edge the leader meets (right edge when splaying left,
+          // left edge when splaying right), clamped so the block stays on screen
+          let innerX = a.x + (toLeft ? -outX : outX);
+          innerX = toLeft
+            ? Math.max(innerX, pad + labelW[k])
+            : Math.min(innerX, W - pad - labelW[k]);
+          const half = titleH[k] / 2;
+          // ey is the TITLE's vertical centre — the height the leader meets it at —
+          // held below the site header (block top = ey - half must clear it)
+          const ey = Math.max(a.y - outY, headerSafe + half);
+          const elbowX = innerX + (toLeft ? stub : -stub); // corner on the anchor side
+          const ty = ey - half; // block top, so the title centre sits on the leader
+          const lx = toLeft ? innerX - labelW[k] : innerX; // text hugs the inner edge
+          ptsA[k] = `${a.x.toFixed(1)},${a.y.toFixed(1)} ${elbowX.toFixed(1)},${ey.toFixed(1)} ${innerX.toFixed(1)},${ey.toFixed(1)}`;
           lxA[k] = lx;
           eyA[k] = ey;
+          tyA[k] = ty;
+          toLeftA[k] = toLeft;
 
           // a hover over the callout text lights its slice directly (the words are
           // the one thing the terrain pick can't see). The slope itself is handled
@@ -516,7 +545,8 @@ export default function RidgelineStage() {
           // whole face lights it — not just a disc by the anchor.
           if (!dragging && hx >= 0 && vis > 0.12) {
             const inLabel =
-              hx >= lx - 14 && hx <= lx + labelW[k] + 14 && hy >= ey - 32 && hy <= ey + 8;
+              hx >= lx - 14 && hx <= lx + labelW[k] + 14 &&
+              hy >= ty - 8 && hy <= ty + labelH[k] + 8;
             if (inLabel) labelHover = k;
           }
         }
@@ -565,7 +595,12 @@ export default function RidgelineStage() {
           const op = dispOp[k].toFixed(3);
           if (laidOut) {
             leader.setAttribute("points", ptsA[k]);
-            label.style.transform = `translate(${lxA[k].toFixed(1)}px, ${(eyA[k] - 14).toFixed(1)}px)`;
+            // place the block so the title's centre sits on the leader's horizontal
+            // run, and align the lines to the leader side (right-align when the block
+            // splays left, left-align when it splays right)
+            label.style.transform =
+              `translate(${lxA[k].toFixed(1)}px, ${tyA[k].toFixed(1)}px)`;
+            label.style.textAlign = toLeftA[k] ? "right" : "left";
           }
           leader.style.opacity = op;
           label.style.opacity = op;
@@ -717,11 +752,17 @@ export default function RidgelineStage() {
         </svg>
         <ul className="survey-list">
           {STATIONS.map((s, k) => (
-            // both forms render; CSS shows the full ORG·CITY·YEAR on desktop and the
-            // compact ORG 'YY on the narrow mobile flank. offsetWidth (measured for
-            // the leader layout) reflects whichever span is visible.
+            // both forms render; CSS shows the full stacked record on desktop and the
+            // compact ORG 'YY on the narrow mobile flank. offsetWidth/Height (measured
+            // for the leader layout) reflect whichever variant is visible.
             <li className="survey-callout" key={`callout-${k}`}>
-              <span className="survey-full">{s.label}</span>
+              {/* desktop: the role title with the company beneath it; a leader runs
+                  from the ring to the SIDE of the title */}
+              <span className="survey-full">
+                <span className="sc-title">{s.role}</span>
+                <span className="sc-org">{s.company}</span>
+              </span>
+              {/* narrow flank: the compact single-line annotation */}
               <span className="survey-short">{s.short}</span>
             </li>
           ))}

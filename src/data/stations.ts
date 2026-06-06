@@ -49,6 +49,15 @@ export type Station = {
   label: string;
   short: string;
   role: string;
+  // ---- LinkedIn-style survey block (drives the stacked mountain callout) ------
+  // `role` is the big title line; these four fill the smaller lines beneath it,
+  // newest → oldest. `duration` is "" for the education stations (their callout
+  // shows just the years). `place` is kept to city + country so the floating
+  // label stays tight over the scene.
+  company: string;
+  dates: string;
+  duration: string;
+  place: string;
   body: string;
   meta: string;
   cta: string;
@@ -61,6 +70,10 @@ export const STATIONS: Station[] = [
     label: "STEGRA · STOCKHOLM · 2025",
     short: "STEGRA '25",
     role: "BIM Specialist",
+    company: "Stegra",
+    dates: "Feb 2025 – Present",
+    duration: "1 yr 5 mos",
+    place: "Stockholm, Sweden",
     body: "Shaping BIM strategy and building the Power BI dashboards that keep the project legible. Trains stakeholders and supports the coordination team.",
     meta: "Now · BIM strategy, Power BI",
     cta: "View role",
@@ -84,6 +97,10 @@ export const STATIONS: Station[] = [
     label: "NEOBUILT · GOTHENBURG · 2025",
     short: "NEOBUILT '25",
     role: "BIM Developer · Founder",
+    company: "Neobuilt AB",
+    dates: "Feb 2025 – Present",
+    duration: "1 yr 5 mos",
+    place: "Gothenburg, Sweden",
     body: "Founded a practice building bespoke tooling on the Revit and Navisworks APIs, turning repetitive modelling work into automation.",
     meta: "Now · C#/.NET, Python, Revit API",
     cta: "View role",
@@ -132,6 +149,10 @@ public class PlaceWallsOnGrids : IExternalCommand
     label: "NORTHVOLT · SKELLEFTEÅ · 2023",
     short: "NORTHVOLT '23",
     role: "BIM Coordinator",
+    company: "Northvolt",
+    dates: "Sep 2023 – Dec 2024",
+    duration: "1 yr 4 mos",
+    place: "Skellefteå, Sweden",
     body: "Ran ISO 19650 information management and clash coordination across disciplines, with heavy emphasis on mentoring and training the wider team.",
     meta: "2023–2024 · ISO 19650, Navisworks",
     cta: "View role",
@@ -155,6 +176,10 @@ public class PlaceWallsOnGrids : IExternalCommand
     label: "COLLECTIVE ARCHITECTURE · LOS ANGELES · 2023",
     short: "COLLECTIVE '23",
     role: "BIM Modeler",
+    company: "Office for Collective Architecture",
+    dates: "Jan 2023 – Sep 2023",
+    duration: "9 mos",
+    place: "Los Angeles, USA",
     body: "Drove energy and daylight studies in Rhino and Grasshopper, feeding the analysis back into the architectural model.",
     meta: "2023 · Rhino, Grasshopper",
     cta: "View role",
@@ -177,6 +202,10 @@ public class PlaceWallsOnGrids : IExternalCommand
     label: "WHITE ARKITEKTER · GOTHENBURG · 2022",
     short: "WHITE ARK. '22",
     role: "BIM Modeler",
+    company: "White Arkitekter",
+    dates: "Jan 2022 – Dec 2022",
+    duration: "1 yr",
+    place: "Gothenburg, Sweden",
     body: "Modelled Revit healthcare projects and prepared the IFC deliveries the wider design team relied on.",
     meta: "2022 · Revit, IFC",
     cta: "View role",
@@ -199,6 +228,10 @@ public class PlaceWallsOnGrids : IExternalCommand
     label: "CHALMERS · GOTHENBURG · 2020",
     short: "CHALMERS '20",
     role: "M.Sc. Architectural Engineering",
+    company: "Chalmers University of Technology",
+    dates: "2020 – 2023",
+    duration: "",
+    place: "Gothenburg, Sweden",
     body: "A master's grounded in computational design, exploring geometry and performance through Rhino and Grasshopper.",
     meta: "2020–2023 · Computational design, Rhino",
     cta: "View studies",
@@ -222,6 +255,10 @@ public class PlaceWallsOnGrids : IExternalCommand
     label: "SHAHID BEHESHTI · TEHRAN · 2014",
     short: "SHAHID B. '14",
     role: "B.Sc. Architectural Engineering",
+    company: "Shahid Beheshti University",
+    dates: "2014 – 2019",
+    duration: "",
+    place: "Tehran, Iran",
     body: "Where it began — undergraduate studies alongside the first BIM modelling at Boomshahr Paydar, the start of the whole climb.",
     meta: "2014–2019 · ArchiCAD, first BIM",
     cta: "View studies",
