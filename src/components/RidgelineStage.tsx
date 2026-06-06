@@ -10,6 +10,7 @@ import {
   pickBand,
 } from "../gpu/ridgeline";
 import RoleOverlay from "./RoleOverlay";
+import AssignmentOverlay from "./AssignmentOverlay";
 import { STATIONS } from "../data/stations";
 
 /* =========================================================================
@@ -50,6 +51,19 @@ const REST_OP = 0.46; // resting opacity for an un-hovered, front-facing callout
 const DIM_OP = 0.24; // the others recede to this while one is hovered
 const HEADER_SAFE = 110; // px — callouts stay below the full-width site header
 
+// ---- apex beacon anchor: a world point on the orbit AXIS (x = 0, z = PEAK_Z),
+// floating just above the summit crest. Because it sits directly above the camera
+// pivot (TGT), it projects to the HORIZONTAL CENTRE of the frame for every yaw — so
+// the beacon stays welded over the peak through a full orbit, riding only its
+// screen-Y with pitch (no FACING fade like the near-face ring callouts). z mirrors
+// the shader's PEAK_Z (8200); y floats it just above the rendered crest into the
+// dotted halo. The crest at x = 0 sits at world-y ≈ 5019 (silhouette tip ~11% down
+// the frame at rest), so y ≈ 5230 floats the disc a short hair above the snowy tip,
+// in the halo, in the header's empty centre column. (Verified by projecting the JS
+// height field; tune against a live capture if the float gap reads wrong.)
+const APEX = { x: 0, y: 5230, z: 8200 };
+const BEACON_TAU = 0.3; // s — how the beacon eases in / out (overlay open, off-screen)
+
 const smooth = (e0: number, e1: number, x: number) => {
   const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0)));
   return t * t * (3 - 2 * t);
@@ -75,13 +89,51 @@ export default function RidgelineStage() {
   const wasOpenRef = useRef(false);
   const closeBtnRef = useRef<HTMLButtonElement>(null);
 
+  // ---- apex beacon → "Your Assignment?" overlay ----------------------------
+  // A second focused surface, parallel to `selected`: the floating "?" datum at the
+  // summit opens it. `assignmentOpenRef` is the value the imperative rAF loop reads
+  // each frame (to hide the beacon and recede the survey while it's up); `closeAssignRef`
+  // lets the once-registered window keydown handler reach the close setter through a
+  // stable ref — the same defensive indirection as `selectRef` (these setters are
+  // useCallback([]) and never change identity, so the ref-sync effect isn't load-bearing).
+  const [assignmentOpen, setAssignmentOpen] = useState(false);
+  const assignmentOpenRef = useRef(false);
+  const closeAssignRef = useRef<() => void>(() => {});
+  const assignCloseBtnRef = useRef<HTMLButtonElement>(null);
+  const beaconRef = useRef<HTMLButtonElement>(null);
+  const assignLastFocusRef = useRef<HTMLElement | null>(null);
+  const assignWasOpenRef = useRef(false);
+  // set when the brief is dismissed VIA its CTA (which routes to #contact): the close
+  // effect then leaves focus for the contact target rather than yanking it to the beacon.
+  const assignNavigatingRef = useRef(false);
+
+  const openAssignment = useCallback(() => {
+    // drop focus off the beacon BEFORE the next commit makes it aria-hidden, so the
+    // focused element is never momentarily inside an aria-hidden subtree; the
+    // close-restore falls back to the beacon (prev === body), so nothing is lost.
+    beaconRef.current?.blur();
+    assignmentOpenRef.current = true;
+    setAssignmentOpen(true);
+  }, []);
+  const closeAssignment = useCallback(() => {
+    assignmentOpenRef.current = false;
+    setAssignmentOpen(false);
+  }, []);
+  // the CTA dismissal: a normal close, flagged so the restore skips the beacon refocus
+  const closeAssignmentNavigating = useCallback(() => {
+    assignNavigatingRef.current = true;
+    assignmentOpenRef.current = false;
+    setAssignmentOpen(false);
+  }, []);
+
   const select = useCallback((i: number | null) => {
     selectedRef.current = i;
     setSelected(i);
   }, []);
-  // keep the loop's escape hatch pointed at the freshest setter every render
+  // keep the loop's escape hatches pointed at the freshest setters every render
   useEffect(() => {
     selectRef.current = select;
+    closeAssignRef.current = closeAssignment;
   });
 
   // focus management: on open, remember what was focused and move focus into the
@@ -97,6 +149,27 @@ export default function RidgelineStage() {
       (lastFocusRef.current ?? hintRef.current)?.focus?.();
     }
   }, [selected]);
+
+  // the same focus dance for the assignment panel: remember what was focused (the
+  // beacon), move focus to its close control on open, restore it on close.
+  useEffect(() => {
+    if (assignmentOpen) {
+      assignLastFocusRef.current = document.activeElement as HTMLElement | null;
+      assignCloseBtnRef.current?.focus();
+      assignWasOpenRef.current = true;
+    } else if (assignWasOpenRef.current) {
+      assignWasOpenRef.current = false;
+      if (assignNavigatingRef.current) {
+        // dismissed via the CTA → #contact: leave focus for the contact target
+        assignNavigatingRef.current = false;
+      } else {
+        // return focus to whatever opened the brief — but if nothing meaningful held
+        // it (e.g. the page body), fall back to the beacon, the logical anchor
+        const prev = assignLastFocusRef.current;
+        (prev && prev !== document.body ? prev : beaconRef.current)?.focus?.();
+      }
+    }
+  }, [assignmentOpen]);
 
   useEffect(() => {
     const cvs = canvasRef.current;
@@ -206,6 +279,7 @@ export default function RidgelineStage() {
       let hoverBand = -1; // slice under the pointer THIS frame (set in updateSurvey)
       let shownBand = -1; // the slice the wash is CURRENTLY on (cross-dissolve bookkeeping)
       let hoverAmt = 0; // eased presence 0..1
+      let beaconOp = 0; // eased apex-beacon opacity 0..1 (fades on overlay-open / off-screen)
       const reduceMotion =
         typeof matchMedia === "function" &&
         matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -342,7 +416,13 @@ export default function RidgelineStage() {
       };
 
       const onKey = (e: KeyboardEvent) => {
-        // Escape dismisses an open focus before any orbit handling
+        // Escape dismisses an open surface before any orbit handling — the summit
+        // brief first, then a focused career slice
+        if (e.key === "Escape" && assignmentOpenRef.current) {
+          closeAssignRef.current();
+          e.preventDefault();
+          return;
+        }
         if (e.key === "Escape" && selectedRef.current != null) {
           selectRef.current(null);
           e.preventDefault();
@@ -447,7 +527,7 @@ export default function RidgelineStage() {
         if (!overlay) return;
         // while a slice is focused the survey words recede behind the panel — only
         // the selected callout stays lit, and the per-frame hover pick is skipped.
-        const focusActive = selectedRef.current != null;
+        const focusActive = selectedRef.current != null || assignmentOpenRef.current;
         const fsel = selectedRef.current ?? -1;
         if (!labelEls) {
           labelEls = overlay.querySelectorAll<HTMLElement>(".survey-callout");
@@ -606,6 +686,33 @@ export default function RidgelineStage() {
           label.style.opacity = op;
         }
         hoverBand = foundHover;
+
+        // ---- apex beacon: weld the "Your Assignment?" datum above the summit. The
+        // apex lives on the orbit AXIS (x = 0, z = PEAK_Z), so it projects to the
+        // frame's horizontal centre for EVERY yaw and stays put through a full orbit
+        // — only its screen-Y rides with pitch. No FACING fade (unlike the near-face
+        // ring callouts, the summit never rounds out of view). It eases out while an
+        // overlay is open, off-screen, or at an extreme tilt that would tuck it under
+        // the site header. Transform is written imperatively (never a CSS transition).
+        const beacon = beaconRef.current;
+        if (beacon) {
+          const ap = projectToScreen(vp, APEX.x, APEX.y, APEX.z, W, H);
+          const inFrame =
+            ap.visible && ap.x > -80 && ap.x < W + 80 && ap.y > -80 && ap.y < H + 120;
+          // the summit floats high in the frame (tip ~11% down), so the disc lives in
+          // the header band — but in its empty CENTRE column, clear of the wordmark
+          // (left) and nav (right). Only fade if it would ride right up under the very
+          // top edge (an extreme tilt the bounded pitch never actually reaches).
+          const clearHeader = ap.y > (mobile ? 20 : 28);
+          const open = selectedRef.current != null || assignmentOpenRef.current;
+          const target = open || !inFrame || !clearHeader ? 0 : 1;
+          const bk = reduceMotion ? 1 : 1 - Math.exp(-dt / BEACON_TAU);
+          beaconOp += (target - beaconOp) * bk;
+          beacon.style.transform =
+            `translate3d(${ap.x.toFixed(1)}px, ${ap.y.toFixed(1)}px, 0) translate(-50%, -50%)`;
+          beacon.style.opacity = (beaconOp * 0.9).toFixed(3);
+          beacon.style.pointerEvents = !open && beaconOp > 0.5 ? "auto" : "none";
+        }
       };
 
       let raf = 0;
@@ -739,8 +846,13 @@ export default function RidgelineStage() {
     );
   }
 
+  const overlayOpen = selected !== null || assignmentOpen;
+
   return (
-    <div className="ridge-stage" id="home">
+    <div
+      className={`ridge-stage${overlayOpen ? " is-overlay-open" : ""}`}
+      id="home"
+    >
       <canvas id="ridge" ref={canvasRef} />
       {/* B1 surveyor callouts — projected + revealed imperatively from the rAF
           loop. pointer-events:none so a drag still orbits the canvas beneath. */}
@@ -768,6 +880,31 @@ export default function RidgelineStage() {
           ))}
         </ul>
       </div>
+
+      {/* apex beacon — the floating "?" survey datum welded above the summit. Its
+          transform + opacity are written each frame by the rAF loop (projected from
+          the orbit axis); clicking it opens the "Your Assignment?" brief. Made inert
+          (aria-hidden + tabindex -1) while any overlay is up so focus can't land on
+          it behind the dialog. */}
+      <button
+        type="button"
+        className="ridge-beacon"
+        ref={beaconRef}
+        onClick={openAssignment}
+        aria-label="Open: Your Assignment — the projects I can take on"
+        aria-haspopup="dialog"
+        aria-expanded={assignmentOpen}
+        aria-hidden={overlayOpen || undefined}
+        tabIndex={overlayOpen ? -1 : 0}
+      >
+        <span className="beacon-core" aria-hidden="true">
+          <span className="beacon-glyph">?</span>
+        </span>
+        <span className="beacon-leader" aria-hidden="true" />
+        <span className="beacon-label" aria-hidden="true">
+          Your assignment?
+        </span>
+      </button>
 
       {/* "drag to rotate" affordance — a curved arrow that rocks back and forth so
           the gesture reads at a glance. Clicking it flicks the mountain into a short
@@ -801,6 +938,18 @@ export default function RidgelineStage() {
             index={selected}
             onClose={() => select(null)}
             onNavigate={(i) => select(i)}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* the summit brief — "Your Assignment?", opened by the apex beacon */}
+      <AnimatePresence>
+        {assignmentOpen && (
+          <AssignmentOverlay
+            key="assignment-overlay"
+            ref={assignCloseBtnRef}
+            onClose={closeAssignment}
+            onNavigate={closeAssignmentNavigating}
           />
         )}
       </AnimatePresence>
