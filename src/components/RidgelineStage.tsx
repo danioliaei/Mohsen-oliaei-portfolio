@@ -4,12 +4,15 @@ import {
   RidgelineScene,
   PITCH_LO,
   PITCH_HI,
+  GLOBE_PITCH_LO,
+  GLOBE_PITCH_HI,
   ridgeCamera,
   projectToScreen,
   ringAnchor,
   pickBand,
   GLOBE,
   GLOBE_SPIN_RATE,
+  MORPH_DUR,
   CLOUD_CHARS,
   CHAR_CLOUD,
 } from "../gpu/ridgeline";
@@ -83,6 +86,7 @@ export default function RidgelineStage() {
   const arrowLeftRef = useRef<HTMLButtonElement>(null);
   const arrowRightRef = useRef<HTMLButtonElement>(null);
   const rotateRef = useRef<(dir: number) => void>(() => {});
+  const hintRef = useRef<HTMLDivElement>(null);
   const [unsupported, setUnsupported] = useState(false);
 
   // ---- click-to-focus state -------------------------------------------------
@@ -378,13 +382,17 @@ export default function RidgelineStage() {
       let focusBand = -1; // the band the dim is centred on (sticky during fade-out)
       let focusShiftY = 0; // eased vertical lens shift that lifts the selected ring
       let lastFrameT = 0;
-      const clampPitch = (p: number) => Math.min(Math.max(p, PITCH_LO), PITCH_HI);
+      // live pitch walls — updated each frame from the morph clock: the WIDE globe range
+      // (look over the top / under the bottom of the ball) eases to the TIGHT authored mountain
+      // range, pinned exactly at the endpoints (mEase 0 = globe walls, 1 = mountain walls).
+      let pLo = GLOBE_PITCH_LO, pHi = GLOBE_PITCH_HI;
+      const clampPitch = (p: number) => Math.min(Math.max(p, pLo), pHi);
       // add a pitch delta with a soft, direction-aware cushion: within PITCH_SOFT
       // of the limit you're heading toward, the step is scaled down to zero so the
       // tilt glides to rest instead of slamming. Returns the new (still-bounded)
       // target — never overshoots, and reverses cleanly with no dead zone.
       const addPitch = (cur: number, delta: number) => {
-        const head = delta > 0 ? PITCH_HI - cur : delta < 0 ? cur - PITCH_LO : 1;
+        const head = delta > 0 ? pHi - cur : delta < 0 ? cur - pLo : 1;
         const ease = head < PITCH_SOFT ? Math.max(0, head) / PITCH_SOFT : 1;
         return clampPitch(cur + delta * ease);
       };
@@ -409,19 +417,19 @@ export default function RidgelineStage() {
 
       // ---- Home (globe) ⇄ CV (mountain) morph (loop-locals; read by frame + the pointer
       // handlers, which all live in this one closure so they share the live values) ----
-      const MORPH_TAU = 0.62; // s — eased approach to the view target (reversible; snapped on reduced-motion)
       const SPIN = reduceMotion ? 0 : GLOBE_SPIN_RATE; // idle planet spin (held still on reduced-motion)
-      // mEase is the RAW eased state (exponential approach to the target — fast in, asymptotic
-      // crawl out). Each frame it is RE-MAPPED through a smootherstep into the perceptual clock
-      // `mc` that every VISUAL consumer reads (the GPU uniform, the cloud, the survey, the dolly),
-      // so the assembly eases in AND out in real time instead of front-loading then crawling — the
-      // single highest-leverage knob for a coherent globe→mountain transition. mEase itself stays
+      // The morph is a constant-DURATION clock: mClock is driven LINEARLY in time toward the view
+      // target (0 = globe/Home, 1 = mountain/CV) at 1/MORPH_DUR per second, then shaped ONCE by a
+      // smootherstep into the perceptual clock `mc` every VISUAL consumer reads (the GPU uniform, the
+      // cloud, the survey, the dolly). One ease (not the old compounded exponential×smootherstep) plays
+      // the whole assembly at a steady, readable pace and lands crisply. mEase mirrors mClock and stays
       // the phase latch the pointer/arrow handlers test (mEase < 0.04 ⇒ still the globe).
-      let mEase = 0;            // 0 = globe (Home), 1 = mountain (CV) — raw eased state toward morphTargetRef
+      let mClock = 0;           // 0 = globe (Home), 1 = mountain (CV) — LINEAR time toward morphTargetRef
+      let mEase = 0;            // = mClock; kept as the phase latch the pointer/arrow handlers read
+      let prevMorphTarget = 0;  // last frame's view target — detects a fresh →CV switch (reduced-motion snap)
       let globeSpin = 0;        // radians about Y; advances whenever the globe shows, eased to rest as terrain forms
-      let globeSpinVel = 0;     // rad/s, decaying — an arrow/key nudge spins the planet smoothly (never a raw jump)
-      let dragMode: "spin" | "orbit" = "spin"; // latched per gesture in onDown
       const mix01 = (a: number, b: number, t: number) => a + (b - a) * t;
+      let hintOpacity = 0;      // eased opacity of the bottom "drag to rotate" cue (globe-only, loop-owned)
 
       // letter-cloud geometry: the protagonists' Fibonacci dirs + the DECOMPOSED character cloud
       // (even dirs, per-char radial depth, and the ring each char rains toward — all built once in
@@ -481,21 +489,17 @@ export default function RidgelineStage() {
         invited = false;
         arrowLeftRef.current?.classList.add("is-quiet");
         arrowRightRef.current?.classList.add("is-quiet");
+        if (hintRef.current) hintRef.current.style.opacity = "0"; // retire the bottom cue too
       };
-      // one rotate path for both arrows AND the arrow keys. dir = +1 (left) / -1 (right),
-      // matching the drag sign (a leftward drag is +). On the globe it feeds a decaying
-      // globeSpinVel (so the planet AND the welded letters ease — globeSpin is applied RAW
-      // to the shader, so a direct jump would pop them); on the mountain it nudges the
-      // orbit target and seeds velYaw so it glides out on the existing inertia.
+      // one rotate path for both arrows AND the arrow keys, in BOTH phases. dir = +1 (left) /
+      // -1 (right), matching the drag sign (a leftward drag is +). It nudges the SAME camera
+      // orbit target the drag steers (globe and mountain alike) and seeds velYaw so it glides
+      // out on the existing inertia. The globe's idle Y-spin (globeSpin) is independent ambient
+      // motion and is NOT touched here — so a nudge orbits the viewpoint, never jolts the ball.
       const rotateNudge = (dir: number) => {
-        if (mEase < 0.04) {
-          globeSpinVel += dir * 1.6;
-          globeSpinVel = Math.max(-3.0, Math.min(3.0, globeSpinVel));
-        } else {
-          tYaw += dir * 0.32;
-          velYaw = Math.max(-MAX_VEL, Math.min(MAX_VEL, velYaw + dir * 0.9));
-          velPitch = 0;
-        }
+        tYaw += dir * 0.32;
+        velYaw = Math.max(-MAX_VEL, Math.min(MAX_VEL, velYaw + dir * 0.9));
+        velPitch = 0;
         stopInviting();
         haptic(8, performance.now());
       };
@@ -504,10 +508,8 @@ export default function RidgelineStage() {
       const onDown = (e: PointerEvent) => {
         if (e.pointerType === "mouse" && e.button !== 0) return; // left only
         dragging = true;
-        // latch the gesture's role from the CURRENT phase: a press while the globe is up
-        // spins the planet; once it's the mountain, it orbits. Latched so a drag that begins
-        // on the globe keeps spinning even as the morph ticks up under it.
-        dragMode = mEase < 0.04 ? "spin" : "orbit";
+        // a drag ORBITS the camera in both phases now (globe and mountain share one orbit path);
+        // the globe's idle Y-spin is independent ambient motion, never driven by the drag.
         pid = e.pointerId;
         lastX = e.clientX;
         lastY = e.clientY;
@@ -542,12 +544,6 @@ export default function RidgelineStage() {
         lastX = e.clientX;
         lastY = e.clientY;
         lastT = e.timeStamp;
-
-        // globe phase: a drag spins the planet on its axis — never yaws/pitches the camera
-        if (dragMode === "spin") {
-          globeSpin += -dxPix * rot;
-          return;
-        }
 
         const dYaw = -dxPix * rot;
         tYaw += dYaw;
@@ -640,15 +636,9 @@ export default function RidgelineStage() {
           e.preventDefault();
           return;
         }
-        // globe phase: arrows nudge the planet's spin; the camera orbit is the mountain's.
-        // both go through the shared rotateNudge so keys, clicks and drags feel identical
-        // (eased, capped, haptic) and any of them retires the breathing invitation.
-        if (mEase < 0.04) {
-          if (e.key === "ArrowLeft") { rotateNudge(1); e.preventDefault(); }
-          else if (e.key === "ArrowRight") { rotateNudge(-1); e.preventDefault(); }
-          return;
-        }
-        // mountain: left/right orbit via rotateNudge; up/down still step the pitch directly
+        // both phases: left/right orbit-yaw via the shared rotateNudge; up/down step the pitch
+        // directly (now allowed on the globe too — the wide globe pitch walls let you look over
+        // the top / under the bottom of the ball, the same gesture as on the mountain).
         if (e.key === "ArrowLeft") { rotateNudge(1); e.preventDefault(); return; }
         if (e.key === "ArrowRight") { rotateNudge(-1); e.preventDefault(); return; }
         const step = 0.2; // rad per press (~11°) — eased in by the smoothing
@@ -751,7 +741,7 @@ export default function RidgelineStage() {
         // suppress the whole survey + apex beacon through the globe + the assembly, then fade
         // them in over the last stretch — picking up the baton just as the flying protagonist
         // labels land and fade out (~0.85), so the words arrive with the finished mountain.
-        if (m < 0.85) {
+        if (m < 0.80) {
           if (labelEls) labelEls.forEach((el) => { el.style.opacity = "0"; });
           if (leaderEls) leaderEls.forEach((el) => { (el as SVGElement).style.opacity = "0"; });
           if (beaconRef.current) {
@@ -763,7 +753,7 @@ export default function RidgelineStage() {
           }
           return;
         }
-        const surveyFade = smooth(0.85, 1.0, m);
+        const surveyFade = smooth(0.80, 1.0, m);
         // while a slice is focused the survey words recede behind the panel — only
         // the selected callout stays lit, and the per-frame hover pick is skipped.
         const focusActive =
@@ -985,7 +975,7 @@ export default function RidgelineStage() {
         // decomposed "ball of letters" settling onto the contour bands.
         // fade the glyphs out a touch EARLIER than they rain home (fall completes ~0.62), so they
         // are mostly gone before the GPU drain funnel peaks → the additive climax stays one source.
-        const charVis = 1 - smooth(0.50, 0.70, m); // hold the glyphs legible until the peak reads
+        const charVis = 1 - smooth(0.52, 0.72, m); // hold the glyphs legible until the funnel peak, then clear just before the halo blooms
         const fall = smooth(0.30, 0.66, m); // 0 on the globe → 1 raining onto the ring band, in step with the funnel/emerge
         for (let i = 0; i < charEls.length; i++) {
           const el = charEls[i];
@@ -1036,27 +1026,31 @@ export default function RidgelineStage() {
         // on a switch to CV, dissolve it back into the spinning globe on a return Home. The
         // planet's idle spin runs whenever the globe is present, easing to rest as the terrain
         // takes over so a switch reads as a settle rather than a slide.
+        // ---- the morph clock: ONE linear-time parameter driven toward the view target at a fixed
+        // rate (1/MORPH_DUR per second), then shaped ONCE by smootherstep. The old compounded
+        // exponential×smootherstep had an unpredictable, front-loaded velocity (a rush, then a mushy
+        // crawl); a constant-DURATION clock plays the whole assembly at a steady, readable pace and
+        // lands crisply. reduceMotion jumps straight to the target. Endpoints pinned: smootherstep
+        // (0)=0, (1)=1, and mClock hard-clamps to the target ⇒ mc≡1 when landed ⇒ the morph=1
+        // mountain is byte-identical.
         const mTarget = morphTargetRef.current;
-        const mK = reduceMotion ? 1 : 1 - Math.exp(-dt / MORPH_TAU);
-        mEase += (mTarget - mEase) * mK;
-        if (Math.abs(mTarget - mEase) < 5e-4) mEase = mTarget;
-        // Re-map the raw exponential ease into a perceptual clock so the assembly eases in
-        // AND out in real time (the exponential alone is fast-in / asymptotic-crawl-out, which
-        // bunches the climax into the slowest tail and reads as incoherent). Plain smootherstep
-        // is provably monotonic and pinned 0→0, 1→1 — so the transition never stutters/reverses
-        // and BOTH endpoints stay byte-identical (clean globe at 0, today's mountain at 1).
-        // reduceMotion snaps mEase to the target, so mc snaps with it.
+        const mDir = mClock < mTarget ? 1 : mClock > mTarget ? -1 : 0; // 0 at the target → rests at 0/1 exactly
+        const mRate = reduceMotion ? 1e9 : 1 / MORPH_DUR;
+        mClock = Math.max(0, Math.min(1, mClock + mDir * mRate * dt));
+        if (Math.abs(mTarget - mClock) < 5e-4) mClock = mTarget;
+        mEase = mClock; // the phase latch (mEase < 0.04 ⇒ still globe); a linear ramp crosses it cleanly
         const mc = reduceMotion
-          ? mEase
-          : mEase * mEase * mEase * (mEase * (mEase * 6 - 15) + 10);
+          ? mClock
+          : mClock * mClock * mClock * (mClock * (mClock * 6 - 15) + 10);
+
+        // tighten the pitch walls from the wide GLOBE range to the authored MOUNTAIN range as the
+        // morph runs; re-clamp the target so a wide globe tilt eases inside the new walls instead of
+        // snapping. Endpoints pinned: mEase 0 ⇒ globe walls, 1 ⇒ mountain walls.
+        pLo = mix01(GLOBE_PITCH_LO, PITCH_LO, mEase);
+        pHi = mix01(GLOBE_PITCH_HI, PITCH_HI, mEase);
+        tPitch = clampPitch(tPitch);
         globeSpin += SPIN * (1 - smooth(0.15, 0.6, mc)) * dt;
-        // a click/key arrow-nudge spins the planet via a small decaying velocity (globeSpin is
-        // applied RAW to the shader + the welded letters, so this eases instead of popping)
-        if (globeSpinVel !== 0) {
-          globeSpin += globeSpinVel * dt;
-          globeSpinVel *= Math.exp(-dt / 0.5);
-          if (Math.abs(globeSpinVel) < 1e-3) globeSpinVel = 0;
-        }
+        // (idle globeSpin only — the arrow/key nudge now orbits the camera, not the Y-spin)
         const landed = mc > 0.985;
 
         // after release, inertia drifts the TARGET, eased out until it settles
@@ -1070,6 +1064,32 @@ export default function RidgelineStage() {
           velPitch *= damp;
           if (Math.abs(velYaw) < 1e-3) velYaw = 0;
           if (Math.abs(velPitch) < 1e-3) velPitch = 0;
+        }
+
+        // reduced motion has no morph window to resolve the camera in, so snap the orbit to the
+        // authored hero pose the instant a fresh →CV switch is requested.
+        if (reduceMotion && morphTargetRef.current === 1 && prevMorphTarget !== 1) {
+          tYaw = 0; tPitch = 0; yaw = 0; pitch = 0; velYaw = 0; velPitch = 0;
+        }
+        prevMorphTarget = morphTargetRef.current;
+
+        // HERO-RESOLVE: while the mountain is forming (forward →CV morph only, not yet landed),
+        // unwind whatever orbit the globe was left at back to the authored rest pose (yaw=pitch=0
+        // ⇒ ORBIT.azim/elev), so the massif always crystallizes into the byte-identical hero framing
+        // and the survey lands facing the viewer. Resolved by ~mid-morph (well before the 0.80 survey
+        // reveal); inertia killed so it lands clean. The instant it lands (mEase===1) this stops — so
+        // the finished mountain orbits freely — and it never runs on the globe or the return Home.
+        if (!reduceMotion && morphTargetRef.current === 1 && mEase < 1) {
+          // fold any spun-up yaw to its nearest turn in (−π, π], shifting the DISPLAYED yaw by the
+          // same multiple of 2π so the orientation never jumps — it then resolves the SHORT way (≤180°).
+          const turns = Math.round(tYaw / TWO_PI);
+          tYaw -= turns * TWO_PI;
+          yaw -= turns * TWO_PI;
+          const reso = smooth(0.04, 0.55, mc);
+          tYaw *= 1 - reso;
+          tPitch *= 1 - reso;
+          velYaw *= 1 - reso;
+          velPitch *= 1 - reso;
         }
 
         // the smoothing that makes it feel pleasant: ease the camera → target
@@ -1148,8 +1168,8 @@ export default function RidgelineStage() {
         // overflows the width — pull the camera further back there so the ball fits comfortably.
         // mirrors the mountain's own zoomBase (radiusScale) aspect term. smooth(0,1,mc)=1 at mc=1
         // ⇒ mix01(globeStart, 1.0, 1) === 1.0 for ANY start, so the mountain dolly is byte-identical.
-        const globeStart = 1.40 + 0.95 * smooth(1.0, 0.5, aspectNow); // 1.40 wide … ~2.35 portrait
-        const globeRadius = mix01(globeStart, 1.0, smooth(0.0, 1.0, mc));
+        const globeStart = 1.66 + 1.10 * smooth(1.0, 0.5, aspectNow); // ~1.66 wide … ~2.76 portrait — a touch smaller on both
+        const globeRadius = mix01(globeStart, 1.0, smooth(0.0, 0.70, mc));
         const rscale = radiusScale * globeRadius;
         gpu.render({
           time: t,
@@ -1166,6 +1186,16 @@ export default function RidgelineStage() {
           focusShift,
           focusShiftY,
         });
+
+        // bottom drag hint: shown only on the whole globe (mc≈0) and only until the first rotate
+        // (invited). Loop-owned opacity, eased so it never pops; mc<0.05 fades it the instant the
+        // morph starts. CSS owns only the resting look + the breathing drift (transform, not opacity).
+        const hint = hintRef.current;
+        if (hint) {
+          const hintTarget = invited && mc < 0.05 && morphTargetRef.current === 0 ? 1 : 0;
+          hintOpacity += (hintTarget - hintOpacity) * (reduceMotion ? 1 : 0.12);
+          hint.style.opacity = hintOpacity < 0.002 ? "0" : hintOpacity.toFixed(3);
+        }
 
         // the letter cloud projects through the EXACT camera the GPU just rendered with this
         // frame (same rscale / breathing), so the glyphs never drift off the ball. Shown
@@ -1308,6 +1338,23 @@ export default function RidgelineStage() {
           <path d="M15 29 L 8.8 25.7 M15 29 L 8.8 32.3" />
         </svg>
       </button>
+
+      {/* bottom drag hint — a tracked small-caps cue flanked by two little CURVED arrows
+          (curving outward, one pointing left, one right) signalling the globe can be spun.
+          Globe-only: opacity is driven from the rAF loop (1 while mc≈0 & still inviting, else
+          0) and retired by stopInviting on the first rotate. aria-hidden + pointer-events:none
+          so a drag passes straight through to the canvas beneath. */}
+      <div className="globe-hint" ref={hintRef} aria-hidden="true">
+        <svg className="globe-hint-arrow" viewBox="0 0 30 22" fill="none" aria-hidden="true">
+          <path d="M27 11 A 11 11 0 0 0 7 11" />
+          <path d="M7 11 L 11.4 7.4 M7 11 L 11.4 14.6" />
+        </svg>
+        <span className="globe-hint-text">drag to rotate</span>
+        <svg className="globe-hint-arrow" viewBox="0 0 30 22" fill="none" aria-hidden="true">
+          <path d="M3 11 A 11 11 0 0 1 23 11" />
+          <path d="M23 11 L 18.6 7.4 M23 11 L 18.6 14.6" />
+        </svg>
+      </div>
 
       {/* focused experience: clicking a slice dims the rest of the massif and dollies
           the camera in (GPU), while this full-screen liquid-glass dossier grows in —

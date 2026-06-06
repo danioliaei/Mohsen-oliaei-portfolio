@@ -35,7 +35,7 @@ const HDR: GPUTextureFormat = "rgba16float";
    through the same camera here, sits exactly on the rendered ball. ---------------------- */
 export const GLOBE = { cx: 0, cy: 2120, cz: 8200, r: 3600 } as const;
 export const GLOBE_SPIN_RATE = 0.16; // rad/s — the planet's slow idle rotation (0 on reduced-motion)
-export const MORPH_DUR = 2.6;        // s — globe → mountain assembly (shortened on reduced-motion)
+export const MORPH_DUR = 2.35;       // s — globe → mountain assembly, hand-authored constant duration (snapped on reduced-motion)
 
 /* ---- letter-cloud content, drawn from the real career record (data/stations.ts): the record is
    DECOMPOSED into individual CHARACTERS scattered THROUGH the globe volume at many radii (see
@@ -466,6 +466,15 @@ const ELEV_RANGE: readonly [number, number] = [-0.12, 1.0];
 export const PITCH_LO = ELEV_RANGE[0] - ORBIT.elev;
 export const PITCH_HI = ELEV_RANGE[1] - ORBIT.elev;
 
+/** GLOBE pitch walls — a far WIDER absolute-elevation range than the mountain's, so the Home
+ *  ball can be looked over the top / under the bottom (the mountain's range is deliberately
+ *  tight). Kept clear of the lookAt gimbal singularity at elev = ±π/2. The stage interpolates
+ *  between these and PITCH_LO/PITCH_HI by the morph clock, so the walls tighten to the authored
+ *  mountain limits exactly at mEase = 1. */
+const GLOBE_ELEV_RANGE: readonly [number, number] = [-1.25, 1.4];
+export const GLOBE_PITCH_LO = GLOBE_ELEV_RANGE[0] - ORBIT.elev; // ≈ -1.200
+export const GLOBE_PITCH_HI = GLOBE_ELEV_RANGE[1] - ORBIT.elev; // ≈  1.450
+
 /* ---- tiny column-major mat4 helpers (dependency-free) ------------------- */
 type Mat4 = Float32Array;
 function persp(fovy: number, aspect: number, near: number, far: number): Mat4 {
@@ -553,7 +562,7 @@ export function ridgeCamera(
   shiftY = 0,
 ): { vp: Float32Array; eye: [number, number, number] } {
   const azim = ORBIT.azim + yaw + Math.sin(time * 0.05) * 0.0045;
-  const p = Math.min(Math.max(pitch, PITCH_LO), PITCH_HI);
+  const p = pitch; // caller (stage) pre-clamps to the active globe/mountain pitch walls
   const elev = ORBIT.elev + p + Math.sin(time * 0.037) * 0.0035;
   const ce = Math.cos(elev);
   const se = Math.sin(elev);
@@ -693,7 +702,7 @@ export function pickBand(
 ): number {
   // the exact rendered eye (mirror ridgeCamera, breathing + focus dolly included)
   const azim = ORBIT.azim + yaw + Math.sin(time * 0.05) * 0.0045;
-  const p = Math.min(Math.max(pitch, PITCH_LO), PITCH_HI);
+  const p = pitch; // stage pre-clamps to the active globe/mountain walls (mirror ridgeCamera)
   const elev = ORBIT.elev + p + Math.sin(time * 0.037) * 0.0035;
   const ce = Math.cos(elev), se = Math.sin(elev);
   const R = ORBIT.radius * radiusScale;

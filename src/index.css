@@ -459,6 +459,83 @@ canvas#ridge:active {
   }
 }
 
+/* ---- bottom drag hint (globe only) ---------------------------------------------
+   A tracked small-caps cue centred under the globe, flanked by two little curved
+   arrows. Bare ivory + dark drop-shadow (no plate), matching .ridge-arrow. Opacity
+   is OWNED by the rAF loop (shown only at mc≈0 while still inviting); CSS sets the
+   resting colour + a gentle breathing DRIFT (transform only, never opacity, so it
+   can't fight the loop). pointer-events:none — drags pass straight through. */
+.globe-hint {
+  position: absolute;
+  left: 50%;
+  bottom: clamp(20px, 4.2vh, 46px);
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  transform: translateX(-50%);
+  color: rgba(244, 241, 234, 0.62);
+  opacity: 0; /* the rAF loop owns this */
+  pointer-events: none;
+  -webkit-user-select: none;
+  user-select: none;
+  filter:
+    drop-shadow(0 0 7px rgba(0, 0, 0, 0.65))
+    drop-shadow(0 1px 2px rgba(0, 0, 0, 0.6));
+  animation: globe-hint-breathe 4.2s 1.6s ease-in-out infinite;
+}
+.globe-hint-text {
+  font-size: 11px;
+  letter-spacing: 0.34em;
+  text-transform: uppercase;
+  font-weight: 500;
+  /* the 0.34em tracking adds trailing space on the right — pull it back so the pair
+     reads optically centred between the two arrows */
+  padding-left: 0.34em;
+}
+.globe-hint-arrow {
+  width: 26px;
+  height: 19px;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  fill: none;
+  overflow: visible;
+  flex: none;
+}
+/* breathe a subtle downward drift (transform only — opacity stays loop-owned) */
+@keyframes globe-hint-breathe {
+  0%, 100% { transform: translateX(-50%) translateY(0); }
+  50%      { transform: translateX(-50%) translateY(3px); }
+}
+/* an open overlay covers the scene — never let the hint show through the frost */
+.ridge-stage.is-overlay-open .globe-hint {
+  opacity: 0 !important;
+  animation: none;
+}
+@media (max-width: 760px) {
+  .globe-hint {
+    gap: 9px;
+    bottom: clamp(16px, 3.4vh, 30px);
+  }
+  .globe-hint-text {
+    font-size: 9.5px;
+    letter-spacing: 0.3em;
+    padding-left: 0.3em;
+  }
+  .globe-hint-arrow {
+    width: 21px;
+    height: 15px;
+    stroke-width: 1.8;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .globe-hint {
+    animation: none; /* no breathing — the loop's eased fade still shows/hides it */
+  }
+}
+
 /* ---- focused role overlay (ridgeline click-to-focus) ------------------------
    A full-page liquid-glass dossier ("the masthead bleed"): the title + every detail
    are one generous LEFT-anchored editorial column, and the highlighted mountain
