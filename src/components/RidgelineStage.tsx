@@ -18,8 +18,9 @@ import {
 } from "../gpu/ridgeline";
 import RoleOverlay from "./RoleOverlay";
 import AssignmentOverlay from "./AssignmentOverlay";
-import ProjectsOverlay from "./ProjectsOverlay";
+import ProjectsOverlay, { type ProjectsDialDom } from "./ProjectsOverlay";
 import { STATIONS } from "../data/stations";
+import { PROJECTS, formatMonthYearLong } from "../data/projects";
 
 /* =========================================================================
    RidgelineStage — mounts the monochrome ridgeline experiment.
@@ -72,6 +73,33 @@ const HEADER_SAFE = 110; // px — callouts stay below the full-width site heade
 const APEX = { x: 0, y: 5230, z: 8200 };
 const BEACON_TAU = 0.3; // s — how the beacon eases in / out (overlay open, off-screen)
 
+// ---- Projects "Dial" (see ProjectsOverlay) -------------------------------------
+// The Projects view parks the globe LEFT and fans ~20 organized project spokes out to
+// the RIGHT, the selected one resting at 3 o'clock; dragging the globe (a knob) scrolls
+// the selection. These constants drive the screen-space fan the rAF loop welds to the
+// projected globe each frame. SLOT is the dial rotation per project (the selection
+// wheel — NOT the orbit DETENT); ARC_STEP is the visible screen-fan pitch (a different
+// angle); the fan only renders >860px (mobile uses the vertical list), where the globe
+// is large enough that the spokes never collide.
+const DIAL_N = PROJECTS.length; // the project count (>= 1; DIAL_SLOT divides by it)
+const DIAL_SLOT = TWO_PI / DIAL_N; // selection-wheel step
+const DIAL_ARC_STEP = (10 * Math.PI) / 180; // fan pitch between adjacent spokes
+const DIAL_ARC_MAX = (66 * Math.PI) / 180; // visible half-window; beyond this a spoke wraps & hides
+const DIAL_ARC_FADE = (15 * Math.PI) / 180; // fade band before the cull
+const DIAL_L_SEL = 0.82; // spoke reach past the rim as a fraction of the globe screen radius
+const DIAL_L_NEAR = 0.6;
+const DIAL_L_FAR = 0.46;
+const DIAL_PAN = 0.42; // NDC_x left-pan of the globe when the dial opens (wide screens only)
+const DIAL_ZOOM = 0.92; // globe camera-radius mult at full dial (smaller = closer = a touch bigger)
+const DIAL_SENS = 1.7; // rad of dial per canvas-height of horizontal drag
+const DIAL_SMOOTH_TAU = 0.12; // s — ease displayed angle → target
+const DIAL_INERTIA_TAU = 0.6; // s — release-flick decay
+const DIAL_MAX_VEL = 3.4; // rad/s — inertia cap
+const DIAL_SNAP_VEL = 0.06; // rad/s — below this (and not dragging) settle to the detent
+const DIAL_SNAP_TAU = 0.18; // s — detent settle ease
+const PROJ_OPEN_TAU = 0.36; // s — projAmt 0→1
+const PROJ_CLOSE_TAU = 0.24; // s — projAmt 1→0
+
 const smooth = (e0: number, e1: number, x: number) => {
   const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0)));
   return t * t * (3 - 2 * t);
@@ -80,12 +108,6 @@ const smooth = (e0: number, e1: number, x: number) => {
 export default function RidgelineStage() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
-  // the two minimal curved rotate arrows (one per side). They serve BOTH phases —
-  // spinning the globe (Home) and orbiting the mountain (CV) — through one stable
-  // indirection the imperative loop assigns (mirrors selectRef / navToRef).
-  const arrowLeftRef = useRef<HTMLButtonElement>(null);
-  const arrowRightRef = useRef<HTMLButtonElement>(null);
-  const rotateRef = useRef<(dir: number) => void>(() => {});
   const hintRef = useRef<HTMLDivElement>(null);
   const [unsupported, setUnsupported] = useState(false);
 
@@ -144,6 +166,13 @@ export default function RidgelineStage() {
   const projectsCloseBtnRef = useRef<HTMLButtonElement>(null);
   const projectsLastFocusRef = useRef<HTMLElement | null>(null);
   const projectsWasOpenRef = useRef(false);
+  // the Projects DIAL bridge: the overlay writes its live DOM nodes into dialDomRef
+  // (the rAF loop reads it each frame to weld the spokes/labels to the projected globe),
+  // and selecting a project (click / mobile-list tap) routes through dialGotoRef, which
+  // the imperative loop assigns so it can mutate the loop-local dial angle.
+  const dialDomRef = useRef<ProjectsDialDom | null>(null);
+  const dialGotoRef = useRef<(i: number) => void>(() => {});
+  const onDialSelect = useCallback((i: number) => dialGotoRef.current(i), []);
 
   const openAssignment = useCallback(() => {
     // drop focus off the beacon BEFORE the next commit makes it aria-hidden, so the
@@ -168,6 +197,13 @@ export default function RidgelineStage() {
     // drop focus off the beacon first (same defensiveness as openAssignment) so it
     // never sits inside an aria-hidden subtree once the overlay commits.
     beaconRef.current?.blur();
+    // the Dial IS a globe experience — if the mountain (CV) is showing, dissolve it back
+    // to the globe first; the rAF loop holds projAmt at 0 until the morph clears (mc<0.15),
+    // so the dial fans in only once the globe is actually present.
+    if (morphTargetRef.current !== 0) {
+      morphTargetRef.current = 0;
+      setViewState("home");
+    }
     projectsOpenRef.current = true;
     setProjectsOpen(true);
   }, []);
@@ -254,7 +290,7 @@ export default function RidgelineStage() {
       wasOpenRef.current = true;
     } else if (wasOpenRef.current) {
       wasOpenRef.current = false;
-      (lastFocusRef.current ?? arrowLeftRef.current)?.focus?.();
+      lastFocusRef.current?.focus?.();
     }
   }, [selected]);
 
@@ -431,6 +467,33 @@ export default function RidgelineStage() {
       const mix01 = (a: number, b: number, t: number) => a + (b - a) * t;
       let hintOpacity = 0;      // eased opacity of the bottom "drag to rotate" cue (globe-only, loop-owned)
 
+      // ---- Projects "Dial" loop state (shared by the frame + the projects-mode pointer/key
+      // handlers + updateDial, all in this one closure). projAmt eases the whole dial in/out;
+      // dialAngle is the eased displayed knob angle (tDialAngle its target); selecting reads the
+      // project nearest the 3-o'clock detent. The globe's idle spin fades out as projAmt rises and
+      // the dial drives the spin instead, so the ball turns 1:1 with the knob.
+      let projAmt = 0;            // 0 = no dial … 1 = dial fully open (globe parked left, calmed)
+      let dialAngle = 0;          // eased displayed knob angle (rad)
+      let tDialAngle = 0;         // target knob angle the drag/keys/snap steer
+      let velDial = 0;            // rad/s — release-flick inertia
+      let dialSelected = 0;       // project index nearest the 3-o'clock detent
+      let dialPrevSelected = -1;  // last frame's selection (roving tabindex / announce on change)
+      let dialDragging = false;
+      let dialStartAngle = 0, dialStartX = 0; // drag anchor
+      let dialLastNotch = 0;      // detent-tick bookkeeping during a drag
+      const dialMobile = () =>    // narrow → the vertical list owns it; the fan never runs
+        typeof matchMedia === "function" && matchMedia("(max-width: 860px)").matches;
+      // snap the dial to project i the SHORT way round (fold the delta to ±π)
+      const dialGoto = (i: number) => {
+        let delta = (i * DIAL_SLOT - tDialAngle) % TWO_PI;
+        if (delta > Math.PI) delta -= TWO_PI;
+        if (delta < -Math.PI) delta += TWO_PI;
+        tDialAngle += delta;
+        velDial = 0;
+        stopInviting();
+      };
+      dialGotoRef.current = dialGoto;
+
       // letter-cloud geometry: the protagonists' Fibonacci dirs + the DECOMPOSED character cloud
       // (even dirs, per-char radial depth, and the ring each char rains toward — all built once in
       // ridgeline.ts), plus cached DOM node lists. On a narrow flank / reduced motion the char
@@ -479,23 +542,20 @@ export default function RidgelineStage() {
       };
       let lastNotch = 0;
 
-      // ---- the minimal curved rotate arrows: they PERSIST as controls (one per side),
-      // but their breathing "you can drag this" invitation retires the moment the viewer
-      // first rotates by any means (drag, click, or arrow keys) — stopInviting() just adds
-      // .is-quiet to both, killing the nudge animation while the arrows stay live.
+      // ---- the breathing "you can drag this" invitation on the bottom hint retires the
+      // moment the viewer first rotates by any means (drag or arrow keys) — stopInviting()
+      // fades the bottom cue out for good.
       let invited = true;
       const stopInviting = () => {
         if (!invited) return;
         invited = false;
-        arrowLeftRef.current?.classList.add("is-quiet");
-        arrowRightRef.current?.classList.add("is-quiet");
-        if (hintRef.current) hintRef.current.style.opacity = "0"; // retire the bottom cue too
+        if (hintRef.current) hintRef.current.style.opacity = "0";
       };
-      // one rotate path for both arrows AND the arrow keys, in BOTH phases. dir = +1 (left) /
-      // -1 (right), matching the drag sign (a leftward drag is +). It nudges the SAME camera
-      // orbit target the drag steers (globe and mountain alike) and seeds velYaw so it glides
-      // out on the existing inertia. The globe's idle Y-spin (globeSpin) is independent ambient
-      // motion and is NOT touched here — so a nudge orbits the viewpoint, never jolts the ball.
+      // one rotate path for the arrow keys, in BOTH phases. dir = +1 (left) / -1 (right),
+      // matching the drag sign (a leftward drag is +). It nudges the SAME camera orbit target
+      // the drag steers (globe and mountain alike) and seeds velYaw so it glides out on the
+      // existing inertia. The globe's idle Y-spin (globeSpin) is independent ambient motion and
+      // is NOT touched here — so a nudge orbits the viewpoint, never jolts the ball.
       const rotateNudge = (dir: number) => {
         tYaw += dir * 0.32;
         velYaw = Math.max(-MAX_VEL, Math.min(MAX_VEL, velYaw + dir * 0.9));
@@ -503,10 +563,25 @@ export default function RidgelineStage() {
         stopInviting();
         haptic(8, performance.now());
       };
-      rotateRef.current = rotateNudge;
 
       const onDown = (e: PointerEvent) => {
         if (e.pointerType === "mouse" && e.button !== 0) return; // left only
+        // PROJECTS DIAL: a drag spins the knob (scrolls the project selection), never the orbit.
+        if (projectsOpenRef.current) {
+          dialDragging = true;
+          pid = e.pointerId;
+          dialStartAngle = tDialAngle;
+          dialStartX = e.clientX;
+          lastT = e.timeStamp;
+          velDial = 0;
+          dialLastNotch = Math.round(tDialAngle / DIAL_SLOT);
+          stopInviting();
+          try { cvs.setPointerCapture(pid); } catch { /* capture optional */ }
+          cvs.style.cursor = "grabbing";
+          haptic(10, e.timeStamp);
+          e.preventDefault();
+          return;
+        }
         dragging = true;
         // a drag ORBITS the camera in both phases now (globe and mountain share one orbit path);
         // the globe's idle Y-spin is independent ambient motion, never driven by the drag.
@@ -530,6 +605,22 @@ export default function RidgelineStage() {
       };
 
       const onMove = (e: PointerEvent) => {
+        // PROJECTS DIAL drag → spin the knob (the globe + the fan follow dialAngle)
+        if (projectsOpenRef.current && dialDragging && e.pointerId === pid) {
+          const ddt = Math.min(Math.max((e.timeStamp - lastT) / 1000, 1 / 240), 1 / 30);
+          lastT = e.timeStamp;
+          const rot = ((2 * Math.PI) / Math.max(cvs.clientHeight, 1)) * DIAL_SENS;
+          const prev = tDialAngle;
+          tDialAngle = dialStartAngle + (e.clientX - dialStartX) * rot; // drag right → next project
+          velDial = Math.max(
+            -DIAL_MAX_VEL,
+            Math.min(DIAL_MAX_VEL, velDial * 0.5 + ((tDialAngle - prev) / ddt) * 0.5),
+          );
+          const notch = Math.round(tDialAngle / DIAL_SLOT);
+          if (notch !== dialLastNotch) { dialLastNotch = notch; haptic(6, e.timeStamp); }
+          e.preventDefault();
+          return;
+        }
         if (!dragging || e.pointerId !== pid) return;
         // once the press travels past the slop it's a drag, not a click — a real rotation
         // (spin OR orbit) retires the arrows' breathing invitation, leaving them as controls
@@ -563,6 +654,15 @@ export default function RidgelineStage() {
       };
 
       const onUp = (e: PointerEvent) => {
+        // PROJECTS DIAL release — the knob settles to its detent via the frame loop's inertia
+        if (dialDragging && e.pointerId === pid) {
+          dialDragging = false;
+          pid = -1;
+          try { cvs.releasePointerCapture(e.pointerId); } catch { /* already gone */ }
+          cvs.style.cursor = "grab";
+          e.preventDefault();
+          return;
+        }
         if (e.pointerId !== pid) return;
         dragging = false;
         pid = -1;
@@ -618,12 +718,21 @@ export default function RidgelineStage() {
           e.preventDefault();
           return;
         }
-        // the Projects timeline owns arrow / Home / End while it's open (it walks the
-        // survey); never let those leak to the canvas orbit / globe-spin beneath.
+        // the Projects DIAL owns arrow / Home / End while it's open (they step the knob);
+        // never let those leak to the canvas orbit / globe-spin beneath. Up/Left = previous,
+        // Down/Right = next (matching a drag-right → next); Home/End jump to the first/last.
         if (
           projectsOpenRef.current &&
           (e.key.startsWith("Arrow") || e.key === "Home" || e.key === "End")
         ) {
+          if (e.key === "ArrowUp" || e.key === "ArrowLeft") tDialAngle -= DIAL_SLOT;
+          else if (e.key === "ArrowDown" || e.key === "ArrowRight") tDialAngle += DIAL_SLOT;
+          else if (e.key === "Home") dialGoto(0);
+          else if (e.key === "End") dialGoto(DIAL_N - 1);
+          velDial = 0;
+          stopInviting();
+          haptic(8, e.timeStamp);
+          e.preventDefault();
           return;
         }
         if (e.key === "Escape" && assignmentOpenRef.current) {
@@ -680,7 +789,6 @@ export default function RidgelineStage() {
         window.removeEventListener("pointerup", onUp);
         window.removeEventListener("pointercancel", onUp);
         window.removeEventListener("keydown", onKey);
-        rotateRef.current = () => {}; // drop the stale loop handler so a late arrow click is inert
         if (iosTick?.parentNode) iosTick.parentNode.removeChild(iosTick);
       });
 
@@ -1012,6 +1120,113 @@ export default function RidgelineStage() {
         }
       };
 
+      // ---- Projects DIAL welder: project the globe centre + a rim point through the LIVE vp,
+      // then lay out the project spokes as a screen-space fan on the globe's right hemisphere —
+      // the selected project horizontal at 3 o'clock, neighbours arcing up/down, the rest wrapping
+      // around the back (hidden). Mirrors updateCloud/updateSurvey: imperative DOM writes only, so
+      // nothing re-renders React and the fan stays welded to the (panned) globe. The fan is
+      // desktop-only; the narrow layout uses the vertical list, which only needs its selected class.
+      const setDialClass = (el: Element, tier: number) => {
+        el.classList.toggle("is-selected", tier === 2);
+        el.classList.toggle("is-near", tier === 1);
+        el.classList.toggle("is-far", tier === 0);
+      };
+      const updateDial = (
+        vp: Float32Array,
+        W: number,
+        H: number,
+        amt: number,
+        sel: number,
+      ) => {
+        const dom = dialDomRef.current;
+        if (!dom) return;
+        const mobile = dialMobile();
+        // masthead readout + mobile-list selection track every frame (cheap text/class writes)
+        if (dom.plate) dom.plate.textContent = `PLATE ${String(sel + 1).padStart(2, "0")} / ${DIAL_N}`;
+        if (dom.live)
+          dom.live.textContent =
+            `${PROJECTS[sel].title.toUpperCase()} · ${PROJECTS[sel].place.toUpperCase()}`;
+        if (dom.listItems.length === DIAL_N)
+          for (let i = 0; i < DIAL_N; i++)
+            dom.listItems[i].classList.toggle("is-selected", i === sel);
+
+        const { lines, nodes, glows, labels } = dom;
+        if (labels.length === DIAL_N && !mobile) {
+          const c = projectToScreen(vp, GLOBE.cx, GLOBE.cy, GLOBE.cz, W, H);
+          if (c.visible) {
+            const ed = projectToScreen(vp, GLOBE.cx + GLOBE.r, GLOBE.cy, GLOBE.cz, W, H);
+            const Rs = Math.hypot(ed.x - c.x, ed.y - c.y) || 1;
+            for (let i = 0; i < DIAL_N; i++) {
+              // signed wheel distance from the selected detent, folded to the nearest wrap
+              let k = (((i - sel) % DIAL_N) + DIAL_N) % DIAL_N;
+              if (k > DIAL_N / 2) k -= DIAL_N;
+              const a = k * DIAL_ARC_STEP; // screen angle, +up (screen y is down → negate sin)
+              const aa = Math.abs(a);
+              const line = lines[i], node = nodes[i], glow = glows[i], label = labels[i];
+              if (aa > DIAL_ARC_MAX) {
+                line.style.display = "none";
+                node.style.display = "none";
+                if (glow) glow.style.display = "none";
+                label.style.display = "none";
+                (label as HTMLElement).tabIndex = -1;
+                continue;
+              }
+              const tier = k === 0 ? 2 : Math.abs(k) <= 2 ? 1 : 0;
+              const Lf = tier === 2 ? DIAL_L_SEL : tier === 1 ? DIAL_L_NEAR : DIAL_L_FAR;
+              const L = Rs * Lf;
+              const ca = Math.cos(a), sa = Math.sin(a);
+              const ax = c.x + Rs * ca, ay = c.y - Rs * sa;
+              const tx = c.x + (Rs + L) * ca, ty = c.y - (Rs + L) * sa;
+              const edge =
+                aa > DIAL_ARC_MAX - DIAL_ARC_FADE
+                  ? 1 - smooth(DIAL_ARC_MAX - DIAL_ARC_FADE, DIAL_ARC_MAX, aa)
+                  : 1;
+              const op = (edge * amt).toFixed(3);
+              line.style.display = "";
+              node.style.display = "";
+              label.style.display = "";
+              line.setAttribute("x1", ax.toFixed(1));
+              line.setAttribute("y1", ay.toFixed(1));
+              line.setAttribute("x2", tx.toFixed(1));
+              line.setAttribute("y2", ty.toFixed(1));
+              line.style.opacity = op;
+              node.setAttribute("cx", ax.toFixed(1));
+              node.setAttribute("cy", ay.toFixed(1));
+              node.style.opacity = op;
+              if (glow) {
+                glow.setAttribute("cx", ax.toFixed(1));
+                glow.setAttribute("cy", ay.toFixed(1));
+                glow.style.display = tier === 2 ? "" : "none";
+              }
+              // the label hugs the spoke tip, vertically centred on it
+              label.style.transform =
+                `translate(${tx.toFixed(1)}px, ${ty.toFixed(1)}px) translateY(-50%)`;
+              label.style.opacity = op;
+              (label as HTMLElement).tabIndex = tier === 2 ? 0 : -1;
+              setDialClass(line, tier);
+              setDialClass(node, tier);
+              if (glow) setDialClass(glow, tier);
+              setDialClass(label, tier);
+            }
+          }
+        }
+
+        // roving focus + a polite SR announcement when the selection changes
+        if (sel !== dialPrevSelected) {
+          dialPrevSelected = sel;
+          if (dom.liveRegion)
+            dom.liveRegion.textContent =
+              `${PROJECTS[sel].title}, ${formatMonthYearLong(PROJECTS[sel].date)}`;
+          const act = typeof document !== "undefined" ? document.activeElement : null;
+          if (
+            act &&
+            (act.classList?.contains("dial-label") || act.classList?.contains("dial-list-item"))
+          ) {
+            (mobile ? dom.listItems[sel] : labels[sel])?.focus?.();
+          }
+        }
+      };
+
       let raf = 0;
       let prev = performance.now();
       const startT = prev;
@@ -1043,14 +1258,45 @@ export default function RidgelineStage() {
           ? mClock
           : mClock * mClock * mClock * (mClock * (mClock * 6 - 15) + 10);
 
+        // ---- Projects DIAL clocks. projAmt eases in only once the globe is actually present
+        // (mc<0.15), so opening from CV waits for the mountain to dissolve. The knob angle eases
+        // toward its target with a release-flick + a detent snap; while closed it unwinds to rest.
+        const projTarget = projectsOpenRef.current && mc < 0.15 ? 1 : 0;
+        const projTau = projTarget > projAmt ? PROJ_OPEN_TAU : PROJ_CLOSE_TAU;
+        projAmt += (projTarget - projAmt) * (reduceMotion ? 1 : 1 - Math.exp(-dt / projTau));
+        if (projTarget === 0 && projAmt < 1e-3) projAmt = 0;
+        if (projectsOpenRef.current) {
+          if (!dialDragging) {
+            velDial *= Math.exp(-dt / DIAL_INERTIA_TAU);
+            tDialAngle += velDial * dt;
+            if (Math.abs(velDial) < DIAL_SNAP_VEL) {
+              const snap = Math.round(tDialAngle / DIAL_SLOT) * DIAL_SLOT; // settle to the nearest detent
+              tDialAngle += (snap - tDialAngle) * (reduceMotion ? 1 : 1 - Math.exp(-dt / DIAL_SNAP_TAU));
+              if (Math.abs(velDial) < 1e-4) velDial = 0;
+            }
+            if (Math.abs(tDialAngle) > 6 * Math.PI) { // unwind a many-flick spin without a visible jump
+              const fold = Math.round(tDialAngle / TWO_PI) * TWO_PI;
+              tDialAngle -= fold; dialAngle -= fold;
+            }
+          }
+          dialAngle += (tDialAngle - dialAngle) * (reduceMotion ? 1 : 1 - Math.exp(-dt / DIAL_SMOOTH_TAU));
+        } else if (projAmt > 0) {
+          tDialAngle = 0; velDial = 0; // closing: unwind to rest so a reopen starts fresh
+          dialAngle += (0 - dialAngle) * (reduceMotion ? 1 : 1 - Math.exp(-dt / DIAL_SMOOTH_TAU));
+        }
+        dialSelected = ((Math.round(dialAngle / DIAL_SLOT) % DIAL_N) + DIAL_N) % DIAL_N;
+
         // tighten the pitch walls from the wide GLOBE range to the authored MOUNTAIN range as the
         // morph runs; re-clamp the target so a wide globe tilt eases inside the new walls instead of
         // snapping. Endpoints pinned: mEase 0 ⇒ globe walls, 1 ⇒ mountain walls.
         pLo = mix01(GLOBE_PITCH_LO, PITCH_LO, mEase);
         pHi = mix01(GLOBE_PITCH_HI, PITCH_HI, mEase);
         tPitch = clampPitch(tPitch);
-        globeSpin += SPIN * (1 - smooth(0.15, 0.6, mc)) * dt;
-        // (idle globeSpin only — the arrow/key nudge now orbits the camera, not the Y-spin)
+        // idle planet spin — fades out as the dial opens (the knob drives the spin instead, below)
+        globeSpin += SPIN * (1 - smooth(0.15, 0.6, mc)) * (1 - projAmt) * dt;
+        // the GPU globe + the DOM letter-cloud both read this summed spin, so the ball turns 1:1
+        // with the knob (dialAngle) while the dial is open and resumes its idle drift when closed.
+        const spinOut = globeSpin + dialAngle * projAmt;
         const landed = mc > 0.985;
 
         // after release, inertia drifts the TARGET, eased out until it settles
@@ -1133,7 +1379,9 @@ export default function RidgelineStage() {
         // mountain; on a tall phone the overlay stacks vertically, so keep it centred.
         // Eased by focusAmt so the slide tracks the dolly in and out.
         const wide = smooth(1.0, 1.4, aspectNow);
-        const focusShift = focusAmt * 0.42 * wide;
+        // the dossier focus pans the massif RIGHT; the Projects dial pans the globe LEFT (so its
+        // right hemisphere faces the open right where the spokes fan). Both are wide-screen only.
+        const focusShift = focusAmt * 0.42 * wide - DIAL_PAN * projAmt * wide;
 
         // lift the SELECTED ring to a comfortable framing height. The dolly-in keeps
         // aiming at the summit, so without this the low (early-career) rings near the
@@ -1169,14 +1417,16 @@ export default function RidgelineStage() {
         // mirrors the mountain's own zoomBase (radiusScale) aspect term. smooth(0,1,mc)=1 at mc=1
         // ⇒ mix01(globeStart, 1.0, 1) === 1.0 for ANY start, so the mountain dolly is byte-identical.
         const globeStart = 1.66 + 1.10 * smooth(1.0, 0.5, aspectNow); // ~1.66 wide … ~2.76 portrait — a touch smaller on both
-        const globeRadius = mix01(globeStart, 1.0, smooth(0.0, 0.70, mc));
+        // the Projects dial leans the camera a touch closer (DIAL_ZOOM<1) to emphasise the globe's
+        // right part; mix01(1, DIAL_ZOOM, 0) === 1 so the Home/CV framing is byte-identical at projAmt 0.
+        const globeRadius = mix01(globeStart, 1.0, smooth(0.0, 0.70, mc)) * mix01(1.0, DIAL_ZOOM, projAmt);
         const rscale = radiusScale * globeRadius;
         gpu.render({
           time: t,
           yaw,
           pitch,
           morph: mc,
-          globeSpin,
+          globeSpin: spinOut,
           motion: reduceMotion ? 0 : 1,
           hoverBand: landed ? shownBand : -1,
           hoverGlow: landed ? hoverGlow : 0,
@@ -1185,6 +1435,7 @@ export default function RidgelineStage() {
           radiusScale: rscale,
           focusShift,
           focusShiftY,
+          projAmt,
         });
 
         // bottom drag hint: shown only on the whole globe (mc≈0) and only until the first rotate
@@ -1204,7 +1455,12 @@ export default function RidgelineStage() {
         const aspect = cvs.clientWidth / Math.max(cvs.clientHeight, 1);
         if (mc < 0.999) {
           const cam = ridgeCamera(yaw, pitch, aspect, t, rscale, focusShift, focusShiftY);
-          updateCloud(cam.vp, cam.eye, globeSpin, mc, cvs.clientWidth, cvs.clientHeight);
+          // spinOut (idle + dial) so the cloud co-rotates with the GPU ball in BOTH phases
+          updateCloud(cam.vp, cam.eye, spinOut, mc, cvs.clientWidth, cvs.clientHeight);
+          // the chaotic letter-cloud is part of "the mess" — fade it out as the dial organises
+          if (cloudRef.current) cloudRef.current.style.opacity = (1 - projAmt).toFixed(3);
+          // weld the Projects dial spokes + labels to the SAME projected (panned) globe
+          if (projAmt > 0.002) updateDial(cam.vp, cvs.clientWidth, cvs.clientHeight, projAmt, dialSelected);
         } else if (cloudRef.current && cloudRef.current.style.visibility !== "hidden") {
           cloudRef.current.style.visibility = "hidden"; // mountain is whole — drop the cloud
         }
@@ -1309,50 +1565,20 @@ export default function RidgelineStage() {
         </span>
       </button>
 
-      {/* the rotate affordance — two minimal CURVED arrows hugging the side edges, no pill
-          and no liquid-glass plate beneath: just a bare ivory swoosh that breathes to invite
-          the drag. They serve BOTH views (spin the globe / orbit the mountain) and stay live
-          as click + keyboard controls; only the breathing retires once the viewer first
-          rotates. Wordless — the direction lives in the aria-label, not on screen. */}
-      <button
-        type="button"
-        className="ridge-arrow ridge-arrow--left"
-        ref={arrowLeftRef}
-        aria-label="Rotate left"
-        onClick={() => rotateRef.current?.(1)}
-      >
-        <svg className="ridge-arrow-icon" viewBox="0 0 34 36" fill="none" aria-hidden="true">
-          <path d="M32 16 A 13 13 0 0 1 19 29" />
-          <path d="M19 29 L 25.2 25.7 M19 29 L 25.2 32.3" />
-        </svg>
-      </button>
-      <button
-        type="button"
-        className="ridge-arrow ridge-arrow--right"
-        ref={arrowRightRef}
-        aria-label="Rotate right"
-        onClick={() => rotateRef.current?.(-1)}
-      >
-        <svg className="ridge-arrow-icon" viewBox="0 0 34 36" fill="none" aria-hidden="true">
-          <path d="M2 16 A 13 13 0 0 0 15 29" />
-          <path d="M15 29 L 8.8 25.7 M15 29 L 8.8 32.3" />
-        </svg>
-      </button>
-
       {/* bottom drag hint — a tracked small-caps cue flanked by two little CURVED arrows
           (curving outward, one pointing left, one right) signalling the globe can be spun.
           Globe-only: opacity is driven from the rAF loop (1 while mc≈0 & still inviting, else
           0) and retired by stopInviting on the first rotate. aria-hidden + pointer-events:none
           so a drag passes straight through to the canvas beneath. */}
       <div className="globe-hint" ref={hintRef} aria-hidden="true">
-        <svg className="globe-hint-arrow" viewBox="0 0 30 22" fill="none" aria-hidden="true">
-          <path d="M27 11 A 11 11 0 0 0 7 11" />
-          <path d="M7 11 L 11.4 7.4 M7 11 L 11.4 14.6" />
+        <svg className="globe-hint-arrow" viewBox="0 0 24 20" fill="none" aria-hidden="true">
+          <path d="M21 13.5 Q12 6.5 3 10.5" />
+          <path d="M3 10.5 L6 6.9 M3 10.5 L7.4 11.4" />
         </svg>
         <span className="globe-hint-text">drag to rotate</span>
-        <svg className="globe-hint-arrow" viewBox="0 0 30 22" fill="none" aria-hidden="true">
-          <path d="M3 11 A 11 11 0 0 1 23 11" />
-          <path d="M23 11 L 18.6 7.4 M23 11 L 18.6 14.6" />
+        <svg className="globe-hint-arrow" viewBox="0 0 24 20" fill="none" aria-hidden="true">
+          <path d="M3 13.5 Q12 6.5 21 10.5" />
+          <path d="M21 10.5 L18 6.9 M21 10.5 L16.6 11.4" />
         </svg>
       </div>
 
@@ -1385,14 +1611,17 @@ export default function RidgelineStage() {
         )}
       </AnimatePresence>
 
-      {/* the Projects timeline — "The Survey Line", opened by the Projects nav link
-          / #projects route. Sits over whichever scene is live. */}
+      {/* the Projects "Dial" — opened by the Projects nav link / #projects route. A
+          transparent layer over the live globe: the spokes + labels are welded each
+          frame by the rAF loop via dialDomRef; selecting routes through onDialSelect. */}
       <AnimatePresence>
         {projectsOpen && (
           <ProjectsOverlay
             key="projects-overlay"
             ref={projectsCloseBtnRef}
             onClose={closeProjects}
+            domRef={dialDomRef}
+            onSelect={onDialSelect}
           />
         )}
       </AnimatePresence>

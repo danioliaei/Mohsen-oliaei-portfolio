@@ -25,7 +25,7 @@ struct Frame {
   post : vec4<f32>,   // x bloomAmt, y vignette, z grain, w exposure
   eye  : vec4<f32>,   // xyz camera eye (world), w unused
   hov  : vec4<f32>,   // x hovered slice index (-1 none), y pulse 0..1, zw unused
-  mph  : vec4<f32>,   // x morph 0..1 (0 = intro globe, 1 = finished mountain), y globeSpin (rad), zw spare
+  mph  : vec4<f32>,   // x morph 0..1 (0 = intro globe, 1 = finished mountain), y globeSpin (rad), z motion, w projAmt (0 = globe chaos … 1 = dial-calm)
 };
 @group(0) @binding(0) var<uniform> F : Frame;
 `;
@@ -513,7 +513,12 @@ struct FOut {
     sin(ph * 0.73 + tt * 0.65 + 4.2),
   );
   let tang = w - d * dot(w, d);                  // tangential component only (preserve radius)
-  let flowAmt = mix(0.068, 0.020, isArm) * mix(1.35, 1.0, depth01) * motion; // interior silk more alive
+  // PROJECTS-DIAL CALM (F.mph.w): as the dial opens the chaotic threads settle toward near-stillness.
+  // projGate is 1 on the globe and falls to 0 by morph 0.20, so this is utterly INERT once the mountain
+  // forms (and the filament pass itself is skipped at morph>=0.72) — morph=1 stays byte-identical.
+  let projGate = smoothstep(0.20, 0.0, morph);
+  let calmDown = mix(1.0, 0.16, F.mph.w * projGate);
+  let flowAmt = mix(0.068, 0.020, isArm) * mix(1.35, 1.0, depth01) * motion * calmDown; // interior silk more alive
   d = normalize(d + tang * flowAmt);
 
   // a tiny BREATHING PUMP so the whole web gently inhales (frozen on reduced motion)
