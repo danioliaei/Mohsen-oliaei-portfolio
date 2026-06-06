@@ -481,33 +481,99 @@ struct FOut {
 @vertex fn vs(@location(0) mdir : vec3<f32>, @location(1) at : vec4<f32>) -> FOut {
   let morph  = F.mph.x;
   let motion = F.mph.z;                          // 0 on reduced-motion → the web holds still
-  // the ball dissolves as the mountain assembles (a touch after the decor letters start sinking),
-  // and is fully gone by morph 0.70 — by then the terrain occludes it anyway.
-  let globeFade = 1.0 - smoothstep(0.12, 0.70, morph);
+  let tt     = F.a.x;
+
+  // ---- line CLASS, encoded as a sentinel range in at.y (the seed): [0,1) curl thread / surface
+  // spark (organic), [1,2) radial spoke (rigid armature), [2,3) nucleus (the core, lifts to summit).
+  // The FRACTIONAL part is the per-line phase seed every flow/twinkle term has always used. ----
+  let kindRaw = at.y;
+  let sseed   = fract(at.y);
+  let isArm   = step(1.0, kindRaw);              // spoke OR nucleus → the rigid armature (flows less)
+  let isCore  = step(2.0, kindRaw);              // nucleus only → rises to the summit during the morph
 
   var d = normalize(mdir);
   // CONSTANT MOVEMENT: a flow that travels ALONG each thread (phase keyed to t) and over time,
-  // projected onto the tangent plane so the ball keeps its round silhouette. Three offset lobes
-  // → an organic, non-repeating shimmer, like real filaments caught in a current, not a wobble.
-  let tt = F.a.x;
-  let ph = at.x * 9.0 + at.y * F_TAU;
+  // projected onto the tangent plane so the ball keeps its round silhouette. Three offset lobes →
+  // an organic, non-repeating shimmer. The rigid armature (spokes/nucleus) flows far less than the
+  // organic curl, so the cage reads stable against the silk — the "sophisticated" contrast.
+  let ph = at.x * 9.0 + sseed * F_TAU;
   let w = vec3<f32>(
     sin(ph + tt * 0.85),
     sin(ph * 1.27 + tt * 1.10 + 2.1),
     sin(ph * 0.73 + tt * 0.65 + 4.2),
   );
   let tang = w - d * dot(w, d);                  // tangential component only (preserve radius)
-  d = normalize(d + tang * 0.055 * motion);
+  let flowAmt = mix(0.068, 0.020, isArm) * motion;
+  d = normalize(d + tang * flowAmt);
+
+  // a tiny BREATHING PUMP so the whole web gently inhales (frozen on reduced motion)
+  let pumpR = at.w * (1.0 + 0.01 * sin(tt * 0.4 + at.x * F_TAU) * motion);
 
   // spin about Y by globeSpin — matches the terrain sphere (lon += F.mph.y) and rotY() for the
   // DOM letters, so threads, surface and words all co-rotate welded to the same ball.
   let cs = cos(F.mph.y); let sn = sin(F.mph.y);
   let sd = vec3<f32>(d.x * cs + d.z * sn, d.y, -d.x * sn + d.z * cs);
 
-  let world = F_GLOBE_C + F_GLOBE_R * at.w * sd;
+  var world = F_GLOBE_C + F_GLOBE_R * pumpR * sd;
+
+  // ===== MORPH — the globe is not crossfaded out; it FUNNELS down the summit axis and is consumed
+  // as the mountain rises through the converging streams. The axis x=0, z=8200 is BOTH the globe
+  // centre and the summit axis (PEAK_X = GLOBE_C.x = 0, PEAK_Z = GLOBE_C.z = 8200), so the centre
+  // literally becomes the peak. All of this lives inside the filament pass, which is skipped at
+  // morph >= 0.72 (and every fade below terminates by 0.70), so the morph = 1 mountain is untouched.
+  // DRAIN (0.12→0.45): collapse each vertex horizontally onto the axis at its own height — the
+  // interior / near-core lines collapse first, the outer shell follows.
+  let drainT = clamp(smoothstep(0.12, 0.45, morph) * (1.4 - clamp(at.w, 0.0, 1.0) * 0.8), 0.0, 1.0);
+  world = mix(world, vec3<f32>(0.0, world.y, 8200.0), drainT);
+  // NUCLEUS LIFT (0.30→0.62): the bright core rises up the axis to the summit seed (APEX =
+  // 0,5230,8200 in RidgelineStage), handing off to the apex beacon that fades in at morph 0.85.
+  let lift = smoothstep(0.3, 0.62, morph) * isCore;
+  world = mix(world, vec3<f32>(0.0, 5230.0, 8200.0), lift);
+
+  // per-vertex, drain-aware FADE (replaces the old flat globeFade): a line fades only AFTER it has
+  // drained; inner / lower lines fade first, matching the terrain's bottom-up assembly so the web
+  // reads as CONSUMED by the rising mountain. The nucleus holds until its lift completes. Max
+  // (fadeStart + width) = 0.70 < the 0.72 draw gate → every vertex is provably gone first.
+  var fadeStart = 0.3 + 0.16 * clamp(at.w, 0.0, 1.0);
+  fadeStart = mix(fadeStart, 0.55, isCore);
+  let globeFade = 1.0 - smoothstep(fadeStart, fadeStart + 0.15, morph);
+
+  // ---- BRIGHTNESS — all computed here; the FS just emits it (additive over black). ----
+  // DEPTH-DIM by frontness: the back of the ball recedes, the front reads crisp → real VOLUME
+  // instead of a flat scribble. Uses the spun dir, so it tracks the rotation. NaN-safe: eye is far
+  // from the (constant) centre, so the normalize argument is never zero.
+  let frontness = 0.5 + 0.5 * dot(sd, normalize(F.eye.xyz - F_GLOBE_C));
+  var glow = at.z;
+  // TRAVELLING PULSE — a hot bead races along each line (charge flowing), faster as the drain begins.
+  // Gaussians use a*a (NOT pow): pow(x, 2.0) NaNs for x < 0 in WGSL.
+  let pSpeed = 0.55 * (1.0 + 3.0 * drainT);
+  let p  = fract(tt * pSpeed + sseed);
+  let pa = (0.5 - abs(fract(at.x - p) - 0.5)) * 14.0;        // wrapped distance to the pulse head
+  let pulse = exp(-pa * pa);
+  let ta = fract(at.x - p + 0.06) * 9.0;                     // a short comet afterglow trailing behind
+  let tail = 0.42 * exp(-ta * ta);
+  glow = glow * mix(1.0, 0.55 + 2.2 * (pulse + tail), motion);
+  // NODE / RIM TWINKLE — scintillation, small amplitude to stay tasteful
+  let tw = 0.86 + 0.14 * sin(tt * 3.0 + sseed * 40.0);
+  glow = glow * mix(1.0, tw, motion);
+  // depth volume
+  glow = glow * mix(0.34, 1.08, frontness);
+  // SPOKES FIRE OUTWARD — a wave that travels core→rim every few seconds (only for armature lines)
+  let aw = (0.5 - abs(fract(tt * 0.4 - at.w) - 0.5)) * 8.0;
+  let armWave = exp(-aw * aw);
+  glow = mix(glow, glow * (0.5 + 2.0 * armWave), isArm * motion);
+  // NUCLEUS SOMA GLOW — the core burns hot and throbs (additive, NOT depth-dimmed, so the heart
+  // stays lit from any angle); the bloom pass lifts it into a luminous orb with no extra pass.
+  let coreK = clamp((0.18 - at.w) / 0.18, 0.0, 1.0);
+  let somaBeat = 0.8 + 0.2 * sin(tt * 1.15) * motion;
+  glow = glow + coreK * coreK * 2.6 * somaBeat;
+  // FIRING WAVE — the instant the climb begins, a brightness wave discharges core→shell
+  let fr = (at.w - clamp(morph * 2.4, 0.0, 1.4)) * 7.0;
+  glow = glow * (1.0 + 1.6 * exp(-fr * fr));
+
   var o : FOut;
   o.pos  = F.vp * vec4<f32>(world, 1.0);
-  o.glow = at.z * globeFade;
+  o.glow = glow * globeFade;
   return o;
 }
 
