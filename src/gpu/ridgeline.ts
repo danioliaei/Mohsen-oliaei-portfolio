@@ -25,8 +25,50 @@ import {
   BRIGHT_WGSL,
   BLUR_WGSL,
 } from "./ridgelineShaders";
+import { STATIONS } from "../data/stations";
 
 const HDR: GPUTextureFormat = "rgba16float";
+
+/* ---- INTRO GLOBE: the "ball of lines & letters" the terrain mesh is wrapped onto at
+   morph = 0 and unravels from as morph → 1. The centre/radius MUST mirror the GLOBE_C /
+   GLOBE_R consts in ridgelineShaders.ts (the GPU sphere) so the DOM letter-cloud, projected
+   through the same camera here, sits exactly on the rendered ball. ---------------------- */
+export const GLOBE = { cx: 0, cy: 2120, cz: 8200, r: 3600 } as const;
+export const GLOBE_SPIN_RATE = 0.16; // rad/s — the planet's slow idle rotation (0 on reduced-motion)
+export const MORPH_DUR = 2.6;        // s — globe → mountain assembly (shortened on reduced-motion)
+
+/* ---- letter-cloud content, drawn from the real career record (data/stations.ts): the seven
+   role + company labels are PROTAGONISTS (index k ↔ STATIONS[k]; they fly to their ring anchor
+   and hand off to the survey as the mountain forms), while place / dates / tools are DECOR
+   fragments that swarm the ball then sink and fade. Deterministic order (no Math.random) so the
+   layout is stable across re-measures / StrictMode remounts. ---------------------------- */
+export const CLOUD_PROTAGONISTS = STATIONS.map((s) => `${s.role} · ${s.company}`);
+// a varied, dense swarm: every company, place, year-span and tool/standard across the record —
+// enough distinct words that the ball reads as the "ball of letters" it's meant to be.
+export const CLOUD_DECOR: string[] = [
+  ...STATIONS.map((s) => s.company),
+  ...STATIONS.map((s) => s.place),
+  ...STATIONS.map((s) => s.dates),
+  ...STATIONS.flatMap((s) => s.detail.tools),
+];
+
+/** Even unit directions on a sphere (Fibonacci lattice). `phase` spins the whole set so two
+ *  lattices (protagonists, decor) interleave rather than overlap. Returns a flat xyz array. */
+function fibSphere(n: number, phase: number): Float32Array {
+  const out = new Float32Array(n * 3);
+  const golden = Math.PI * (3 - Math.sqrt(5));
+  for (let i = 0; i < n; i++) {
+    const y = 1 - (i + 0.5) * (2 / n);
+    const r = Math.sqrt(Math.max(0, 1 - y * y));
+    const th = golden * i + phase;
+    out[i * 3] = Math.cos(th) * r;
+    out[i * 3 + 1] = y;
+    out[i * 3 + 2] = Math.sin(th) * r;
+  }
+  return out;
+}
+export const decorBaseDirs = (): Float32Array => fibSphere(CLOUD_DECOR.length, 0);
+export const protagonistBaseDirs = (): Float32Array => fibSphere(CLOUD_PROTAGONISTS.length, 1.7);
 
 // ---- camera (eye-level, looking across the dune plain toward the summit) ----
 // Set high enough above the dunes that the foreground reads as densely-packed
@@ -86,6 +128,13 @@ export interface RidgeFrame {
    *  the dune plain fall off the bottom of the frame. Mirror of focusShift; MUST match
    *  the value the survey overlay projects with (same vp). */
   focusShiftY?: number;
+  /** Sphere→terrain MORPH 0..1: 0 = the intro "globe of lines & letters", 1 = the
+   *  finished mountain. Defaults to 1 everywhere, so any caller that omits it renders
+   *  today's mountain byte-identically. */
+  morph?: number;
+  /** Globe SPIN in radians about Y during the intro (the planet's slow rotation); the
+   *  DOM letter-cloud co-rotates with the exact same value. Ignored once morph hits 1. */
+  globeSpin?: number;
 }
 
 /* ---- orbit camera: drag to spin a full turn around the summit -------------
@@ -706,6 +755,9 @@ export class RidgelineScene {
     // z/w recede every OTHER band so the focused (clicked) slice reads as the hero.
     u[32] = s.hoverBand ?? -1; u[33] = s.hoverGlow ?? 0;
     u[34] = s.focusBand ?? -1; u[35] = s.focusAmt ?? 0;
+    // mph = (morph, globeSpin, spare, spare). morph DEFAULTS to 1 (full mountain) so any
+    // path that forgets the field renders the finished mountain, never a stuck globe.
+    u[36] = s.morph ?? 1; u[37] = s.globeSpin ?? 0; u[38] = 0; u[39] = 0;
     this.g.device.queue.writeBuffer(this.uBuf, 0, u.buffer, 0, 256);
   }
 

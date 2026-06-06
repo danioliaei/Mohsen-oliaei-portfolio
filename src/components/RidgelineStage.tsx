@@ -8,6 +8,13 @@ import {
   projectToScreen,
   ringAnchor,
   pickBand,
+  GLOBE,
+  GLOBE_SPIN_RATE,
+  MORPH_DUR,
+  CLOUD_PROTAGONISTS,
+  CLOUD_DECOR,
+  decorBaseDirs,
+  protagonistBaseDirs,
 } from "../gpu/ridgeline";
 import RoleOverlay from "./RoleOverlay";
 import AssignmentOverlay from "./AssignmentOverlay";
@@ -89,6 +96,15 @@ export default function RidgelineStage() {
   const wasOpenRef = useRef(false);
   const closeBtnRef = useRef<HTMLButtonElement>(null);
 
+  // ---- intro globe → mountain morph ----------------------------------------
+  // The homepage opens as a slowly-spun "globe of lines & letters"; clicking the core
+  // assembles it into the mountain. `entered` (React) toggles the globe-phase chrome;
+  // `enteredRef` is what the imperative rAF loop reads each frame to kick the morph.
+  const [entered, setEntered] = useState(false);
+  const enteredRef = useRef(false);
+  const coreRef = useRef<HTMLButtonElement>(null);
+  const cloudRef = useRef<HTMLDivElement>(null);
+
   // ---- apex beacon → "Your Assignment?" overlay ----------------------------
   // A second focused surface, parallel to `selected`: the floating "?" datum at the
   // summit opens it. `assignmentOpenRef` is the value the imperative rAF loop reads
@@ -130,10 +146,22 @@ export default function RidgelineStage() {
     selectedRef.current = i;
     setSelected(i);
   }, []);
+
+  // begin the climb: assemble the mountain out of the globe. Blur the core BEFORE the commit
+  // makes it inert (the beacon pattern), so focus is never trapped in an aria-hidden subtree.
+  const enter = useCallback(() => {
+    if (enteredRef.current) return;
+    coreRef.current?.blur();
+    enteredRef.current = true;
+    setEntered(true);
+  }, []);
+  const enterRef = useRef(enter);
+
   // keep the loop's escape hatches pointed at the freshest setters every render
   useEffect(() => {
     selectRef.current = select;
     closeAssignRef.current = closeAssignment;
+    enterRef.current = enter;
   });
 
   // focus management: on open, remember what was focused and move focus into the
@@ -284,6 +312,29 @@ export default function RidgelineStage() {
         typeof matchMedia === "function" &&
         matchMedia("(prefers-reduced-motion: reduce)").matches;
 
+      // ---- intro globe → mountain morph (loop-locals; read by frame + the pointer
+      // handlers, which all live in this one closure so they share the live values) ----
+      const MDUR = reduceMotion ? 0.18 : MORPH_DUR; // assembly duration (a quick dissolve on reduced-motion)
+      const SPIN = reduceMotion ? 0 : GLOBE_SPIN_RATE; // idle planet spin (held still on reduced-motion)
+      let morph = 0;            // 0 = globe, 1 = mountain — the intro always opens on the globe
+      let morphStart = -1;      // loop-clock time of the first frame after enter() fires (<0 until then)
+      let globeSpin = 0;        // radians about Y; advances while morph < 1, eased to rest as terrain forms
+      let dragMode: "spin" | "orbit" = "spin"; // latched per gesture in onDown
+      const easeOutQuint = (x: number) => 1 - Math.pow(1 - x, 5);
+      const mix01 = (a: number, b: number, t: number) => a + (b - a) * t;
+
+      // letter-cloud geometry: fixed Fibonacci dirs (built once) + cached label nodes.
+      const decorDirs = decorBaseDirs();
+      const protoDirs = protagonistBaseDirs();
+      let decorEls: NodeListOf<HTMLElement> | null = null;
+      let protoEls: NodeListOf<HTMLElement> | null = null;
+      // rotate a base dir about Y by `spin`, matching the shader's lon += globeSpin (a point at
+      // base-longitude φ ends at φ+spin, measured from +z toward +x) so letters weld to the lines.
+      const rotY = (dx: number, dy: number, dz: number, spin: number): [number, number, number] => {
+        const s = Math.sin(spin), c = Math.cos(spin);
+        return [dx * c + dz * s, dy, -dx * s + dz * c];
+      };
+
       // ---- haptics: the Vibration API (Android/Chrome) plus the iOS-Safari
       // trick — toggling a hidden <input switch> plays the system "tock". Kept
       // off-screen (not display:none, which would mute it) and clicked from
@@ -334,7 +385,11 @@ export default function RidgelineStage() {
       const onDown = (e: PointerEvent) => {
         if (e.pointerType === "mouse" && e.button !== 0) return; // left only
         dragging = true;
-        hideHint();
+        // latch the gesture's role from the CURRENT phase: a press while the globe is up
+        // spins the planet; once it's the mountain, it orbits. Latched so a drag that begins
+        // on the globe keeps spinning even as the morph ticks up under it.
+        dragMode = morph < 0.04 ? "spin" : "orbit";
+        if (dragMode === "orbit") hideHint(); // keep the orbit hint for after the climb begins
         pid = e.pointerId;
         lastX = e.clientX;
         lastY = e.clientY;
@@ -367,6 +422,12 @@ export default function RidgelineStage() {
         lastX = e.clientX;
         lastY = e.clientY;
         lastT = e.timeStamp;
+
+        // globe phase: a drag spins the planet on its axis — never yaws/pitches the camera
+        if (dragMode === "spin") {
+          globeSpin += -dxPix * rot;
+          return;
+        }
 
         const dYaw = -dxPix * rot;
         tYaw += dYaw;
@@ -401,13 +462,31 @@ export default function RidgelineStage() {
           e.timeStamp - downT < CLICK_TIME &&
           (e.pointerType !== "mouse" || e.button === 0);
         if (isClick) {
+          // globe phase: a tap anywhere on the ball begins the assembly (the same as the
+          // core button) — and never tries to pick a career slice that isn't there yet.
+          if (morph < 0.985) { enterRef.current(); return; }
           const r = cvs.getBoundingClientRect();
           const px = e.clientX - r.left;
           const py = e.clientY - r.top;
-          const b = pickBand(
-            yaw, pitch, cvs.clientWidth / Math.max(cvs.clientHeight, 1),
-            lastFrameT, px, py, cvs.clientWidth, cvs.clientHeight, radiusScale,
-          );
+          // a click on a survey CALLOUT (the floating role title + company) opens that
+          // station directly. The words sit off the slope in the air, so the terrain
+          // ray-pick below can't see them — test their projected boxes first (the same
+          // geometry updateSurvey lays out each frame, in canvas px; mirrors the hover
+          // hit-test), then fall back to the ray-pick for a click on the bare slope.
+          let b = -1;
+          for (let k = 0; k < STATIONS.length; k++) {
+            if (visA[k] <= 0.12 || !ptsA[k]) continue;
+            if (
+              px >= lxA[k] - 14 && px <= lxA[k] + labelW[k] + 14 &&
+              py >= tyA[k] - 8 && py <= tyA[k] + labelH[k] + 8
+            ) { b = k; break; }
+          }
+          if (b < 0) {
+            b = pickBand(
+              yaw, pitch, cvs.clientWidth / Math.max(cvs.clientHeight, 1),
+              lastFrameT, px, py, cvs.clientWidth, cvs.clientHeight, radiusScale,
+            );
+          }
           if (b >= 0) {
             selectRef.current(b);
             hideHint();
@@ -426,6 +505,12 @@ export default function RidgelineStage() {
         if (e.key === "Escape" && selectedRef.current != null) {
           selectRef.current(null);
           e.preventDefault();
+          return;
+        }
+        // globe phase: arrows nudge the planet's spin; the camera orbit is the mountain's
+        if (morph < 0.04) {
+          if (e.key === "ArrowLeft") { globeSpin += 0.25; e.preventDefault(); }
+          else if (e.key === "ArrowRight") { globeSpin -= 0.25; e.preventDefault(); }
           return;
         }
         const step = 0.2; // rad per press (~11°) — eased in by the smoothing
@@ -525,6 +610,16 @@ export default function RidgelineStage() {
       ) => {
         const overlay = overlayRef.current;
         if (!overlay) return;
+        // suppress the whole survey + apex beacon through the globe + the assembly, then fade
+        // them in over the last stretch — picking up the baton just as the flying protagonist
+        // labels land and fade out (~0.85), so the words arrive with the finished mountain.
+        if (morph < 0.85) {
+          if (labelEls) labelEls.forEach((el) => { el.style.opacity = "0"; });
+          if (leaderEls) leaderEls.forEach((el) => { (el as SVGElement).style.opacity = "0"; });
+          if (beaconRef.current) beaconRef.current.style.opacity = "0";
+          return;
+        }
+        const surveyFade = smooth(0.85, 1.0, morph);
         // while a slice is focused the survey words recede behind the panel — only
         // the selected callout stays lit, and the per-frame hover pick is skipped.
         const focusActive = selectedRef.current != null || assignmentOpenRef.current;
@@ -672,7 +767,7 @@ export default function RidgelineStage() {
             : k === foundHover ? 1 : anyHover ? DIM_OP : REST_OP;
           const target = laidOut ? visA[k] * tier : 0;
           dispOp[k] += (target - dispOp[k]) * opK;
-          const op = dispOp[k].toFixed(3);
+          const op = (dispOp[k] * surveyFade).toFixed(3);
           if (laidOut) {
             leader.setAttribute("points", ptsA[k]);
             // place the block so the title's centre sits on the leader's horizontal
@@ -710,8 +805,79 @@ export default function RidgelineStage() {
           beaconOp += (target - beaconOp) * bk;
           beacon.style.transform =
             `translate3d(${ap.x.toFixed(1)}px, ${ap.y.toFixed(1)}px, 0) translate(-50%, -50%)`;
-          beacon.style.opacity = (beaconOp * 0.9).toFixed(3);
+          beacon.style.opacity = (beaconOp * 0.9 * surveyFade).toFixed(3);
           beacon.style.pointerEvents = !open && beaconOp > 0.5 ? "auto" : "none";
+        }
+      };
+
+      // ---- letter cloud: the "ball of letters". Real career words from data/stations.ts,
+      // projected onto the spinning globe and co-rotated (rotY) in lock-step with the GPU
+      // lines. DECOR fragments (places / dates / tools) swarm the ball then SINK into the
+      // forming terrain and fade; the seven PROTAGONIST role·company labels FLY from the
+      // sphere to their ring anchor and hand off to the survey callouts as the mountain lands.
+      // Projected from the SAME live vp/eye the GPU rendered with, so nothing drifts. ----
+      const updateCloud = (
+        vp: Float32Array,
+        eye: [number, number, number],
+        spin: number,
+        m: number,
+        W: number,
+        H: number,
+      ) => {
+        const wrap = cloudRef.current;
+        if (!wrap) return;
+        if (wrap.style.visibility === "hidden") wrap.style.visibility = "visible";
+        if (!decorEls) decorEls = wrap.querySelectorAll<HTMLElement>(".cloud-decor");
+        if (!protoEls) protoEls = wrap.querySelectorAll<HTMLElement>(".cloud-proto");
+
+        // DECOR: present on the globe, then sink (rain into the terrain) + fade out by ~m 0.62
+        const decorVis = 1 - smooth(0.42, 0.62, m);
+        const sinkY = smooth(0.35, 0.95, m) * 320; // downward drift in px as it dissolves
+        for (let i = 0; i < decorEls.length; i++) {
+          const el = decorEls[i];
+          if (decorVis <= 0.002) { el.style.opacity = "0"; continue; }
+          const [rx, ry, rz] = rotY(decorDirs[i * 3], decorDirs[i * 3 + 1], decorDirs[i * 3 + 2], spin);
+          const Px = GLOBE.cx + GLOBE.r * rx, Py = GLOBE.cy + GLOBE.r * ry, Pz = GLOBE.cz + GLOBE.r * rz;
+          const vx = eye[0] - Px, vy = eye[1] - Py, vz = eye[2] - Pz;
+          const vl = Math.hypot(vx, vy, vz) || 1;
+          const facing = (rx * vx + ry * vy + rz * vz) / vl; // outward normal · view (>0 = front)
+          const faceFade = smooth(-0.06, 0.3, facing); // let limb words linger → a fuller ball
+          const cw = vp[3] * Px + vp[7] * Py + vp[11] * Pz + vp[15];
+          if (cw <= 1e-6 || faceFade <= 0.002) { el.style.opacity = "0"; continue; }
+          const cx = vp[0] * Px + vp[4] * Py + vp[8] * Pz + vp[12];
+          const cy = vp[1] * Px + vp[5] * Py + vp[9] * Pz + vp[13];
+          const sx = ((cx / cw) * 0.5 + 0.5) * W;
+          const sy = (1 - ((cy / cw) * 0.5 + 0.5)) * H + sinkY;
+          const depth = smooth(0.0, 1.0, ((2 * GLOBE.r) / cw) * 0.5); // 0 far → 1 near
+          const scale = 0.66 + 0.42 * depth;
+          el.style.transform =
+            `translate3d(${sx.toFixed(1)}px, ${sy.toFixed(1)}px, 0) translate(-50%, -50%) scale(${scale.toFixed(3)})`;
+          el.style.opacity = (decorVis * faceFade * (0.32 + 0.5 * depth)).toFixed(3);
+        }
+
+        // PROTAGONISTS: fly sphere → ring anchor (same vp the survey uses → seamless handoff).
+        // They land and fade OUT by m≈0.85, just as the survey callouts begin fading IN — a clean
+        // baton pass with no doubled text.
+        const fly = smooth(0.0, 0.85, m);
+        const protoVis = 1 - smooth(0.70, 0.85, m);
+        for (let k = 0; k < protoEls.length; k++) {
+          const el = protoEls[k];
+          if (protoVis <= 0.002) { el.style.opacity = "0"; continue; }
+          const [rx, ry, rz] = rotY(protoDirs[k * 3], protoDirs[k * 3 + 1], protoDirs[k * 3 + 2], spin);
+          const Px = GLOBE.cx + GLOBE.r * rx, Py = GLOBE.cy + GLOBE.r * ry, Pz = GLOBE.cz + GLOBE.r * rz;
+          const sp = projectToScreen(vp, Px, Py, Pz, W, H);
+          const a = ringAnchor(STATIONS[k].radius);
+          const tp = projectToScreen(vp, a.x, a.y, a.z, W, H);
+          if (!sp.visible || !tp.visible) { el.style.opacity = "0"; continue; }
+          const lx = sp.x + (tp.x - sp.x) * fly;
+          const ly = sp.y + (tp.y - sp.y) * fly;
+          const vx = eye[0] - Px, vy = eye[1] - Py, vz = eye[2] - Pz;
+          const vl = Math.hypot(vx, vy, vz) || 1;
+          const facing = (rx * vx + ry * vy + rz * vz) / vl;
+          const faceFade = fly > 0.5 ? 1 : smooth(-0.1, 0.35, facing); // once flying in, never cull
+          el.style.transform =
+            `translate3d(${lx.toFixed(1)}px, ${ly.toFixed(1)}px, 0) translate(-50%, -50%)`;
+          el.style.opacity = (protoVis * faceFade).toFixed(3);
         }
       };
 
@@ -723,6 +889,17 @@ export default function RidgelineStage() {
         prev = now;
         const t = (now - startT) / 1000;
         lastFrameT = t; // so a click can pick against the exact frame on screen
+
+        // advance the globe → mountain morph: an eased clock tween, kicked by enter(). The
+        // planet's idle spin runs throughout, easing to rest as the terrain takes over so the
+        // assembly reads as a settle rather than a slide.
+        if (enteredRef.current && morphStart < 0) morphStart = t;
+        if (morphStart >= 0 && morph < 1) {
+          morph = easeOutQuint(Math.min(1, (t - morphStart) / MDUR));
+          if (morph > 0.999) morph = 1;
+        }
+        globeSpin += SPIN * (1 - smooth(0.15, 0.6, morph)) * dt;
+        const landed = morph > 0.985;
 
         // after release, inertia drifts the TARGET, eased out until it settles
         if (!dragging && (velYaw !== 0 || velPitch !== 0)) {
@@ -806,19 +983,48 @@ export default function RidgelineStage() {
         }
         focusShiftY += (shiftYTarget - focusShiftY) * fk;
 
+        // a cinematic dolly: the globe sits SMALL and whole in the middle of the frame, then the
+        // camera flies in as it assembles, settling to the authored mountain framing exactly at
+        // morph = 1 (globeRadius → 1, so the end framing is untouched). Hover / focus are forced
+        // inert until the mountain has landed, so the globe can't be picked.
+        const globeRadius = mix01(1.55, 1.0, smooth(0.0, 1.0, morph));
+        const rscale = radiusScale * globeRadius;
         gpu.render({
           time: t,
           yaw,
           pitch,
-          hoverBand: shownBand,
-          hoverGlow,
-          focusBand,
-          focusAmt,
-          radiusScale,
+          morph,
+          globeSpin,
+          hoverBand: landed ? shownBand : -1,
+          hoverGlow: landed ? hoverGlow : 0,
+          focusBand: landed ? focusBand : -1,
+          focusAmt: landed ? focusAmt : 0,
+          radiusScale: rscale,
           focusShift,
           focusShiftY,
         });
-        updateSurvey(yaw, pitch, t, dt, radiusScale, focusShift, focusShiftY);
+
+        // the letter cloud + the core button project through the EXACT camera the GPU just
+        // rendered with this frame (same rscale / breathing), so nothing drifts off the ball.
+        const aspect = cvs.clientWidth / Math.max(cvs.clientHeight, 1);
+        if (morph < 1) {
+          const cam = ridgeCamera(yaw, pitch, aspect, t, rscale, focusShift, focusShiftY);
+          updateCloud(cam.vp, cam.eye, globeSpin, morph, cvs.clientWidth, cvs.clientHeight);
+          const core = coreRef.current;
+          if (core) {
+            // pin to the globe's near-hemisphere front point (camera sits on −z, so front = cz − r)
+            const fp = projectToScreen(cam.vp, GLOBE.cx, GLOBE.cy, GLOBE.cz - GLOBE.r, cvs.clientWidth, cvs.clientHeight);
+            const cop = 1 - smooth(0.0, 0.22, morph); // fades out the instant the assembly starts
+            core.style.transform =
+              `translate3d(${fp.x.toFixed(1)}px, ${fp.y.toFixed(1)}px, 0) translate(-50%, -50%)`;
+            core.style.opacity = (fp.visible ? cop : 0).toFixed(3);
+            core.style.pointerEvents = !enteredRef.current && cop > 0.5 ? "auto" : "none";
+          }
+        } else if (cloudRef.current) {
+          cloudRef.current.style.visibility = "hidden"; // mountain is whole — drop the cloud
+          if (coreRef.current) { coreRef.current.style.opacity = "0"; coreRef.current.style.pointerEvents = "none"; }
+        }
+        updateSurvey(yaw, pitch, t, dt, rscale, focusShift, focusShiftY);
         raf = requestAnimationFrame(frame);
       };
       raf = requestAnimationFrame(frame);
@@ -850,10 +1056,28 @@ export default function RidgelineStage() {
 
   return (
     <div
-      className={`ridge-stage${overlayOpen ? " is-overlay-open" : ""}`}
+      className={`ridge-stage${overlayOpen ? " is-overlay-open" : ""}${entered ? "" : " is-globe"}`}
       id="home"
     >
       <canvas id="ridge" ref={canvasRef} />
+
+      {/* the intro "ball of letters" — real career words projected onto the spinning globe
+          and co-rotated with the GPU lines, written imperatively from the rAF loop. Decorative
+          fragments swarm then sink into the terrain; the seven role·company labels fly to their
+          ring anchors and hand off to the survey. aria-hidden: the survey carries the readable
+          copy once the mountain forms; this is the same words mid-flight. */}
+      <div className="ridge-cloud" ref={cloudRef} aria-hidden="true">
+        <ul className="cloud-proto-list">
+          {CLOUD_PROTAGONISTS.map((txt, k) => (
+            <li className="cloud-proto" key={`cp-${k}`}>{txt}</li>
+          ))}
+        </ul>
+        <ul className="cloud-decor-list">
+          {CLOUD_DECOR.map((txt, k) => (
+            <li className="cloud-decor" key={`cd-${k}`}>{txt}</li>
+          ))}
+        </ul>
+      </div>
       {/* B1 surveyor callouts — projected + revealed imperatively from the rAF
           loop. pointer-events:none so a drag still orbits the canvas beneath. */}
       <div className="ridge-survey" ref={overlayRef} aria-label="Career stations">
@@ -904,6 +1128,28 @@ export default function RidgelineStage() {
         <span className="beacon-label" aria-hidden="true">
           Your assignment?
         </span>
+      </button>
+
+      {/* the globe's CORE — a glass benchmark disc welded to the front of the rotating ball
+          (its transform/opacity are written each frame by the rAF loop). Clicking it (or
+          tapping/pressing anywhere on the ball) assembles the lines & letters into the mountain.
+          Made inert once the climb begins so focus never lands on it behind the formed scene. */}
+      <button
+        type="button"
+        className="ridge-core"
+        ref={coreRef}
+        onClick={() => enterRef.current()}
+        aria-label="Enter — assemble the mountain of experience"
+        aria-hidden={entered || undefined}
+        tabIndex={entered ? -1 : 0}
+      >
+        <span className="core-disc" aria-hidden="true">
+          <svg className="core-glyph" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M3 19L10 8l4 6 2.5-3.5L21 19Z" fill="currentColor" stroke="none" />
+          </svg>
+        </span>
+        <span className="core-ring" aria-hidden="true" />
+        <span className="core-label" aria-hidden="true">Enter</span>
       </button>
 
       {/* "drag to rotate" affordance — a curved arrow that rocks back and forth so
