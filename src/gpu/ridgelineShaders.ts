@@ -260,7 +260,99 @@ struct VsOut {
   // lower slopes, exactly as in the reference still (kept under full white so the
   // erosion texture still reads on the snow rather than blowing out)
   let snowFill = snow * snow * (0.24 + 0.46 * diff);
-  var c = lum + snowFill;                          // the base surface
+  var c = lum + snowFill;                          // the base surface (the CONTOUR MODEL)
+
+  // ============================================================================
+  //  HALF-REALISTIC REVEAL — an animated vertical seam sweeps across the massif,
+  //  dissolving the white-on-black CONTOUR MODEL (left / not-yet-reached) into a
+  //  lit, greyscale ROCK & SNOW render (right / in the wake): a "digital 3D model
+  //  turning into a real mountain", kept on the same black sky. The seam is
+  //  SCREEN-LOCKED so it reads as a true vertical line at every framing (drive the
+  //  front from i.wpos.x instead of screenX01 to make it track the orbit instead).
+  //  SCREEN X is i.pos.x (VsOut.pos IS @builtin(position) = framebuffer pixels) —
+  //  do NOT add a @builtin(position) param, that duplicates the builtin and fails
+  //  to compile. Designed + adversarially WGSL-reviewed via a fan-out workflow.
+  // ----------------------------------------------------------------------------
+  let screenX01 = i.pos.x / F.a.y;                 // 0 at the left edge -> 1 at the right edge of the (supersampled) target
+  // focus calm: 1 while free (sweep alive), eased to 0 as a slice is focused so the
+  // dossier settles to the stable contour schematic it was designed against.
+  let calm = 1.0 - smoothstep(0.0, 1.0, clamp(F.hov.w, 0.0, 1.0));
+  // ping-pong PHASE from unbounded time via cos() (no fract precision drift at large t)
+  let SWEEP_W = 0.52;                              // rad/s -> ~12.1s for a full there-and-back cycle
+  let ph = 0.5 - 0.5 * cos(F.a.x * SWEEP_W);       // 0 -> 1 -> 0, symmetric, smooth turn-arounds
+  let dwelled = smoothstep(0.08, 0.92, ph);        // gentle symmetric ease + a soft rest at BOTH ends (no latch)
+  let eased = dwelled * dwelled * (3.0 - 2.0 * dwelled);   // smootherstep S-curve, still symmetric
+  // wavefront position: eased 0 -> seam off the RIGHT (all contour model); eased 1 ->
+  // seam off the LEFT (all realistic). The seam recedes right->left and the render
+  // fills in behind it. Over-scan past both edges (-0.10..1.10) so the seam fully clears.
+  let travel = mix(1.10, -0.10, eased);
+  let front = mix(1.10, travel, calm);             // calm=0 (focused) parks it at 1.10 = all contour model, frozen
+  let band = mix(0.012, 0.090, calm);              // transition half-width; wider while free so the moving seam is soft
+  // real = 0 LEFT of the seam (contour model — "left stays the model"), 1 to the RIGHT
+  // in its wake (the shaded render); smooth across the band.
+  let real = smoothstep(front - band, front + band, screenX01);
+  // materialization BEAM: a SLIM crisp core + a faint soft halo, given its OWN narrow width
+  // (independent of the wider model<->real blend band) so the light edge stays thin and
+  // graphic rather than a broad wash. Both killed when focused.
+  let beamDist = abs(screenX01 - front);
+  let beamCore = 1.0 - smoothstep(0.0, 0.0075, beamDist);   // crisp slim core (~6px half-width @ 820)
+  let beamHalo = 1.0 - smoothstep(0.0, 0.048, beamDist);    // faint, soft halo around the core
+  let seamLive = beamCore * calm;
+  let haloLive = beamHalo * calm;
+
+  // ---- REALISTIC ROCK & SNOW SURFACE (greyscale scalar cReal) ----------------
+  // All heavy noise gated behind (real > 0.001) so pure-contour fragments pay only
+  // the cheap sweep math above. Reuses n, L, diff, V, rim, hN already computed.
+  // === DENSE FINE TOPOGRAPHIC WEAVE — the crisp detail the soft shaded version lacked.
+  //     Constant-elevation contours DRAPED on the 3D form (so they wrap the peak like a
+  //     survey map, not flat screen bands), heavily domain-warped by the erosion field so
+  //     they weave like the reference, at FINE spacing for dense detail. Crisp via fwidth,
+  //     dissolved where they project tighter than a pixel (anti-moire). Computed in UNIFORM
+  //     control flow (fwidth requires it) and only USED on the realistic side below. ===
+  let lnWarp = (fbm(vec2<f32>(i.wpos.x * 0.00095, i.wpos.z * 0.00115) + 5.0) - 0.5) * 150.0
+             + (ridged(vec2<f32>(i.wpos.x * 0.0040, i.wpos.z * 0.0030) + 9.0) - 0.40) * 85.0;
+  let LINE_SP = 24.0;                              // world units between fine contour lines (very dense)
+  let cv = (i.wy + lnWarp) / LINE_SP;
+  let aaw = max(fwidth(cv), 1e-5);
+  var lines = (1.0 - smoothstep(0.0, aaw * 1.05, 0.5 - abs(fract(cv) - 0.5)))   // crisp thin AA lines
+            * (1.0 - smoothstep(0.55, 1.30, aaw));                              // dissolve where too tight (anti-moire)
+  let cv2 = cv * 2.0;                              // a finer harmonic (half spacing) so it reads dense up close
+  let aaw2 = aaw * 2.0;                            // = fwidth(cv2); no second derivative call
+  var fine = (1.0 - smoothstep(0.0, aaw2 * 1.1, 0.5 - abs(fract(cv2) - 0.5)))
+           * (1.0 - smoothstep(0.55, 1.30, aaw2));
+
+  var cReal = 0.0;
+  if (real > 0.001) {
+    let ndl = clamp(dot(n, L), 0.0, 1.0);          // key light
+    let slopeUp = clamp(n.y, 0.0, 1.0);            // 1 on flat/up-faces -> 0 on vertical cliffs
+    // --- ragged snow line: high elevation AND shallow up-slope ---
+    let snowNoise = fbm(vec2<f32>(i.wpos.x * 0.0016, i.wpos.z * 0.0014) + 31.0);
+    let snowMask = clamp(smoothstep(0.34, 0.60, hN + (snowNoise - 0.5) * 0.14)
+                       * smoothstep(0.26, 0.66, slopeUp), 0.0, 1.0);
+    // --- HIGH-CONTRAST tonal relief base: near-black rock, brighter snow, shaped by the
+    //     key, with deep crevice darkening so gullies pool to black (no soft clay) ---
+    let crev = clamp(ridged(vec2<f32>(i.wpos.x * 0.0044, i.wpos.z * 0.0017) + 19.0), 0.0, 1.0);
+    let rockTone = 0.03 + 0.15 * ndl;              // dark rock; lit faces lift just a touch
+    let snowTone = 0.20 + 0.52 * ndl;              // snow much brighter under the key
+    let base = mix(rockTone, snowTone, snowMask) * (0.40 + 0.60 * smoothstep(0.08, 0.55, crev));
+    // line luminance: bright, lifted by the key + snow so the weave itself models the relief
+    // (brighter where lit, sinking into shadow) — kept mostly under the 0.82 bloom threshold
+    // so the lines stay CRISP; only summit snow lines glow a little.
+    let lineLum = mix(0.40 + 0.42 * ndl, 0.98, snowMask);
+    var surf = base + lines * lineLum + fine * lineLum * 0.35;   // dark tonal relief + bright fine weave
+    surf = surf + rim * (0.10 + 0.26 * snowMask);  // grazing ridge light against the black sky
+    let depthF = smoothstep(ZN, ZF * 0.9, i.wpos.z);
+    let lowF = 1.0 - smoothstep(0.05, 0.30, hN);
+    let recess = clamp(depthF * (0.45 + 0.35 * lowF) * (1.0 - snowMask * 0.5), 0.0, 0.75);
+    cReal = surf * (1.0 - recess);                 // bright lines may graze >1 -> a touch of bloom
+  }
+
+  // ---- BLEND model <-> real + the "edge of creation" wavefront ---------------
+  c = mix(c, cReal, real);                          // left of seam = contour model, wake = shaded render, soft band between
+  let snowGuard = 1.0 - 0.6 * clamp(cReal, 0.0, 1.0);    // don't over-bloom where the surface is already bright
+  // slim bright core (squared -> a tight, clean centre) + a delicate halo; the bloom pass
+  // turns the hot core into a soft glow on its own, so the explicit halo stays subtle.
+  c = c + (seamLive * seamLive * 0.80 + haloLive * haloLive * 0.09) * snowGuard;
 
   // ---- hover wash: when the pointer rests on a career callout, ITS slice of the
   // massif lifts in a soft, breathing pulse (amplitude driven from RidgelineStage).
