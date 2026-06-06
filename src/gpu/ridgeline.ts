@@ -26,7 +26,6 @@ import {
   BRIGHT_WGSL,
   BLUR_WGSL,
 } from "./ridgelineShaders";
-import { STATIONS } from "../data/stations";
 
 const HDR: GPUTextureFormat = "rgba16float";
 
@@ -38,17 +37,16 @@ export const GLOBE = { cx: 0, cy: 2120, cz: 8200, r: 3600 } as const;
 export const GLOBE_SPIN_RATE = 0.16; // rad/s — the planet's slow idle rotation (0 on reduced-motion)
 export const MORPH_DUR = 2.6;        // s — globe → mountain assembly (shortened on reduced-motion)
 
-/* ---- letter-cloud content, drawn from the real career record (data/stations.ts): the seven
-   role + company labels are PROTAGONISTS (index k ↔ STATIONS[k]; they fly to their ring anchor
-   and hand off to the survey as the mountain forms). The rest of the record is DECOMPOSED into
-   individual CHARACTERS scattered THROUGH the globe volume at many radii (see CLOUD_CHARS below) —
-   the "ball of letters" mixed in among the lines, rather than whole words pasted on the shell.
-   Deterministic order (no Math.random) so the layout is stable across re-measures / StrictMode
-   remounts. ---------------------------- */
-export const CLOUD_PROTAGONISTS = STATIONS.map((s) => `${s.role} · ${s.company}`);
+/* ---- letter-cloud content, drawn from the real career record (data/stations.ts): the record is
+   DECOMPOSED into individual CHARACTERS scattered THROUGH the globe volume at many radii (see
+   CLOUD_CHARS below) — the "ball of letters" mixed in among the filament lines, rather than whole
+   words pasted on the shell. (The old whole-word role·company labels were removed so the globe
+   reads purely as a tangle of lines + loose letters.) Deterministic order (a seeded PRNG, never the
+   built-in randomness) so the layout is stable across re-measures / StrictMode remounts. ------ */
 
-/** Even unit directions on a sphere (Fibonacci lattice). `phase` spins the whole set so two
- *  lattices (protagonists, decor) interleave rather than overlap. Returns a flat xyz array. */
+/** Even unit directions on a sphere (Fibonacci lattice). `phase` spins the whole set so separate
+ *  lattices (the filament nodes, the letter cloud, the spokes) interleave rather than overlap.
+ *  Returns a flat xyz array. */
 function fibSphere(n: number, phase: number): Float32Array {
   const out = new Float32Array(n * 3);
   const golden = Math.PI * (3 - Math.sqrt(5));
@@ -62,13 +60,12 @@ function fibSphere(n: number, phase: number): Float32Array {
   }
   return out;
 }
-export const protagonistBaseDirs = (): Float32Array => fibSphere(CLOUD_PROTAGONISTS.length, 1.7);
 
 /* ---- DECOMPOSED character cloud: short, curated signatures from the record (companies, cities,
    tools/standards, years), broken into individual CHARACTERS and scattered through the globe's
    VOLUME at many radii so glyphs float in among the filaments at every depth. Each token also
    carries the career station (ring) its characters rain toward as the mountain forms. Curated
-   short so the per-frame DOM-write budget stays modest (~128 chars + 7 protagonists). ------- */
+   short so the per-frame DOM-write budget stays modest (~128 individual character spans). ------- */
 const CLOUD_CHAR_TOKENS: ReadonlyArray<{ text: string; ring: number }> = [
   { text: "STEGRA", ring: 0 }, { text: "STOCKHOLM", ring: 0 }, { text: "2025", ring: 0 },
   { text: "ISO19650", ring: 2 },
@@ -128,22 +125,31 @@ export const CLOUD_CHARS: string[] = CHAR_CLOUD.chars;
    like the letter lattice. Vertex = (x,y,z material dir, t, seed, brightness,
    radial shell) → 7 floats; stride 28 B, matching the pipeline's attributes. ---- */
 export const FILAMENT_FLOATS_PER_VERT = 7;
-const FIL_NODES = 42;       // bright convergence points (Fibonacci lattice)
+const FIL_NODES = 48;       // bright convergence points (Fibonacci lattice)
 const FIL_PER_NODE = 24;    // threads spun out from each node
 const FIL_STEPS = 28;       // points sampled per thread
 const FIL_STEP_ANG = 0.082; // radians advanced per step → a long sweeping arc (~2.2 rad)
 const FIL_SPARKS = 5;       // short bright segments crossing each surface node
-// nested radial shells the curl threads inhabit (a thread is assigned one by f % 3) so the ball
-// reads as a layered VOLUME of filaments rather than the old single thin 0.88..1.0 crust.
-const FIL_SHELLS = [0.6, 0.8, 0.98] as const;
-const CORE_TRAIL_FRAC = 0.4;  // fraction of curl threads that DIVE inward to the core near their tip
+// nested radial shells the curl threads inhabit (a thread is assigned one by f % FIL_SHELLS.length)
+// so the ball reads as a deep, LAYERED VOLUME of filaments — five shells from the deep interior
+// (0.34) out to the crust (1.0), the layered "well" the eye can fall into.
+const FIL_SHELLS = [0.34, 0.52, 0.7, 0.86, 1.0] as const;
+const CORE_TRAIL_FRAC = 0.46; // fraction of curl threads that DIVE inward to the core near their tip
 const SPOKE_COUNT = 64;       // radial sight-lines from the nucleus out to the rim (the armature)
 const SPOKE_DASHES = 8;       // dash segments per spoke (read as travelling measurement ticks)
-const NUCLEUS_SPARKS = 56;    // short crossing sparks forming the glowing core AT the centre
+const NUCLEUS_SPARKS = 96;    // short crossing sparks forming the glowing core AT the centre
+// ---- THE DEEP ORRERY additions: interior dust filling the void between shells, counter-precessing
+// great-circle gimbal rings, and a slow halo orbiting the nucleus — all riding the EXISTING sentinel
+// classes so the morph (drain/lift/fade) is untouched and the morph=1 mountain stays byte-identical.
+const MOTE_COUNT = 3600;      // interior dust specks filling the void BETWEEN the shells (class [0,1))
+const RING_COUNT = 14;        // great-circle gimbal rings that counter-precess (armature, class [1,2))
+const RING_SEGS = 132;        // segments per gimbal ring (smooth at globe scale)
+const HALO_SEGS = 96;         // segments per nucleus orbital-halo ring (class [2,3))
 // the line CLASS is encoded as a sentinel range in the `seed` float (at.y), read in the VS via
-// step()/fract(): curl threads + surface sparks use seed ∈ [0,1) (organic, flows), radial spokes
-// use [1,2) (rigid armature), the nucleus uses [2,3) (the core that lifts to the summit). The
-// FRACTIONAL part stays the per-line phase seed the flow/twinkle math has always used.
+// step()/fract(): curl threads + surface sparks + interior MOTES use seed ∈ [0,1) (organic, flows),
+// radial spokes + great-circle RINGS use [1,2) (rigid armature — a ring is flagged by fract ≥ 0.90),
+// the nucleus + its orbital HALO use [2,3) (the core that lifts to the summit — the halo flagged by
+// radial ≥ 0.12). The FRACTIONAL part stays the per-line phase seed the flow/twinkle math has used.
 
 type V3 = [number, number, number];
 const v3norm = (x: number, y: number, z: number): V3 => {
@@ -207,7 +213,8 @@ export function buildFilamentGeometry(): Float32Array<ArrayBuffer> {
     const base: V3 = [nodes[n * 3], nodes[n * 3 + 1], nodes[n * 3 + 2]];
     for (let f = 0; f < FIL_PER_NODE; f++) {
       const seed = rnd();
-      const shellR = FIL_SHELLS[f % FIL_SHELLS.length] + 0.06 * rnd(); // which depth this thread rides
+      const baseShell = FIL_SHELLS[f % FIL_SHELLS.length]; // which depth this thread rides
+      const shellR = baseShell + 0.05 * baseShell * rnd(); // jitter ∝ depth → crisp inner shells
       const dive = seed < CORE_TRAIL_FRAC; // a core-trail: plunges toward radial 0.12 over its last steps
       // start at the node with a small jitter so the threads don't perfectly overlap
       let d = v3norm(base[0] + rsym() * 0.045, base[1] + rsym() * 0.045, base[2] + rsym() * 0.045);
@@ -250,6 +257,26 @@ export function buildFilamentGeometry(): Float32Array<ArrayBuffer> {
     }
   }
 
+  // ---- INTERIOR MOTE DUST: fine suspended specks filling the void BETWEEN the shells, at every
+  // interior radius, so the well has texture at ALL depths (not just on the crust). Each is a tiny
+  // crossing segment; organic class [0,1) → drains + radial-fades exactly like the silk. The inward
+  // bias (pow > 1) packs the deep interior densest → the "fall into the well" feeling. ----
+  for (let m = 0; m < MOTE_COUNT; m++) {
+    const dir = v3norm(rsym(), rsym(), rsym());
+    const rad = 0.1 + 0.82 * Math.pow(rnd(), 1.35); // 0.10..0.92, biased toward the core
+    const seed = rnd();                             // class [0,1), fract = per-mote phase
+    const len = 0.012 + 0.016 * rnd();              // half-length of the speck (material units)
+    // a tangent crossing axis (Gram–Schmidt against dir) so the speck reads as a tiny crossing
+    const ax: V3 = [rsym(), rsym(), rsym()];
+    const dp = ax[0] * dir[0] + ax[1] * dir[1] + ax[2] * dir[2];
+    const tang = v3norm(ax[0] - dir[0] * dp, ax[1] - dir[1] * dp, ax[2] - dir[2] * dp);
+    const e1 = v3norm(dir[0] + tang[0] * len, dir[1] + tang[1] * len, dir[2] + tang[2] * len);
+    const e2 = v3norm(dir[0] - tang[0] * len, dir[1] - tang[1] * len, dir[2] - tang[2] * len);
+    const b = 0.3 + 0.45 * rnd();                   // faint dust; scintillates in the VS
+    push(e1, 0, seed, b, rad);
+    push(e2, 1, seed, b, rad);
+  }
+
   // ---- CLASS B — RADIAL SIGHT-LINE SPOKES: a rigid armature of dashed rays from the nucleus
   // (radial 0.06) out to the rim (radial 1.0), brightest at the inner end so light reads as
   // emanating FROM the centre. Their own Fibonacci set (not the node dirs) so they form a distinct
@@ -257,7 +284,7 @@ export function buildFilamentGeometry(): Float32Array<ArrayBuffer> {
   const spokeDirs = fibSphere(SPOKE_COUNT, 2.1);
   for (let s = 0; s < SPOKE_COUNT; s++) {
     const dir: V3 = [spokeDirs[s * 3], spokeDirs[s * 3 + 1], spokeDirs[s * 3 + 2]];
-    const sentinel = 1.0 + rnd() * 0.999; // class = spoke; fract() = per-spoke phase seed
+    const sentinel = 1.0 + rnd() * 0.9; // class = spoke; fract ∈ [0,0.90) (the ring flag is ≥ 0.90)
     for (let i = 0; i < SPOKE_DASHES; i++) {
       const u0 = i / SPOKE_DASHES;
       const u1 = (i + 0.7) / SPOKE_DASHES; // 70% dash, 30% gap → a measurement-tick rhythm
@@ -265,6 +292,38 @@ export function buildFilamentGeometry(): Float32Array<ArrayBuffer> {
       const rB = 0.06 + 0.94 * u1;
       push(dir, u0, sentinel, 1.7 + (0.42 - 1.7) * u0, rA);
       push(dir, u1, sentinel, 1.7 + (0.42 - 1.7) * u1, rB);
+    }
+  }
+
+  // ---- GREAT-CIRCLE GIMBAL RINGS: thin bright circles, each tilted on its own Fibonacci axis
+  // (golden angles → they interlock, never co-planar), that COUNTER-PRECESS on their own axis in the
+  // VS (no moved geometry — it's a rotation keyed off the ring's seed). Armature class [1,2) → drains
+  // with the spokes; fract(seed) ∈ [0.90,1.0) flags "ring"; t = angle 0..1 around the circle (drives
+  // the dash scroll). They sit on the crust (radial ≈ 0.97..1.02) so they read as a precise orrery. ----
+  const ringAxes = fibSphere(RING_COUNT, 0.6); // distinct phase from spokeDirs(2.1) → cage & orbits don't align
+  for (let r = 0; r < RING_COUNT; r++) {
+    const nrm = v3norm(ringAxes[r * 3], ringAxes[r * 3 + 1], ringAxes[r * 3 + 2]);
+    // orthonormal in-plane basis (u, v) spanning the great-circle plane (robust ref avoids degeneracy)
+    const ref: V3 = Math.abs(nrm[1]) < 0.92 ? [0, 1, 0] : [1, 0, 0];
+    const dp = ref[0] * nrm[0] + ref[1] * nrm[1] + ref[2] * nrm[2];
+    const u = v3norm(ref[0] - nrm[0] * dp, ref[1] - nrm[1] * dp, ref[2] - nrm[2] * dp);
+    const v: V3 = [ // v = nrm × u (already unit)
+      nrm[1] * u[2] - nrm[2] * u[1],
+      nrm[2] * u[0] - nrm[0] * u[2],
+      nrm[0] * u[1] - nrm[1] * u[0],
+    ];
+    const ringR = 0.97 + 0.05 * rnd();              // 0.97..1.02 — a crisp band of orbits on the crust
+    const sentinel = 1.0 + (0.9 + 0.0999 * rnd());  // class = arm, fract ∈ [0.90,1.0) → "ring"
+    let prev: V3 | null = null, prevT = 0;
+    for (let s = 0; s <= RING_SEGS; s++) {
+      const a = (s / RING_SEGS) * Math.PI * 2;
+      const ca = Math.cos(a), sa = Math.sin(a);
+      const d = v3norm(u[0] * ca + v[0] * sa, u[1] * ca + v[1] * sa, u[2] * ca + v[2] * sa);
+      const t = s / RING_SEGS;                      // 0..1 around the ring → drives the dash scroll
+      // a faint base ring with periodic brighter "graduation" marks (a calibrated scale cue)
+      const grad = 0.32 + 0.26 * Math.pow(0.5 + 0.5 * Math.cos(t * Math.PI * 2 * 16), 6);
+      if (prev) { push(prev, prevT, sentinel, grad, ringR); push(d, t, sentinel, grad, ringR); }
+      prev = d; prevT = t;
     }
   }
 
@@ -278,6 +337,33 @@ export function buildFilamentGeometry(): Float32Array<ArrayBuffer> {
     const sentinel = 2.0 + rnd() * 0.999;
     push([-dir[0], -dir[1], -dir[2]], 0, sentinel, 3.0, rad); // one side of the crossing…
     push(dir, 1, sentinel, 3.0, rad);                          // …to the other, through the centre
+  }
+
+  // ---- NUCLEUS ORBITAL HALO: a bright slow ring just outside the core (radial ~0.16) — gives the
+  // luminous heart visible scale + a spin cue read against the still spokes. Nucleus class [2,3) →
+  // lifts to the summit AND fades with the core (never outlives 0.70). Two slightly tilted rings,
+  // riding radial ≈ 0.155..0.18 so the VS flags them distinct from the < 0.10 core sparks. ----
+  for (let ring = 0; ring < 2; ring++) {
+    const axis = v3norm(0.3 + 0.5 * ring, 1.0, 0.2 - 0.4 * ring); // deterministic, distinct tilt per ring
+    const ref: V3 = Math.abs(axis[1]) < 0.92 ? [0, 1, 0] : [1, 0, 0];
+    const dp = ref[0] * axis[0] + ref[1] * axis[1] + ref[2] * axis[2];
+    const u = v3norm(ref[0] - axis[0] * dp, ref[1] - axis[1] * dp, ref[2] - axis[2] * dp);
+    const v: V3 = [
+      axis[1] * u[2] - axis[2] * u[1],
+      axis[2] * u[0] - axis[0] * u[2],
+      axis[0] * u[1] - axis[1] * u[0],
+    ];
+    const haloR = 0.155 + 0.025 * ring;             // 0.155 / 0.180 — distinct from the <0.10 core sparks
+    const sentinel = 2.0 + rnd() * 0.999;           // nucleus class; fract = phase
+    let prev: V3 | null = null, prevT = 0;
+    for (let s = 0; s <= HALO_SEGS; s++) {
+      const a = (s / HALO_SEGS) * Math.PI * 2;
+      const c = Math.cos(a), sn = Math.sin(a);
+      const d = v3norm(u[0] * c + v[0] * sn, u[1] * c + v[1] * sn, u[2] * c + v[2] * sn);
+      const t = s / HALO_SEGS;
+      if (prev) { push(prev, prevT, sentinel, 1.9, haloR); push(d, t, sentinel, 1.9, haloR); }
+      prev = d; prevT = t;
+    }
   }
 
   return new Float32Array(out);

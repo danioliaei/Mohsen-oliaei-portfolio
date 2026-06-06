@@ -150,18 +150,36 @@ nav a:hover::after {
 
 @media (max-width: 760px) {
   header {
-    padding: 15px 16px;
+    padding: 15px 14px;
   }
   nav {
-    gap: 13px;
+    gap: 11px;
   }
-  /* tighten the tracked caps so wordmark + four links share the narrow bar */
+  /* tighten the tracked caps so the wordmark + five links share the narrow bar */
   nav a {
-    font-size: 10px;
-    letter-spacing: 0.07em;
+    font-size: 9.5px;
+    letter-spacing: 0.04em;
   }
   .wordmark {
-    font-size: 17px;
+    font-size: 16px;
+  }
+}
+
+/* the very narrow phones: five nav links + the wordmark only fit with the caps
+   pulled in tighter still (and the wordmark a touch smaller) */
+@media (max-width: 400px) {
+  header {
+    padding: 14px 12px;
+  }
+  nav {
+    gap: 9px;
+  }
+  nav a {
+    font-size: 9px;
+    letter-spacing: 0.02em;
+  }
+  .wordmark {
+    font-size: 15px;
   }
 }
 
@@ -1467,7 +1485,6 @@ canvas#ridge:active {
   pointer-events: none;
   overflow: hidden;
 }
-.cloud-proto-list,
 .cloud-char-list {
   position: absolute;
   inset: 0;
@@ -1475,7 +1492,6 @@ canvas#ridge:active {
   padding: 0;
   list-style: none;
 }
-.cloud-proto,
 .cloud-char {
   position: absolute;
   top: 0;
@@ -1490,11 +1506,6 @@ canvas#ridge:active {
     0 1px 3px rgba(0, 0, 0, 0.75);
   will-change: transform, opacity;
 }
-.cloud-proto {
-  font-size: 14px;
-  font-weight: 600;
-  letter-spacing: 0.005em;
-}
 /* a single decomposed glyph adrift in the volume — a tracked, instrument-like character */
 .cloud-char {
   font-size: 14px;
@@ -1504,129 +1515,12 @@ canvas#ridge:active {
   color: rgba(244, 241, 234, 0.86);
 }
 
-/* ---- the globe's CORE button: a glass benchmark disc welded to the front of the ball ----
-   Its transform + opacity are written each frame by the rAF loop (projected from the globe's
-   near-hemisphere point), so DO NOT put a transform transition on the root — it would fight
-   the per-frame projection. Clicking it (or tapping anywhere on the ball) assembles the
-   mountain. The idle spin/breath lives on the ring + a halo; the press-scale on the disc. */
-.ridge-core {
-  position: absolute;
-  top: 0;
-  left: 0;
-  z-index: 7;
-  display: grid;
-  place-items: center;
-  width: 92px; /* generous target; the visible disc is inset */
-  height: 92px;
-  padding: 0;
-  border: 0;
-  background: none;
-  cursor: pointer;
-  opacity: 0; /* the loop eases this in once the front of the globe is projected */
-  pointer-events: none; /* the loop flips to auto while the core is visible */
-  will-change: transform, opacity;
-  -webkit-tap-highlight-color: transparent;
-}
-/* a soft breathing glow behind the disc (its own layer so a hover glow can override it) */
-.ridge-core::before {
-  content: "";
-  position: absolute;
-  z-index: -1;
-  width: 64px;
-  height: 64px;
-  border-radius: 50%;
-  pointer-events: none;
-  box-shadow: 0 0 0 0 rgba(244, 241, 234, 0);
-  animation: core-breath 4.6s 0.3s ease-in-out infinite;
-}
-.core-disc {
-  position: relative;
-  display: grid;
-  place-items: center;
-  width: 64px;
-  height: 64px;
-  border-radius: 50%;
-  border: 1px solid rgba(244, 241, 234, 0.4);
-  background: radial-gradient(
-    122% 122% at 50% 32%,
-    rgba(244, 241, 234, 0.18),
-    rgba(8, 9, 12, 0.5) 72%
-  );
-  -webkit-backdrop-filter: blur(9px) saturate(1.05);
-  backdrop-filter: blur(9px) saturate(1.05);
-  color: rgba(244, 241, 234, 0.95);
-  box-shadow:
-    0 8px 30px rgba(0, 0, 0, 0.5),
-    inset 0 1px 0 rgba(255, 255, 255, 0.08);
-  transition:
-    border-color 0.3s ease,
-    box-shadow 0.3s ease,
-    transform 0.4s cubic-bezier(0.22, 1, 0.36, 1);
-}
-/* the peak glyph — a little mountain, the very thing the ball is about to become */
-.core-glyph {
-  width: 30px;
-  height: 30px;
-  transform: translateY(1px);
-  filter: drop-shadow(0 1px 6px rgba(0, 0, 0, 0.6));
-}
-/* a slowly-rotating dashed sighting ring — the instrument cue that the core is live */
-.core-ring {
-  position: absolute;
-  inset: -7px;
-  border-radius: 50%;
-  border: 1px dashed rgba(244, 241, 234, 0.24);
-  pointer-events: none;
-  animation: core-ring-spin 16s linear infinite;
-}
-/* the label, set toward the lower face of the disc (clear of the wordmark/nav above) */
-.core-label {
-  position: absolute;
-  top: calc(50% + 50px);
-  left: 50%;
-  transform: translateX(-50%);
-  white-space: nowrap;
-  font-family: var(--sans);
-  font-size: 10.5px;
-  font-weight: 600;
-  letter-spacing: 0.3em;
-  text-transform: uppercase;
-  color: rgba(244, 241, 234, 0.9);
-  text-shadow: 0 1px 10px rgba(0, 0, 0, 0.7);
-}
-.ridge-core:hover .core-disc,
-.ridge-core:focus-visible .core-disc {
-  border-color: rgba(244, 241, 234, 0.72);
-  box-shadow:
-    0 10px 34px rgba(0, 0, 0, 0.5),
-    inset 0 1px 0 rgba(255, 255, 255, 0.1),
-    0 0 26px 2px rgba(244, 241, 234, 0.16);
-}
-.ridge-core:hover .core-ring,
-.ridge-core:focus-visible .core-ring {
-  border-color: rgba(244, 241, 234, 0.5);
-}
-.ridge-core:active .core-disc {
-  transform: scale(0.95);
-}
-@keyframes core-ring-spin {
-  to { transform: rotate(360deg); }
-}
-@keyframes core-breath {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(244, 241, 234, 0); }
-  50% { box-shadow: 0 0 24px 3px rgba(244, 241, 234, 0.13); }
-}
-
-/* during the globe intro, suppress the orbit "drag to rotate" hint (the core "Enter" is the
-   one call to action); it returns for the mountain once the climb has begun. animation:none
-   first so the plain opacity:0 wins over the entrance animation's fill. */
+/* on the Home (globe) view, suppress the orbit "drag to rotate" hint — there is nothing to
+   orbit yet and a tap ANYWHERE on the ball assembles the mountain (the CV view). It returns
+   for the mountain once the climb begins. animation:none first so the plain opacity:0 wins
+   over the entrance animation's fill. */
 .ridge-stage.is-globe .ridge-hint {
   animation: none;
   opacity: 0;
   pointer-events: none;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .ridge-core::before { animation: none; box-shadow: 0 0 16px 1px rgba(244, 241, 234, 0.1); }
-  .core-ring { animation: none; }
 }
