@@ -995,6 +995,7 @@ export default function RidgelineStage() {
           pitch,
           morph,
           globeSpin,
+          motion: reduceMotion ? 0 : 1,
           hoverBand: landed ? shownBand : -1,
           hoverGlow: landed ? hoverGlow : 0,
           focusBand: landed ? focusBand : -1,
