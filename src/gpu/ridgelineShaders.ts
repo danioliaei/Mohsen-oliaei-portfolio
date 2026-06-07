@@ -26,6 +26,7 @@ struct Frame {
   eye  : vec4<f32>,   // xyz camera eye (world), w unused
   hov  : vec4<f32>,   // x hovered slice index (-1 none), y pulse 0..1, zw unused
   mph  : vec4<f32>,   // x morph 0..1 (0 = intro globe, 1 = finished mountain), y globeSpin (rad), z motion, w projAmt (0 = globe chaos … 1 = dial-calm)
+  lod  : vec4<f32>,   // x contour-spacing scale (1 = desktop; >1 on phones widens the spacing → fewer lines), yzw unused
 };
 @group(0) @binding(0) var<uniform> F : Frame;
 `;
@@ -266,7 +267,7 @@ struct VsOut {
   // signature stacked profiles stay painted on the surface and glued to the same
   // ground as the camera orbits. These are the quiet texture the survey RINGS are
   // cut across (head-on they read as horizontal bands; from the flank, obliquely).
-  let Z_STEP = 66.0;                          // world units between scan-lines
+  let Z_STEP = 66.0 * F.lod.x;                // world units between scan-lines (×F.lod.x — wider/fewer on phone)
   let f = i.wpos.z / Z_STEP;
   let dist = 0.5 - abs(fract(f) - 0.5);       // 0 on a line, 0.5 between
   let aa = max(fwidth(f), 1e-5);
@@ -376,7 +377,7 @@ struct VsOut {
   //     control flow (fwidth requires it) and only USED on the realistic side below. ===
   let lnWarp = (fbm(vec2<f32>(i.wpos.x * 0.00095, i.wpos.z * 0.00115) + 5.0) - 0.5) * 150.0
              + (ridged(vec2<f32>(i.wpos.x * 0.0040, i.wpos.z * 0.0030) + 9.0) - 0.40) * 85.0;
-  let LINE_SP = 24.0;                              // world units between fine contour lines (very dense)
+  let LINE_SP = 24.0 * F.lod.x;                    // world units between fine contour lines (×F.lod.x — fewer on phone)
   let cv = (i.wy + lnWarp) / LINE_SP;
   let aaw = max(fwidth(cv), 1e-5);
   var lines = (1.0 - smoothstep(0.0, aaw * 1.05, 0.5 - abs(fract(cv) - 0.5)))   // crisp thin AA lines

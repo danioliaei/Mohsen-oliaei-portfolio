@@ -173,7 +173,11 @@ function v3rot(v: V3, k: V3, a: number): V3 {
 }
 
 /** Build the filament line-list. Returns the flat vertex buffer. */
-export function buildFilamentGeometry(): Float32Array<ArrayBuffer> {
+export function buildFilamentGeometry(phone = false): Float32Array<ArrayBuffer> {
+  // on phones, spin fewer threads per node and fewer interior motes (a lighter tangle,
+  // less additive overdraw) — the rest of the armature (nodes, spokes, rings) is untouched
+  const perNode = phone ? PHONE_FIL_PER_NODE : FIL_PER_NODE;
+  const moteCount = phone ? PHONE_MOTE_COUNT : MOTE_COUNT;
   // mulberry32 — a tiny deterministic PRNG (stable layout, no Math.random)
   let st = 0x1a2b3c4d >>> 0;
   const rnd = (): number => {
@@ -212,7 +216,7 @@ export function buildFilamentGeometry(): Float32Array<ArrayBuffer> {
   // the organic tangle physically converges on the centre rather than floating as a hollow crust.
   for (let n = 0; n < FIL_NODES; n++) {
     const base: V3 = [nodes[n * 3], nodes[n * 3 + 1], nodes[n * 3 + 2]];
-    for (let f = 0; f < FIL_PER_NODE; f++) {
+    for (let f = 0; f < perNode; f++) {
       const seed = rnd();
       const baseShell = FIL_SHELLS[f % FIL_SHELLS.length]; // which depth this thread rides
       const shellR = baseShell + 0.05 * baseShell * rnd(); // jitter ∝ depth → crisp inner shells
@@ -262,7 +266,7 @@ export function buildFilamentGeometry(): Float32Array<ArrayBuffer> {
   // interior radius, so the well has texture at ALL depths (not just on the crust). Each is a tiny
   // crossing segment; organic class [0,1) → drains + radial-fades exactly like the silk. The inward
   // bias (pow > 1) packs the deep interior densest → the "fall into the well" feeling. ----
-  for (let m = 0; m < MOTE_COUNT; m++) {
+  for (let m = 0; m < moteCount; m++) {
     const dir = v3norm(rsym(), rsym(), rsym());
     const rad = 0.1 + 0.82 * Math.pow(rnd(), 1.35); // 0.10..0.92, biased toward the core
     const seed = rnd();                             // class [0,1), fract = per-mote phase
@@ -389,6 +393,21 @@ const WORLD_H_MAX = 5000; // height that normalises to "full snow" in the shader
 // only governs surface fidelity, not how many contour lines appear.
 const NX = 760;
 const NZ = 420;
+
+/* ---- PHONE RENDER PROFILE (tunable) -------------------------------------------------
+   Small / touch viewports trade GEOMETRY for SHARPER lines: a lighter terrain mesh +
+   thinner globe + wider contour spacing free the GPU budget so the phone can render at a
+   higher DPR (set in RidgelineStage.resize + scCap below) without the thermal throttle the
+   on-device telemetry caught (see TELEMETRY.md). Detected ONCE at scene construction (a
+   phone stays a phone); desktop keeps the full-fat path. Dial these to taste. */
+const phoneRender = (): boolean =>
+  typeof matchMedia === "function" &&
+  (matchMedia("(pointer: coarse)").matches || matchMedia("(max-width: 860px)").matches);
+const PHONE_NX = 520, PHONE_NZ = 290;  // terrain mesh LOD (vs 760×420 → ~150k tris, ~76% fewer — TBDR vertex/binning win; contour LINES are shader-drawn so density is unchanged)
+const PHONE_FIL_PER_NODE = 18;         // globe curl-threads per node (vs 24 → a lighter tangle, less additive overdraw)
+const PHONE_MOTE_COUNT = 2400;         // globe interior dust motes (vs 3600)
+const PHONE_LINE_SCALE = 1.25;         // contour spacing ×: 1 = desktop, 1.25 ≈ 20% fewer lines on the mountain (F.lod.x)
+const PHONE_SC_CAP = 2.5;              // HDR scene supersample cap (vs 2 → crisper hairlines at the higher phone DPR)
 
 /** Per-frame inputs from the stage (orbit offsets + clock). */
 export interface RidgeFrame {
@@ -824,6 +843,9 @@ export class RidgelineScene {
   private rh = 1;
   private sc = 1;
   private dprUsed = 1;
+  // phone render profile (set once in the constructor from phoneRender()):
+  private lineScale = 1; // contour-spacing scale fed to the shader as F.lod.x
+  private scCap = 2;     // HDR scene supersample cap (raised on phones for sharper hairlines)
 
   // ---- perf telemetry counters (read by the ?perf=1 harness via info(); set
   // each render() — three integer writes, no cost when the harness isn't watching)
@@ -853,19 +875,27 @@ export class RidgelineScene {
       addressModeV: "clamp-to-edge",
     });
 
-    // ---- static terrain grid (uv + indices), built once ----
-    const verts = new Float32Array((NX + 1) * (NZ + 1) * 2);
+    // ---- phone render profile: a lighter mesh + thinner globe + wider contours, paid
+    // back as a higher render DPR (sharper lines). Resolved once here at construction. ----
+    const phone = phoneRender();
+    this.lineScale = phone ? PHONE_LINE_SCALE : 1;
+    this.scCap = phone ? PHONE_SC_CAP : 2;
+    const nx = phone ? PHONE_NX : NX;
+    const nz = phone ? PHONE_NZ : NZ;
+
+    // ---- static terrain grid (uv + indices), built once at the active LOD ----
+    const verts = new Float32Array((nx + 1) * (nz + 1) * 2);
     let p = 0;
-    for (let j = 0; j <= NZ; j++)
-      for (let i = 0; i <= NX; i++) {
-        verts[p++] = i / NX;
-        verts[p++] = j / NZ;
+    for (let j = 0; j <= nz; j++)
+      for (let i = 0; i <= nx; i++) {
+        verts[p++] = i / nx;
+        verts[p++] = j / nz;
       }
-    const idx = new Uint32Array(NX * NZ * 6);
+    const idx = new Uint32Array(nx * nz * 6);
     let q = 0;
-    const stride = NX + 1;
-    for (let j = 0; j < NZ; j++)
-      for (let i = 0; i < NX; i++) {
+    const stride = nx + 1;
+    for (let j = 0; j < nz; j++)
+      for (let i = 0; i < nx; i++) {
         const tl = j * stride + i, tr = tl + 1, bl = tl + stride, br = bl + 1;
         idx[q++] = tl; idx[q++] = bl; idx[q++] = tr;
         idx[q++] = tr; idx[q++] = bl; idx[q++] = br;
@@ -882,8 +912,8 @@ export class RidgelineScene {
     });
     d.queue.writeBuffer(this.gridIBO, 0, idx);
 
-    // ---- intro filament-ball line geometry, built once (deterministic) ----
-    const fil = buildFilamentGeometry();
+    // ---- intro filament-ball line geometry, built once (deterministic; lighter on phones) ----
+    const fil = buildFilamentGeometry(phone);
     this.filaVertexCount = fil.length / FILAMENT_FLOATS_PER_VERT;
     this.filaVBO = d.createBuffer({
       size: fil.byteLength,
@@ -1046,8 +1076,8 @@ export class RidgelineScene {
     this.canvas.width = Math.max(1, Math.round(W * dpr));
     this.canvas.height = Math.max(1, Math.round(H * dpr));
     // supersample the HDR scene so the composite box-downsample yields clean,
-    // un-aliased hairlines and ridge silhouettes
-    this.sc = Math.min(dpr * 1.4, 2);
+    // un-aliased hairlines and ridge silhouettes (scCap is raised on phones for extra crispness)
+    this.sc = Math.min(dpr * 1.4, this.scCap);
     const fit = (d.limits.maxTextureDimension2D - 16) / Math.max(W, H, 1);
     this.sc = Math.max(1, Math.min(this.sc, fit));
     this.rw = Math.max(1, Math.round(W * this.sc));
@@ -1134,6 +1164,9 @@ export class RidgelineScene {
     // filament flow (0 on reduced-motion → the web holds still), defaulting to 1. projAmt calms the
     // filaments as the Projects dial opens (globe-only; defaults to 0 → today's chaotic ball).
     u[36] = s.morph ?? 1; u[37] = s.globeSpin ?? 0; u[38] = s.motion ?? 1; u[39] = s.projAmt ?? 0;
+    // lod = (contourScale, _, _, _) — widens the mountain's scan-line + fine-contour spacing on
+    // phones (F.lod.x), so the terrain reads with fewer, cleaner lines. 1.0 on desktop.
+    u[40] = this.lineScale;
     this.g.device.queue.writeBuffer(this.uBuf, 0, u.buffer, 0, 256);
   }
 

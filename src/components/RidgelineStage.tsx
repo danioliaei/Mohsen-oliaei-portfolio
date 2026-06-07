@@ -403,7 +403,12 @@ export default function RidgelineStage() {
       teardown.push(() => gpu.dispose());
 
       const resize = () => {
-        const dpr = Math.min(window.devicePixelRatio || 1, 2);
+        // Phone profile: render at a HIGHER DPR (2.5 vs 2) for sharper hairlines — the
+        // lighter terrain mesh + thinner globe + wider contour spacing (see ridgeline.ts
+        // PHONE_* profile) pay back the fill budget. Desktop keeps the 2× cap.
+        const phone =
+          matchMedia("(pointer: coarse)").matches || matchMedia("(max-width: 860px)").matches;
+        const dpr = Math.min(window.devicePixelRatio || 1, phone ? 2.5 : 2);
         gpu.resize(cvs.clientWidth, cvs.clientHeight, dpr);
       };
       resize();
@@ -1519,7 +1524,12 @@ export default function RidgelineStage() {
         // overflows the width — pull the camera further back there so the ball fits comfortably.
         // mirrors the mountain's own zoomBase (radiusScale) aspect term. smooth(0,1,mc)=1 at mc=1
         // ⇒ mix01(globeStart, 1.0, 1) === 1.0 for ANY start, so the mountain dolly is byte-identical.
-        const globeStart = 1.66 + 1.10 * smooth(1.0, 0.5, aspectNow); // ~1.66 wide … ~2.76 portrait — a touch smaller on both
+        // clamp the portrait shrinkage so a tall PHONE renders the globe BIGGER: treat very-tall
+        // aspects as if ~0.66 wide (less camera pull-back ⇒ a closer, bigger globe). Desktop /
+        // landscape (aspect ≥ 0.66) is unchanged, and the morph endpoint stays byte-identical
+        // (smooth(0,0.70,1)=1 at mc=1). Raise the 0.66 floor toward ~0.72 for an even bigger globe
+        // (watch for the ball clipping the screen sides on very-tall phones).
+        const globeStart = 1.66 + 1.10 * smooth(1.0, 0.5, Math.max(aspectNow, 0.66)); // ~1.66 wide … ~2.5 portrait (bigger globe on phone)
         // the Projects dial leans the camera a touch closer (DIAL_ZOOM<1) to emphasise the globe's
         // right part; mix01(1, DIAL_ZOOM, 0) === 1 so the Home/CV framing is byte-identical at projAmt 0.
         const globeRadius = mix01(globeStart, 1.0, smooth(0.0, 0.70, mc)) * mix01(1.0, DIAL_ZOOM, pCam);
