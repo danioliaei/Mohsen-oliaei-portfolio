@@ -27,6 +27,7 @@ struct Frame {
   hov  : vec4<f32>,   // x hovered slice index (-1 none), y pulse 0..1, zw unused
   mph  : vec4<f32>,   // x morph 0..1 (0 = intro globe, 1 = finished mountain), y globeSpin (rad), z motion, w projAmt (0 = globe chaos … 1 = dial-calm)
   lod  : vec4<f32>,   // x contour-spacing scale (1 = desktop; >1 on phones widens the spacing → fewer lines), yzw unused
+  drs  : vec4<f32>,   // x,y = DRS scene sub-rect (fraction of the max HDR target the live scene fills; (1,1) at full quality), zw unused
 };
 @group(0) @binding(0) var<uniform> F : Frame;
 `;
@@ -751,11 +752,15 @@ fn hash12(p : vec2<f32>) -> f32 {
 @fragment fn fs(i : VsOut) -> @location(0) vec4<f32> {
   let uv = i.uv;
   let texel = vec2<f32>(1.0 / F.a.y, 1.0 / F.a.z);
+  // DRS: the live scene fills only the [0,rect] sub-rect of the (max-size) HDR target under load, so
+  // every sceneTex tap is remapped by rect. Folding it as (uv + off*texel)*rect keeps the box-tap
+  // offset a true HALF-physical-texel at every scale; rect=(1,1) at full quality means byte-identical.
+  let rect = F.drs.xy;
   // 4-tap rotated-box downsample of the 2× supersampled scene → clean hairlines
-  var s = textureSample(sceneTex, samp, uv + vec2<f32>( 0.5,  0.5) * texel).rgb;
-  s = s + textureSample(sceneTex, samp, uv + vec2<f32>(-0.5,  0.5) * texel).rgb;
-  s = s + textureSample(sceneTex, samp, uv + vec2<f32>( 0.5, -0.5) * texel).rgb;
-  s = s + textureSample(sceneTex, samp, uv + vec2<f32>(-0.5, -0.5) * texel).rgb;
+  var s = textureSample(sceneTex, samp, (uv + vec2<f32>( 0.5,  0.5) * texel) * rect).rgb;
+  s = s + textureSample(sceneTex, samp, (uv + vec2<f32>(-0.5,  0.5) * texel) * rect).rgb;
+  s = s + textureSample(sceneTex, samp, (uv + vec2<f32>( 0.5, -0.5) * texel) * rect).rgb;
+  s = s + textureSample(sceneTex, samp, (uv + vec2<f32>(-0.5, -0.5) * texel) * rect).rgb;
   var col = s * 0.25;
 
   // ---- PROJECTS depth-of-field: while the timeline is open (F.mph.w>0) soften the frame AWAY from
@@ -769,14 +774,14 @@ fn hash12(p : vec2<f32>) -> f32 {
   if (dof > 0.001) {
     let edgeK = smoothstep(0.20, 0.70, dot(toF, toF) * 2.0); // 0 on the moon (focal) → 1 away from it
     let blurR = 2.6 * edgeK * dof;
-    var b = textureSample(sceneTex, samp, uv + vec2<f32>( 1.0,  0.0) * blurR * texel).rgb;
-    b = b + textureSample(sceneTex, samp, uv + vec2<f32>(-1.0,  0.0) * blurR * texel).rgb;
-    b = b + textureSample(sceneTex, samp, uv + vec2<f32>( 0.0,  1.0) * blurR * texel).rgb;
-    b = b + textureSample(sceneTex, samp, uv + vec2<f32>( 0.0, -1.0) * blurR * texel).rgb;
-    b = b + textureSample(sceneTex, samp, uv + vec2<f32>( 0.7,  0.7) * blurR * texel).rgb;
-    b = b + textureSample(sceneTex, samp, uv + vec2<f32>(-0.7,  0.7) * blurR * texel).rgb;
-    b = b + textureSample(sceneTex, samp, uv + vec2<f32>( 0.7, -0.7) * blurR * texel).rgb;
-    b = b + textureSample(sceneTex, samp, uv + vec2<f32>(-0.7, -0.7) * blurR * texel).rgb;
+    var b = textureSample(sceneTex, samp, (uv + vec2<f32>( 1.0,  0.0) * blurR * texel) * rect).rgb;
+    b = b + textureSample(sceneTex, samp, (uv + vec2<f32>(-1.0,  0.0) * blurR * texel) * rect).rgb;
+    b = b + textureSample(sceneTex, samp, (uv + vec2<f32>( 0.0,  1.0) * blurR * texel) * rect).rgb;
+    b = b + textureSample(sceneTex, samp, (uv + vec2<f32>( 0.0, -1.0) * blurR * texel) * rect).rgb;
+    b = b + textureSample(sceneTex, samp, (uv + vec2<f32>( 0.7,  0.7) * blurR * texel) * rect).rgb;
+    b = b + textureSample(sceneTex, samp, (uv + vec2<f32>(-0.7,  0.7) * blurR * texel) * rect).rgb;
+    b = b + textureSample(sceneTex, samp, (uv + vec2<f32>( 0.7, -0.7) * blurR * texel) * rect).rgb;
+    b = b + textureSample(sceneTex, samp, (uv + vec2<f32>(-0.7, -0.7) * blurR * texel) * rect).rgb;
     col = mix(col, b * 0.125, edgeK * dof);
   }
 
@@ -819,7 +824,10 @@ struct VsOut { @builtin(position) pos : vec4<f32>, @location(0) uv : vec2<f32> }
 
 export const BRIGHT_WGSL = POST_VS + /* wgsl */ `
 @fragment fn fs(i : VsOut) -> @location(0) vec4<f32> {
-  let c = textureSample(tex, samp, i.uv).rgb;
+  // P.params.zw = the DRS scene sub-rect: the bright pass runs full-size but samples only the live
+  // [0,rect] region of the scene target and upsamples it across the (full-size) bloom pyramid, so the
+  // separable blur chain stays untouched. rect=(1,1) at full quality ⇒ byte-identical.
+  let c = textureSample(tex, samp, i.uv * P.params.zw).rgb;
   let l = max(c.r, max(c.g, c.b));
   let t = P.params.x;                       // bloom threshold
   let k = max(l - t, 0.0) / max(l, 1e-4);   // keep colour, soft knee

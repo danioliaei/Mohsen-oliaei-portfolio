@@ -506,6 +506,11 @@ export default function RidgelineStage() {
       // the post-create() guard above). Only reachable on the ?perf=1 import path.
       if (disposed) return;
 
+      // Dynamic resolution scaling holds a steady 60fps by shrinking the internal render-scale only
+      // under sustained load (full quality with headroom). Pin it OFF under ?perf so the harness
+      // measures a stationary worst-case fill rather than a moving target.
+      gpu.setDrsEnabled(!perfEnabled);
+
       // ---- orbit controls — left-drag (mouse / touch) or the arrow keys spin
       // around the summit. The pointer steers a TARGET; the camera EASES toward
       // it every frame, so the motion glides instead of snapping 1:1 — calm and
@@ -649,12 +654,16 @@ export default function RidgelineStage() {
           ? Math.min(CLOUD_CHARS.length, 68)
           : CLOUD_CHARS.length;
       let charEls: NodeListOf<HTMLElement> | null = null;
-      // rotate a base dir about Y by `spin`, matching the shader's lon += globeSpin (a point at
-      // base-longitude φ ends at φ+spin, measured from +z toward +x) so letters weld to the lines.
-      const rotY = (dx: number, dy: number, dz: number, spin: number): [number, number, number] => {
-        const s = Math.sin(spin), c = Math.cos(spin);
-        return [dx * c + dz * s, dy, -dx * s + dz * c];
-      };
+      // The Y-rotation that welds a letter to the spinning lines (lon += globeSpin) is inlined in
+      // updateCloud's hot loop with the per-frame sin/cos(spin) hoisted out (rx = dx·c + dz·s, ry =
+      // dy, rz = −dx·s + dz·c). The station ring anchors a glyph rains toward are LOOP-INVARIANT, so
+      // precompute the seven world points once and project them ONCE per frame (not per glyph) into
+      // the reused scratch below — turning up to ~128 ringAnchor()+projectToScreen() object allocs
+      // per frame into seven inline scalar projections.
+      const stationAnchors = STATIONS.map((s) => ringAnchor(s.radius));
+      const tpx = new Float32Array(STATIONS.length);
+      const tpy = new Float32Array(STATIONS.length);
+      const tpVis = new Uint8Array(STATIONS.length);
 
       // ---- haptics: the Vibration API (Android/Chrome) plus the iOS-Safari
       // trick — toggling a hidden <input switch> plays the system "tock". Kept
@@ -1231,7 +1240,7 @@ export default function RidgelineStage() {
       // labels were removed — the globe is purely a tangle of lines + loose letters now.) ----
       const updateCloud = (
         vp: Float32Array,
-        eye: [number, number, number],
+        eye: Float32Array,
         spin: number,
         m: number,
         W: number,
@@ -1250,13 +1259,30 @@ export default function RidgelineStage() {
         // are mostly gone before the GPU drain funnel peaks → the additive climax stays one source.
         const charVis = 1 - smooth(0.52, 0.72, m); // hold the glyphs legible until the funnel peak, then clear just before the halo blooms
         const fall = smooth(0.30, 0.66, m); // 0 on the globe → 1 raining onto the ring band, in step with the funnel/emerge
+        // per-frame hoists: the globe spin's sin/cos (the inlined rotY) and the seven ring anchors
+        // projected ONCE (each glyph rains toward one of these — identical math to projectToScreen).
+        const ss = Math.sin(spin), cs = Math.cos(spin);
+        if (fall > 0.001) {
+          for (let k = 0; k < stationAnchors.length; k++) {
+            const a = stationAnchors[k];
+            const acw = vp[3] * a.x + vp[7] * a.y + vp[11] * a.z + vp[15];
+            if (acw <= 1e-6) { tpVis[k] = 0; continue; }
+            const acx = vp[0] * a.x + vp[4] * a.y + vp[8] * a.z + vp[12];
+            const acy = vp[1] * a.x + vp[5] * a.y + vp[9] * a.z + vp[13];
+            tpx[k] = ((acx / acw) * 0.5 + 0.5) * W;
+            tpy[k] = (1 - ((acy / acw) * 0.5 + 0.5)) * H;
+            tpVis[k] = 1;
+          }
+        }
         for (let i = 0; i < charEls.length; i++) {
           const el = charEls[i];
           // trimmed on a narrow flank / reduced motion → drop the layer entirely (not just opacity 0)
           if (i >= charCount) { el.style.display = "none"; continue; }
           if (charVis <= 0.002) { el.style.opacity = "0"; continue; }
           const cr = charRadii[i];
-          const [rx, ry, rz] = rotY(charDirs[i * 3], charDirs[i * 3 + 1], charDirs[i * 3 + 2], spin);
+          // inlined rotY (Y-rotation by `spin`, sin/cos hoisted): rx = dx·c + dz·s, ry = dy, rz = −dx·s + dz·c
+          const bx = charDirs[i * 3], by = charDirs[i * 3 + 1], bz = charDirs[i * 3 + 2];
+          const rx = bx * cs + bz * ss, ry = by, rz = -bx * ss + bz * cs;
           const Px = GLOBE.cx + GLOBE.r * cr * rx, Py = GLOBE.cy + GLOBE.r * cr * ry, Pz = GLOBE.cz + GLOBE.r * cr * rz;
           const vx = eye[0] - Px, vy = eye[1] - Py, vz = eye[2] - Pz;
           const vl = Math.hypot(vx, vy, vz) || 1;
@@ -1272,11 +1298,10 @@ export default function RidgelineStage() {
           const cy = vp[1] * Px + vp[5] * Py + vp[9] * Pz + vp[13];
           let sx = ((cx / cw) * 0.5 + 0.5) * W;
           let sy = (1 - ((cy / cw) * 0.5 + 0.5)) * H;
-          // rain toward this char's ring anchor (the same anchors the survey callouts use)
+          // rain toward this char's ring anchor (projected once above; the same anchors the survey uses)
           if (fall > 0.001) {
-            const a = ringAnchor(STATIONS[charRings[i]].radius);
-            const tp = projectToScreen(vp, a.x, a.y, a.z, W, H);
-            if (tp.visible) { sx += (tp.x - sx) * fall; sy += (tp.y - sy) * fall; }
+            const k = charRings[i];
+            if (tpVis[k]) { sx += (tpx[k] - sx) * fall; sy += (tpy[k] - sy) * fall; }
           }
           const scale = 0.55 + 0.62 * depth * (0.6 + 0.4 * cr);
           el.style.transform =
@@ -1655,6 +1680,10 @@ export default function RidgelineStage() {
         // is open, otherwise the eased mountain ring-lift.
         const fShiftY = tlActive ? transitShiftY : focusShiftY;
 
+        // feed this frame's delta to the DRS controller (dt is seconds, already clamped to 0.05 above,
+        // so a resume/GC spike can't pollute the EWMA) — it adjusts the render-scale BEFORE we render.
+        gpu.tickScale(dt * 1000);
+
         gpu.render({
           time: t,
           yaw,
@@ -1707,6 +1736,34 @@ export default function RidgelineStage() {
       };
       raf = requestAnimationFrame(frame);
       teardown.push(() => cancelAnimationFrame(raf));
+
+      // ---- visibility gating: a backgrounded tab paints zero pixels, so rendering it is pure wasted
+      // SoC/GPU heat (the single biggest "free" win on a phone — see HYBRID.md/TELEMETRY.md). Pause the
+      // rAF while hidden and re-arm on return. The raf===0 guard makes hide/show idempotent (no double
+      // schedule). prev=performance.now() on resume is LOAD-BEARING: it makes the first post-resume dt≈0
+      // so no time-accumulator (the morph clock, inertia, the eases) lurches by the elapsed hidden span.
+      // (No IntersectionObserver: the stage is position:fixed inset:0 and the page can't scroll, so the
+      // canvas is always 100% on-screen when the tab is visible.)
+      const pauseLoop = () => { if (raf) { cancelAnimationFrame(raf); raf = 0; } };
+      const resumeLoop = () => {
+        if (raf || disposed || document.visibilityState === "hidden") return;
+        prev = performance.now();
+        raf = requestAnimationFrame(frame);
+      };
+      const onVisibility = () => {
+        if (document.visibilityState === "hidden") pauseLoop();
+        else resumeLoop();
+      };
+      document.addEventListener("visibilitychange", onVisibility);
+      // pageshow re-arms after a back/forward-cache restore (where the document was already "visible"
+      // when pagehide froze it, so no visibilitychange fires); pagehide pauses on bfcache freeze/unload.
+      window.addEventListener("pageshow", resumeLoop);
+      window.addEventListener("pagehide", pauseLoop);
+      teardown.push(() => {
+        document.removeEventListener("visibilitychange", onVisibility);
+        window.removeEventListener("pageshow", resumeLoop);
+        window.removeEventListener("pagehide", pauseLoop);
+      });
     })();
 
     return () => {

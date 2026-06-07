@@ -32,15 +32,31 @@ export async function createGPU(): Promise<GPUCtx | null> {
   }
   if (!adapter) return null;
 
-  const hasF16 = adapter.features.has("shader-f16");
-  const hasTimestamp = adapter.features.has("timestamp-query");
+  // Request the optional features the adapter actually advertises. requestDevice() with NO
+  // descriptor enables NOTHING (requiredFeatures defaults to []) — so the device would lack the
+  // very features we advertise to info()/the telemetry HUD, and a timestamp querySet would throw.
+  // We filter the request against adapter.features so it can never reject for an unsupported one.
+  const want: GPUFeatureName[] = [];
+  if (adapter.features.has("shader-f16")) want.push("shader-f16");
+  if (adapter.features.has("timestamp-query")) want.push("timestamp-query");
 
   let device: GPUDevice;
   try {
-    device = await adapter.requestDevice();
+    device = await adapter.requestDevice({ requiredFeatures: want });
   } catch {
-    return null;
+    // a filtered request should never reject, but stay strictly no-worse than before: fall back
+    // to a bare device on any unrelated creation failure.
+    try {
+      device = await adapter.requestDevice();
+    } catch {
+      return null;
+    }
   }
+
+  // Re-read the flags from the DEVICE (a request can be silently dropped), so info()/the harness
+  // report what is actually enabled rather than what the adapter merely supports.
+  const hasF16 = device.features.has("shader-f16");
+  const hasTimestamp = device.features.has("timestamp-query");
 
   const format = navigator.gpu.getPreferredCanvasFormat();
   return { device, format, hasF16, hasTimestamp };

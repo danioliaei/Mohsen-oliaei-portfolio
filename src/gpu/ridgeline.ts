@@ -528,24 +528,27 @@ const GLOBE_ELEV_RANGE: readonly [number, number] = [-1.25, 1.4];
 export const GLOBE_PITCH_LO = GLOBE_ELEV_RANGE[0] - ORBIT.elev; // ≈ -1.200
 export const GLOBE_PITCH_HI = GLOBE_ELEV_RANGE[1] - ORBIT.elev; // ≈  1.450
 
-/* ---- tiny column-major mat4 helpers (dependency-free) ------------------- */
+/* ---- tiny column-major mat4 helpers (dependency-free) -------------------
+   Out-parameter form: each writes into a caller-supplied buffer instead of
+   allocating a fresh Float32Array, so the per-frame camera solve (ridgeCamera,
+   called 3-5x/frame) churns ZERO garbage — GC pauses were a source of the
+   frame-time tail (p99/max). Every entry is written explicitly (persp's would-be
+   zeros included) so a REUSED scratch buffer never leaks a stale value. */
 type Mat4 = Float32Array;
-function persp(fovy: number, aspect: number, near: number, far: number): Mat4 {
+function persp(out: Mat4, fovy: number, aspect: number, near: number, far: number): void {
   const f = 1 / Math.tan(fovy / 2);
   const nf = 1 / (near - far);
-  const m = new Float32Array(16);
-  m[0] = f / aspect;
-  m[5] = f;
-  m[10] = (far + near) * nf;
-  m[11] = -1;
-  m[14] = 2 * far * near * nf;
-  return m;
+  out[0] = f / aspect; out[1] = 0; out[2] = 0; out[3] = 0;
+  out[4] = 0; out[5] = f; out[6] = 0; out[7] = 0;
+  out[8] = 0; out[9] = 0; out[10] = (far + near) * nf; out[11] = -1;
+  out[12] = 0; out[13] = 0; out[14] = 2 * far * near * nf; out[15] = 0;
 }
 function lookAt(
+  out: Mat4,
   ex: number, ey: number, ez: number,
   cx: number, cy: number, cz: number,
   ux: number, uy: number, uz: number,
-): Mat4 {
+): void {
   let zx = ex - cx, zy = ey - cy, zz = ez - cz;
   let rl = 1 / Math.hypot(zx, zy, zz);
   zx *= rl; zy *= rl; zz *= rl;
@@ -553,24 +556,30 @@ function lookAt(
   rl = 1 / Math.hypot(xx, xy, xz);
   xx *= rl; xy *= rl; xz *= rl;
   const yx = zy * xz - zz * xy, yy = zz * xx - zx * xz, yz = zx * xy - zy * xx;
-  const m = new Float32Array(16);
-  m[0] = xx; m[1] = yx; m[2] = zx; m[3] = 0;
-  m[4] = xy; m[5] = yy; m[6] = zy; m[7] = 0;
-  m[8] = xz; m[9] = yz; m[10] = zz; m[11] = 0;
-  m[12] = -(xx * ex + xy * ey + xz * ez);
-  m[13] = -(yx * ex + yy * ey + yz * ez);
-  m[14] = -(zx * ex + zy * ey + zz * ez);
-  m[15] = 1;
-  return m;
+  out[0] = xx; out[1] = yx; out[2] = zx; out[3] = 0;
+  out[4] = xy; out[5] = yy; out[6] = zy; out[7] = 0;
+  out[8] = xz; out[9] = yz; out[10] = zz; out[11] = 0;
+  out[12] = -(xx * ex + xy * ey + xz * ez);
+  out[13] = -(yx * ex + yy * ey + yz * ez);
+  out[14] = -(zx * ex + zy * ey + zz * ez);
+  out[15] = 1;
 }
-function mul(a: Mat4, b: Mat4): Mat4 {
-  const o = new Float32Array(16);
+/** out = a * b. `out` MUST be distinct from `a` and `b` (it reads them while writing). */
+function mul(out: Mat4, a: Mat4, b: Mat4): void {
   for (let c = 0; c < 4; c++)
     for (let r = 0; r < 4; r++)
-      o[c * 4 + r] =
+      out[c * 4 + r] =
         a[r] * b[c * 4] + a[4 + r] * b[c * 4 + 1] + a[8 + r] * b[c * 4 + 2] + a[12 + r] * b[c * 4 + 3];
-  return o;
 }
+
+// Module-scope scratch for the camera solve (see ridgeCamera). _mVP must stay distinct from
+// _mPersp/_mView for mul()'s no-alias rule. _eye is the returned eye vector. A ridgeCamera result
+// is only valid until the NEXT ridgeCamera call — every caller consumes vp/eye synchronously before
+// the next solve, so the single shared scratch is safe; do not retain a result across another call.
+const _mPersp = new Float32Array(16);
+const _mView = new Float32Array(16);
+const _mVP = new Float32Array(16);
+const _eye = new Float32Array(3);
 
 /* ---- survey-station geometry: where a ring's callout pins to the massif ------
    The index contours are concentric RINGS (the RINGS array in
@@ -613,7 +622,7 @@ export function ridgeCamera(
   radiusScale = 1,
   shiftX = 0,
   shiftY = 0,
-): { vp: Float32Array; eye: [number, number, number] } {
+): { vp: Float32Array; eye: Float32Array } {
   const azim = ORBIT.azim + yaw + Math.sin(time * 0.05) * 0.0045;
   const p = pitch; // caller (stage) pre-clamps to the active globe/mountain pitch walls
   const elev = ORBIT.elev + p + Math.sin(time * 0.037) * 0.0035;
@@ -625,8 +634,10 @@ export function ridgeCamera(
   const ex = TGT[0] + R * ce * Math.sin(azim);
   const ey = TGT[1] + R * se;
   const ez = TGT[2] + R * ce * Math.cos(azim);
-  const view = lookAt(ex, ey, ez, TGT[0], TGT[1], TGT[2], 0, 1, 0);
-  const vp = mul(persp(FOVY, aspect, NEAR, FAR), view);
+  lookAt(_mView, ex, ey, ez, TGT[0], TGT[1], TGT[2], 0, 1, 0);
+  persp(_mPersp, FOVY, aspect, NEAR, FAR);
+  const vp = _mVP;
+  mul(vp, _mPersp, _mView);
   // off-axis LENS SHIFT: add `shiftX` to clip-x (cx += shiftX·cw), i.e. NDC_x += shiftX
   // at every depth — slides the whole image horizontally with NO rotation or
   // perspective distortion. Used while a slice is focused to pan the massif into the
@@ -648,7 +659,8 @@ export function ridgeCamera(
     vp[9] += shiftY * vp[11];
     vp[13] += shiftY * vp[15];
   }
-  return { vp, eye: [ex, ey, ez] };
+  _eye[0] = ex; _eye[1] = ey; _eye[2] = ez;
+  return { vp, eye: _eye };
 }
 
 /** Project a world point through `vp` to CSS-pixel screen coords. `visible` is
@@ -738,6 +750,10 @@ function heightAtJS(x: number, z: number): number {
   return h;
 }
 
+/** Surveyed ring plan-radii, newest → oldest (STATIONS order); mirrors RINGS in the shader.
+ *  Hoisted to module scope so the per-frame hover pick (pickBand) allocates nothing. */
+const PICK_RINGS = [720, 1300, 1980, 2750, 3600, 4550, 5600] as const;
+
 /** Cast the camera ray through pointer pixel (px,py) and return the index of the
  *  career SLICE (0 = tight summit ring … 6 = wide dune ring) the ray's terrain hit
  *  falls on — matching RINGS in the shader and STATIONS in src/data/stations.ts — or -1
@@ -811,11 +827,10 @@ export function pickBand(
     (fbm2(hx * 0.0009 + 12.0, hz * 0.00078 + 12.0) - 0.5) * 210;
   const rw = baseR + warp;
 
-  const RINGS = [720, 1300, 1980, 2750, 3600, 4550, 5600]; // newest → oldest (STATIONS order)
-  if (rw > RINGS[6] + 700) return -1; // past the widest ring → foreground dunes, no slice
+  if (rw > PICK_RINGS[6] + 700) return -1; // past the widest ring → foreground dunes, no slice
   let best = -1, bestD = Infinity;
   for (let k = 0; k < 7; k++) {
-    const d = Math.abs(rw - RINGS[k]);
+    const d = Math.abs(rw - PICK_RINGS[k]);
     if (d < bestD) { bestD = d; best = k; }
   }
   return best;
@@ -867,13 +882,32 @@ export class RidgelineScene {
   private filaVBO: GPUBuffer;
   private filaVertexCount = 0;
 
-  private rw = 1;
-  private rh = 1;
+  private rw = 1;        // MAX (allocated) HDR scene width  — targets are sized to this
+  private rh = 1;        // MAX (allocated) HDR scene height
   private sc = 1;
   private dprUsed = 1;
   // phone render profile (set once in the constructor from phoneRender()):
   private lineScale = 1; // contour-spacing scale fed to the shader as F.lod.x
   private scCap = 2;     // HDR scene supersample cap (raised on phones for sharper hairlines)
+
+  // ---- DYNAMIC RESOLUTION SCALING (zero-churn sub-rect) -------------------------------------
+  // The scene pass is the dominant fill cost (heavy terrain FS over the supersampled HDR target).
+  // Rather than reallocate textures, we keep them at the MAX footprint and render the scene into a
+  // top-left aw×ah SUB-RECTANGLE (viewport+scissor) under load; the post chain samples only that live
+  // rect via F.drs. The controller (tickScale) settles `scale` → 1 whenever the GPU has headroom — and
+  // the resting scene HAS headroom — so at rest aw===rw, no viewport is set, F.drs=(1,1) and the image
+  // is BYTE-IDENTICAL to today. Quality only softens transiently under genuine sustained load.
+  private scale = 1;     // render-scale ∈ [drsFloor, 1]; 1 = full quality
+  private aw = 1;        // active scene width  = round(rw * scale)  (read by writeUniforms)
+  private ah = 1;        // active scene height = round(rh * scale)
+  private drsEnabled = true;   // pinned off (scale held at 1) under ?perf so telemetry is stationary
+  private drsFloor = 0.66;     // lower scale bound (re-derived per-resize so device-px never drop < 1)
+  private drsEwma = 1000 / 60; // EWMA of frame time (ms)
+  private drsBreachRun = 0;    // consecutive over-budget frames (debounce for a shed)
+  private drsClearRun = 0;     // consecutive within-budget frames (debounce for a recover)
+  private drsCooldown = 0;     // frames to wait after a scale change (anti-oscillation)
+  private appliedScale = -1;   // last effective scale written into brightU's rect (rewrite 8B only on change)
+  private readonly _rect = new Float32Array(2); // reused scratch for the brightU rect write
 
   // ---- perf telemetry counters (read by the ?perf=1 harness via info(); set
   // each render() — three integer writes, no cost when the harness isn't watching)
@@ -1117,6 +1151,14 @@ export class RidgelineScene {
     this.sc = Math.max(1, Math.min(this.sc, fit));
     this.rw = Math.max(1, Math.round(W * this.sc));
     this.rh = Math.max(1, Math.round(H * this.sc));
+    // DRS floor: never let the effective device-pixel ratio (sc × scale) fall below 1, or the lines
+    // would raw-alias — so the floor is max(0.66, 1/sc) against the LIVE sc (which can be 1.4 on a
+    // 1×-DPR monitor), not 1/scCap. Re-clamp any persisted scale into the new range.
+    this.drsFloor = Math.max(0.66, 1 / this.sc);
+    this.scale = Math.max(this.drsFloor, Math.min(1, this.scale));
+    this.aw = this.rw;
+    this.ah = this.rh;
+    this.appliedScale = -1; // force the brightU rect to be re-written on the next render()
 
     this.scene?.destroy();
     this.depth?.destroy();
@@ -1145,7 +1187,9 @@ export class RidgelineScene {
     // bloom threshold near the snow-white level so only the genuinely bright
     // summit strokes + the halo's defined circle pick up a soft glow
     const BLOOM_THRESH = 0.82;
-    d.queue.writeBuffer(this.brightU, 0, new Float32Array([tx, ty, 0, 0, BLOOM_THRESH, 0, 0, 0]));
+    // brightU.params.zw carries the DRS scene sub-rect the bright pass samples (1,1 = full scale);
+    // render() rewrites just these 8 bytes when `scale` changes.
+    d.queue.writeBuffer(this.brightU, 0, new Float32Array([tx, ty, 0, 0, BLOOM_THRESH, 0, 1, 1]));
     d.queue.writeBuffer(this.blurHU, 0, new Float32Array([tx, ty, 1, 0, SPREAD, 0, 0, 0]));
     d.queue.writeBuffer(this.blurVU, 0, new Float32Array([tx, ty, 0, 1, SPREAD, 0, 0, 0]));
 
@@ -1186,7 +1230,11 @@ export class RidgelineScene {
 
     const u = this.uArr;
     u.set(vp, 0);
-    u[16] = s.time; u[17] = this.rw; u[18] = this.rh; u[19] = aspect;
+    // F.a.y/F.a.z = the ACTIVE (DRS sub-rect) render size — drives the composite box-tap texel, the
+    // grain, and the terrain seam (screenX01 = i.pos.x / F.a.y, exact since the viewport origin is 0).
+    // At full scale aw===rw so this is today's value. aspect (F.a.w) stays the MAX-based framing aspect
+    // (uniform scale ⇒ unchanged), so the camera + DOM-overlay projection are resolution-independent.
+    u[16] = s.time; u[17] = this.aw; u[18] = this.ah; u[19] = aspect;
     u[20] = NEAR; u[21] = FAR; u[22] = WORLD_H_MAX; u[23] = s.time * 0.012; // haloSpin
     u[24] = 0.34; u[25] = 0.34; u[26] = 0.03; u[27] = 1.0; // bloomAmt, vignette, grain, exposure
     u[28] = ex; u[29] = ey; u[30] = ez; u[31] = 0;
@@ -1205,11 +1253,34 @@ export class RidgelineScene {
     u[40] = this.lineScale;
     u[41] = s.focalX ?? 0.5;
     u[42] = s.focalY ?? 0.5;
+    // drs = (sceneRectX, sceneRectY, _, _): the fraction of the (max) HDR target the live scene
+    // occupies this frame. The composite folds it into every sceneTex tap. (1,1) at full scale.
+    u[44] = this.aw / this.rw;
+    u[45] = this.ah / this.rh;
     this.g.device.queue.writeBuffer(this.uBuf, 0, u.buffer, 0, 256);
   }
 
   render(s: RidgeFrame): void {
     const d = this.g.device;
+
+    // ---- DRS sub-rect sizing (BEFORE writeUniforms, which packs the active size + rect) ----
+    const scale = this.drsEnabled ? this.scale : 1;
+    // clamp the active size into [8, rw] so the sub-rect fraction can never exceed 1 (airtight even on
+    // a degenerate sub-8px target); at scale=1, round(rw*1)===rw so aw===rw exactly.
+    this.aw = Math.min(this.rw, Math.max(8, Math.round(this.rw * scale)));
+    this.ah = Math.min(this.rh, Math.max(8, Math.round(this.rh * scale)));
+    // a viewport is only emitted when actually shrunk → at full scale the command stream is byte-for-
+    // byte today's (the default viewport is the whole target).
+    const sub = this.aw < this.rw || this.ah < this.rh;
+    // refresh the bright pass's scene-sample sub-rect (8 bytes) only when the effective scale changes —
+    // both axes derive from `scale`, so gating on it covers x AND y; resize forces it via appliedScale=-1.
+    if (scale !== this.appliedScale) {
+      this.appliedScale = scale;
+      this._rect[0] = this.aw / this.rw;
+      this._rect[1] = this.ah / this.rh;
+      d.queue.writeBuffer(this.brightU, 24, this._rect.buffer, 0, 8); // PassU.params.zw
+    }
+
     this.writeUniforms(s);
     const enc = d.createCommandEncoder();
 
@@ -1225,6 +1296,12 @@ export class RidgelineScene {
         depthStoreOp: "store",
       },
     });
+    // shrink the scene draws into the top-left aw×ah sub-rect under DRS load (origin 0 keeps the
+    // seam/texel math trivial; depth range stays 0..1 so hidden-line depth is unchanged).
+    if (sub) {
+      pass.setViewport(0, 0, this.aw, this.ah, 0, 1);
+      pass.setScissorRect(0, 0, this.aw, this.ah);
+    }
     pass.setBindGroup(0, this.frameBG);
     pass.setPipeline(this.backdropPipe);
     pass.draw(3);
@@ -1255,12 +1332,14 @@ export class RidgelineScene {
     this.blit(enc, this.blurPipe, this.bgBloomV, this.bloomAV);
 
     // ---- composite → swap-chain ----
+    // loadOp "load": the composite's fullscreen triangle returns vec4(col, 1.0) at EVERY pixel
+    // (alphaMode "opaque"), so it fully overwrites the swap-chain — the clear was pure wasted
+    // per-tile init bandwidth on a TBDR GPU.
     const cpass = enc.beginRenderPass({
       colorAttachments: [
         {
           view: this.context.getCurrentTexture().createView(),
-          clearValue: { r: 0, g: 0, b: 0, a: 1 },
-          loadOp: "clear",
+          loadOp: "load",
           storeOp: "store",
         },
       ],
@@ -1279,15 +1358,57 @@ export class RidgelineScene {
     bg: GPUBindGroup,
     out: GPUTextureView,
   ): void {
+    // loadOp "load": each bloom blit's fullscreen triangle writes every texel of its target, so the
+    // clear was redundant tile-init work (and its alpha=0 clearValue was already irrelevant — bright/
+    // blur write alpha=1 and the composite samples only .rgb).
     const pass = enc.beginRenderPass({
       colorAttachments: [
-        { view: out, clearValue: { r: 0, g: 0, b: 0, a: 0 }, loadOp: "clear", storeOp: "store" },
+        { view: out, loadOp: "load", storeOp: "store" },
       ],
     });
     pass.setPipeline(pipe);
     pass.setBindGroup(0, bg);
     pass.draw(3);
     pass.end();
+  }
+
+  /** Enable/disable dynamic resolution scaling. Disabled pins `scale` at 1 (full quality) — used
+   *  under ?perf so the harness measures a stationary worst-case fill rather than a moving target. */
+  setDrsEnabled(enabled: boolean): void {
+    this.drsEnabled = enabled;
+    if (!enabled) this.scale = 1;
+  }
+
+  /** Reactive dynamic-resolution controller — call once per rendered frame with the frame delta (ms).
+   *  Holds the highest render-scale that sustains ~60fps: it SHEDS quickly when the frame-time EWMA
+   *  breaches the budget, and RECOVERS gently (a hill-climb) whenever the cadence is being held. The
+   *  recover trigger is "not breaching for a sustained stretch" — NOT a sub-budget reading, which
+   *  vsync makes unreachable on a 60Hz panel — so with GPU headroom (the resting scene always has it)
+   *  `scale` provably converges back to 1.0 and the resting image stays byte-identical. */
+  tickScale(dtMs: number): void {
+    if (!this.drsEnabled) { this.scale = 1; return; }
+    this.drsEwma += (dtMs - this.drsEwma) * 0.1; // ~10-frame time constant
+    if (this.drsCooldown > 0) this.drsCooldown--;
+    const SHED = (1000 / 60) * 1.12; // ~18.7 ms — genuinely dropping below 60fps
+    if (this.drsEwma > SHED) {
+      this.drsClearRun = 0;
+      this.drsBreachRun++;
+      if (this.drsBreachRun >= 4 && this.drsCooldown === 0 && this.scale > this.drsFloor) {
+        this.scale = Math.max(this.drsFloor, Math.round(this.scale * 0.92 / 0.02) * 0.02);
+        this.drsBreachRun = 0;
+        this.drsCooldown = 8;
+      }
+    } else {
+      this.drsBreachRun = 0;
+      this.drsClearRun++;
+      // recover ~7.5× more cautiously than we shed (30 held frames vs a 4-frame breach) so the scale
+      // can't pump audibly at the device's capacity boundary; each rung is a ~2% step.
+      if (this.drsClearRun >= 30 && this.drsCooldown === 0 && this.scale < 1) {
+        this.scale = Math.min(1, Math.round(this.scale * 1.04 / 0.02) * 0.02);
+        this.drsClearRun = 0;
+        this.drsCooldown = 8;
+      }
+    }
   }
 
   /** Live render-path snapshot for the ?perf=1 telemetry harness (this app's
