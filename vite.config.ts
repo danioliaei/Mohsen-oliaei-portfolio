@@ -8,6 +8,10 @@ export default defineConfig({
   // so the HTTPS phone behind the tunnel can beacon to it). It adds nothing to the
   // client bundle and is inert on a real deploy.
   plugins: [react(), telemetryCollector()],
-  // bind to 0.0.0.0 so a LAN device / tunnel can reach the dev server
-  server: { port: 5173, open: true, host: true },
+  // bind to 0.0.0.0 so a LAN device / tunnel can reach the server, and allow the
+  // cloudflared quick-tunnel domain through Vite's Host-header check (otherwise the
+  // phone gets "Blocked request. This host is not allowed."). The quick-tunnel
+  // subdomain changes each run, so allow the whole *.trycloudflare.com domain.
+  server: { port: 5173, open: true, host: true, allowedHosts: [".trycloudflare.com"] },
+  preview: { port: 4173, host: true, allowedHosts: [".trycloudflare.com"] },
 });
