@@ -154,13 +154,23 @@ const ProjectsOverlay = forwardRef<HTMLButtonElement, Props>(
             </span>
             <span> · </span>
             <span className="live" ref={liveRef}>
-              {PROJECTS[0].title.toUpperCase()} · {PROJECTS[0].place.toUpperCase()}
+              {PROJECTS[0].title.toUpperCase()}
             </span>
           </p>
         </div>
 
         {/* the spoke layer — geometry welded each frame (desktop fan) */}
         <svg className="projects-dial-svg" ref={svgRef} aria-hidden="true">
+          <defs>
+            {/* each spoke's INNER segment fades to nothing inside the globe, so the line reads as
+                emerging from within the ball (req 2). objectBoundingBox space: since every spoke
+                fans to the RIGHT (outer x > inner x), x=0 is always the inner end, x=1 the tip. */}
+            <linearGradient id="dial-spoke-fade" x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0" stopColor="rgb(244,241,234)" stopOpacity="0" />
+              <stop offset="0.42" stopColor="rgb(244,241,234)" stopOpacity="0.5" />
+              <stop offset="1" stopColor="rgb(244,241,234)" stopOpacity="0.95" />
+            </linearGradient>
+          </defs>
           {PROJECTS.map((p) => (
             <g key={p.id}>
               <line className="dial-line" x1="0" y1="0" x2="0" y2="0" />
@@ -170,8 +180,10 @@ const ProjectsOverlay = forwardRef<HTMLButtonElement, Props>(
           ))}
         </svg>
 
-        {/* the label layer — each project is a positioned button (its own hit target).
-            The compact name shows at rest; the selected one blooms to the full record. */}
+        {/* the label layer — each project is a positioned button (its own hit target). NAME ONLY
+            now (req 5): a single radial label the rAF loop rotates along its spoke; the selected
+            one simply brightens to the amber "you-are-here" accent. The full record (date, place)
+            stays in the aria-label so screen readers lose nothing. */}
         <div className="projects-dial-labels" ref={labelsRef}>
           {PROJECTS.map((p, i) => (
             <button
@@ -185,16 +197,7 @@ const ProjectsOverlay = forwardRef<HTMLButtonElement, Props>(
               aria-label={`Project ${i + 1} of ${TOTAL}: ${p.title}, ${formatMonthYearLong(p.date)}, ${p.place}`}
               onClick={() => onSelect(i)}
             >
-              <span className="dial-label-short">
-                {p.short} {yy(p.date)}
-              </span>
-              <span className="dial-label-title">{p.title}</span>
-              <span className="dial-label-desc">{p.descriptor}</span>
-              <span className="dial-label-meta">
-                <span className="place">{p.place}</span>
-                <span className="dot">·</span>
-                <span className="date">{formatMonthYearLong(p.date)}</span>
-              </span>
+              <span className="dial-label-name">{p.title}</span>
             </button>
           ))}
         </div>
