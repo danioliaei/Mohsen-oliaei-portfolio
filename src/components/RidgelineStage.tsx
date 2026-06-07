@@ -109,8 +109,13 @@ const DIAL_PAN = 0.6; // NDC_x left-pan of the globe when the dial opens (wide s
 const DIAL_ZOOM = 0.92; // globe camera-radius mult at full dial (smaller = closer = bigger → its right side fills).
 // raised from 0.8 to ABSORB the bigger home globe (req 5 lowered globeStart) so the dial globe stays the
 // same size it was tuned at: 1.45·0.92 ≈ 1.66·0.80 (wide). Only the dial is affected (pCam = 0 elsewhere).
-const DIAL_SENS = 1.7; // rad of dial per canvas-height of horizontal drag
-const DIAL_SMOOTH_TAU = 0.15; // s — ease displayed angle → target (a heavier, weightier knob)
+// req 5: the dial was hyper-sensitive — at 1.7 a project was only ~6 px of drag apart, so it
+// felt twitchy / impossible to land on one, and the heavy smoothing added lag on top ("hard to
+// move"). Drop the sensitivity so a project is a comfortable ~13 px apart (smooth, controllable,
+// and the detent ticks once per experience as you pass it), and trim the smoothing so the knob
+// tracks the finger tightly instead of trailing it.
+const DIAL_SENS = 0.75; // rad of dial per canvas-height of horizontal drag (× 2π in the loop)
+const DIAL_SMOOTH_TAU = 0.09; // s — ease displayed angle → target (responsive, still glides)
 const DIAL_INERTIA_TAU = 0.6; // s — release-flick decay
 const DIAL_MAX_VEL = 3.4; // rad/s — inertia cap
 const DIAL_SNAP_VEL = 0.06; // rad/s — below this (and not dragging) settle to the detent
@@ -529,32 +534,42 @@ export default function RidgelineStage() {
         return [dx * c + dz * s, dy, -dx * s + dz * c];
       };
 
-      // ---- haptics: the Vibration API (Android/Chrome) plus the iOS-Safari
-      // trick — toggling a hidden <input switch> plays the system "tock". Kept
-      // off-screen (not display:none, which would mute it) and clicked from
-      // inside the touch gesture so iOS actually fires it. ---------------------
-      let iosTick: HTMLLabelElement | null = null;
-      try {
-        const lbl = document.createElement("label");
-        lbl.setAttribute("aria-hidden", "true");
-        lbl.style.cssText =
-          "position:fixed;top:-9999px;left:-9999px;width:0;height:0;opacity:0;pointer-events:none;";
-        const inp = document.createElement("input");
-        inp.type = "checkbox";
-        inp.setAttribute("switch", ""); // Safari renders an iOS switch → haptic
-        inp.tabIndex = -1;
-        lbl.appendChild(inp);
-        document.body.appendChild(lbl);
-        iosTick = lbl;
-      } catch { /* haptics are a bonus, never required */ }
+      // ---- haptics: Android/Chrome get the Vibration API. iOS Safari has no Vibration API, so
+      // it gets the hidden-switch "tock" — a <label> wrapping an <input type=checkbox switch>
+      // that plays the system haptic when TOGGLED. Per WebKit the click must propagate through
+      // the LABEL (clicking the input from script is ignored), and the proven pattern is to
+      // create → click → remove a fresh element per tick (display:none is fine; an off-screen
+      // element — what we used before — can fail to fire, which is why the old code was silent).
+      // ⚠️ Apple PATCHED programmatic switch-haptics in iOS 26.5: on 26.5+ NO web page can trigger
+      // haptics from script, full stop. So this is best-effort — it fires on Android and iOS
+      // 17.4–26.4, and is harmlessly inert on 26.5+ (an OS limitation, not something code can fix).
       const canVibrate =
         typeof navigator !== "undefined" && typeof navigator.vibrate === "function";
+      const isAppleTouch =
+        typeof navigator !== "undefined" &&
+        /iP(hone|ad|od)/.test(navigator.userAgent || "") &&
+        typeof document !== "undefined";
+      const iosTock = () => {
+        try {
+          const lbl = document.createElement("label");
+          lbl.setAttribute("aria-hidden", "true");
+          lbl.style.display = "none";
+          const inp = document.createElement("input");
+          inp.type = "checkbox";
+          inp.setAttribute("switch", ""); // Safari 17.4+ renders an iOS switch → haptic on toggle
+          inp.tabIndex = -1;
+          lbl.appendChild(inp);
+          document.head.appendChild(lbl);
+          lbl.click();                    // toggling the switch plays the "tock" (must click the LABEL)
+          document.head.removeChild(lbl);
+        } catch { /* haptics are a bonus, never required */ }
+      };
       let lastHapticT = -1e9;
       const haptic = (ms: number, now: number) => {
         if (now - lastHapticT < 24) return; // throttle → distinct notches, not a buzz
         lastHapticT = now;
         if (canVibrate) { try { navigator.vibrate(ms); } catch { /* ignore */ } }
-        if (iosTick) { try { iosTick.click(); } catch { /* ignore */ } }
+        else if (isAppleTouch) iosTock();
       };
       let lastNotch = 0;
 
@@ -805,7 +820,6 @@ export default function RidgelineStage() {
         window.removeEventListener("pointerup", onUp);
         window.removeEventListener("pointercancel", onUp);
         window.removeEventListener("keydown", onKey);
-        if (iosTick?.parentNode) iosTick.parentNode.removeChild(iosTick);
       });
 
       // ---- B1 survey overlay: each frame, project the seven station anchors and
@@ -1490,7 +1504,12 @@ export default function RidgelineStage() {
         // overflows the width — pull the camera further back there so the ball fits comfortably.
         // mirrors the mountain's own zoomBase (radiusScale) aspect term. smooth(0,1,mc)=1 at mc=1
         // ⇒ mix01(globeStart, 1.0, 1) === 1.0 for ANY start, so the mountain dolly is byte-identical.
-        const globeStart = 1.45 + 1.00 * smooth(1.0, 0.5, aspectNow); // ~1.45 wide … ~2.45 portrait — a bit BIGGER home globe (req 5)
+        // ~1.45 wide … ~2.0 portrait. A smaller start-radius = the camera sits closer = a BIGGER,
+        // more-zoomed globe; the portrait term is pulled down (1.00 → 0.55) so the ball fills far
+        // more of a phone screen (req 3 "a bit bigger on iPhone" + req 7 "more focus/zoom on phone")
+        // while wide screens keep the authored framing. Still set back enough that the round
+        // silhouette clears the narrow width rather than cropping.
+        const globeStart = 1.45 + 0.55 * smooth(1.0, 0.5, aspectNow);
         // the Projects dial leans the camera a touch closer (DIAL_ZOOM<1) to emphasise the globe's
         // right part; mix01(1, DIAL_ZOOM, 0) === 1 so the Home/CV framing is byte-identical at projAmt 0.
         const globeRadius = mix01(globeStart, 1.0, smooth(0.0, 0.70, mc)) * mix01(1.0, DIAL_ZOOM, pCam);

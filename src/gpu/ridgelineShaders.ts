@@ -538,7 +538,11 @@ struct FOut {
   // dial opens, so the globe fills with DENSE, ordered rays. 'dial' gates it ⇒ identity on the mountain.
   // dR is the un-flowed radial ray out of the centre; co-rotate it by the same spin so the straightened
   // rays ride the (slowly drifting) ball. straightSel is reused below for the radial reach + glow.
-  let straightSel = step(0.40, fract(sseed * 13.0));
+  // req 4: the project-page tangle read as MESSY + too dense. Cut the share of lines that
+  // resolve into clean radial rays to ~45% (step 0.40 -> 0.55 => fewer survivors) and let the
+  // rest dissolve almost entirely below — so the dial settles into an ORDERED, less-dense
+  // radial pattern instead of a crowded scribble. (Gated by dial => identity on the mountain.)
+  let straightSel = step(0.55, fract(sseed * 13.0));
   let straightW   = smoothstep(0.0, 1.0, dial) * straightSel;
   let dR  = normalize(mdir);
   let sdR = vec3<f32>(dR.x * cs + dR.z * sn, dR.y, -dR.x * sn + dR.z * cs);
@@ -668,7 +672,10 @@ struct FOut {
   // rays. 'dial' gates it ⇒ identity on the mountain; (x*x) not pow (NaN-safe).
   let fw = (at.x - fract(tt * 0.5)) * 5.0;
   let formWave = exp(-fw * fw);
-  glow = glow * mix(1.0, 0.30, dial * (1.0 - straightSel));
+  // the non-ray lines (chaotic silk + interior mote dust — the bulk of the "mess") fade almost
+  // to nothing as the dial opens (0.30 → 0.06), so what remains is the clean ordered ray pattern
+  // (req 4 "less dense"); the rays ignite inner→outer as before.
+  glow = glow * mix(1.0, 0.06, dial * (1.0 - straightSel));
   glow = glow + straightSel * dial * (0.55 + 1.4 * formWave) * motion;
 
   var o : FOut;
@@ -679,7 +686,11 @@ struct FOut {
 
 @fragment fn fs(i : FOut) -> @location(0) vec4<f32> {
   // straight greyscale light (additive over black); the bloom pass turns the hot nodes to glow.
-  let g = max(i.glow, 0.0);
+  // GAIN: 4× MSAA spreads each 1-px line's coverage across its samples, so a thread's peak
+  // intensity resolves ~half as bright as the old un-multisampled hairline. Lift it so the
+  // tangle keeps its luminance and the hot nodes still cross the bloom threshold (req 1). The
+  // filament pass is globe-only (skipped at morph ≥ 0.72), so this never touches the mountain.
+  let g = max(i.glow, 0.0) * 1.55;
   return vec4<f32>(vec3<f32>(g), g);
 }
 `;

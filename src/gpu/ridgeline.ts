@@ -28,6 +28,12 @@ import {
 } from "./ridgelineShaders";
 
 const HDR: GPUTextureFormat = "rgba16float";
+// 4× MSAA on the scene pass. The intro globe is a tangle of 1-px ADDITIVE line-list
+// primitives that, un-multisampled, rasterise as hard aliased hairlines — brutal on a
+// high-DPR phone (req 1/3). MSAA hardware-anti-aliases every line + ridge silhouette,
+// and is cheap on the tile-based GPUs phones use (the resolve stays in tile memory), so
+// it lifts quality AND lets us drop the heavy supersample factor (see resize → req 2).
+const SAMPLES = 4;
 
 /* ---- INTRO GLOBE: the "ball of lines & letters" the terrain mesh is wrapped onto at
    morph = 0 and unravels from as morph → 1. The centre/radius MUST mirror the GLOBE_C /
@@ -783,9 +789,11 @@ export class RidgelineScene {
 
   private samp: GPUSampler;
 
-  private scene!: GPUTexture;
-  private depth!: GPUTexture;
+  private scene!: GPUTexture;     // resolved (single-sample) HDR scene — sampled by the bloom + composite
+  private sceneMS!: GPUTexture;   // 4× multisampled HDR render target, resolved into `scene`
+  private depth!: GPUTexture;     // 4× multisampled depth (hidden-line removal); never sampled, so never resolved
   private sceneView!: GPUTextureView;
+  private sceneMSView!: GPUTextureView;
   private depthView!: GPUTextureView;
 
   private bloomA!: GPUTexture;
@@ -951,6 +959,7 @@ export class RidgelineScene {
         primitive: { topology: "triangle-list" },
         // never write depth; the terrain (cleared depth 1.0) always draws over it
         depthStencil: { format: "depth24plus", depthWriteEnabled: false, depthCompare: "always" },
+        multisample: { count: SAMPLES },
       }),
       d.createRenderPipelineAsync({
         layout: framePL,
@@ -966,6 +975,7 @@ export class RidgelineScene {
         fragment: { module: terrain, entryPoint: "fs", targets: [{ format: HDR }] },
         primitive: { topology: "triangle-list", cullMode: "none" },
         depthStencil: { format: "depth24plus", depthWriteEnabled: true, depthCompare: "less" },
+        multisample: { count: SAMPLES },
       }),
     ]);
 
@@ -1002,6 +1012,7 @@ export class RidgelineScene {
       },
       primitive: { topology: "line-list" },
       depthStencil: { format: "depth24plus", depthWriteEnabled: false, depthCompare: "less-equal" },
+      multisample: { count: SAMPLES },
     });
 
     [this.brightPipe, this.blurPipe] = await Promise.all([
@@ -1036,26 +1047,49 @@ export class RidgelineScene {
     const d = this.g.device;
     this.canvas.width = Math.max(1, Math.round(W * dpr));
     this.canvas.height = Math.max(1, Math.round(H * dpr));
-    // supersample the HDR scene so the composite box-downsample yields clean,
-    // un-aliased hairlines and ridge silhouettes
-    this.sc = Math.min(dpr * 1.4, 2);
+    // 4× MSAA now does the line / silhouette anti-aliasing (see SAMPLES), so the old heavy
+    // 1.4× supersample is redundant. On COARSE-pointer devices (phones / tablets — the
+    // tile-based GPUs where the CV mountain's heavy per-fragment rock shader drops frames
+    // when orbiting, req 2) render the scene LIGHTER (≤ 1.5×) and lean on MSAA for crisp
+    // filament lines (req 1/3); the fragment cost falls with the square of the factor, so
+    // 2.0 → 1.5 is ~44% fewer shaded fragments. Desktop keeps a mild supersample on top of
+    // MSAA, capped so the multisampled rgba16float target never balloons in memory.
+    const coarse =
+      typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches;
+    this.sc = coarse ? Math.min(dpr, 1.5) : Math.min(dpr * 1.3, 1.75);
     const fit = (d.limits.maxTextureDimension2D - 16) / Math.max(W, H, 1);
     this.sc = Math.max(1, Math.min(this.sc, fit));
+    // bound the scene AREA so the 4× MSAA rgba16float target can't balloon on a big / high-DPI
+    // display (4 samples × 8 B ≈ 32 B/px): ~6 MP keeps the multisampled colour under ~190 MB.
+    // Never drops below 1 (native) — we don't render under the requested resolution.
+    const areaSc = Math.sqrt(6_000_000 / Math.max(W * H, 1));
+    this.sc = Math.max(1, Math.min(this.sc, areaSc));
     this.rw = Math.max(1, Math.round(W * this.sc));
     this.rh = Math.max(1, Math.round(H * this.sc));
 
     this.scene?.destroy();
+    this.sceneMS?.destroy();
     this.depth?.destroy();
     this.bloomA?.destroy();
     this.bloomB?.destroy();
 
+    // the single-sample RESOLVE target the bloom + composite read from
     this.scene = makeTarget(d, this.rw, this.rh, HDR);
+    // the multisampled color + depth the scene actually renders into; resolved into `scene`
+    this.sceneMS = d.createTexture({
+      size: { width: this.rw, height: this.rh },
+      format: HDR,
+      sampleCount: SAMPLES,
+      usage: GPUTextureUsage.RENDER_ATTACHMENT,
+    });
     this.depth = d.createTexture({
       size: { width: this.rw, height: this.rh },
       format: "depth24plus",
+      sampleCount: SAMPLES,
       usage: GPUTextureUsage.RENDER_ATTACHMENT,
     });
     this.sceneView = this.scene.createView();
+    this.sceneMSView = this.sceneMS.createView();
     this.depthView = this.depth.createView();
 
     const hw = Math.max(1, this.rw >> 1);
@@ -1136,13 +1170,22 @@ export class RidgelineScene {
     // ---- HDR scene: backdrop halo, then the solid contour mesh ----
     const pass = enc.beginRenderPass({
       colorAttachments: [
-        { view: this.sceneView, clearValue: { r: 0, g: 0, b: 0, a: 1 }, loadOp: "clear", storeOp: "store" },
+        {
+          // render multisampled, RESOLVE into the single-sample scene the post chain samples.
+          // storeOp "discard" drops the (large) MSAA buffer after the resolve — the resolve
+          // still runs — saving bandwidth, which matters most on the mobile GPUs (req 2).
+          view: this.sceneMSView,
+          resolveTarget: this.sceneView,
+          clearValue: { r: 0, g: 0, b: 0, a: 1 },
+          loadOp: "clear",
+          storeOp: "discard",
+        },
       ],
       depthStencilAttachment: {
         view: this.depthView,
         depthClearValue: 1.0,
         depthLoadOp: "clear",
-        depthStoreOp: "store",
+        depthStoreOp: "discard", // depth is never sampled afterwards
       },
     });
     pass.setBindGroup(0, this.frameBG);
@@ -1204,6 +1247,7 @@ export class RidgelineScene {
 
   dispose(): void {
     this.scene?.destroy();
+    this.sceneMS?.destroy();
     this.depth?.destroy();
     this.bloomA?.destroy();
     this.bloomB?.destroy();
