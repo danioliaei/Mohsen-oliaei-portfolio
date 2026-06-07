@@ -518,7 +518,7 @@ struct FOut {
   // forms (and the filament pass itself is skipped at morph>=0.72) — morph=1 stays byte-identical.
   let projGate = smoothstep(0.20, 0.0, morph);
   let dial = F.mph.w * projGate;             // 0..1 dial-open progress, INERT at morph>=0.20 ⇒ morph=1 untouched
-  let calmDown = mix(1.0, 0.10, dial);       // deeper rest as the dial opens (was 0.16) — the ball goes slow
+  let calmDown = mix(1.0, 0.16, dial);       // the chaotic silk calms, but the ordered rays keep moving (req 2)
   let flowAmt = mix(0.068, 0.020, isArm) * mix(1.35, 1.0, depth01) * motion * calmDown; // interior silk more alive
   d = normalize(d + tang * flowAmt);
 
@@ -534,11 +534,11 @@ struct FOut {
   let cs = cos(spinAng); let sn = sin(spinAng);
   var sd = vec3<f32>(d.x * cs + d.z * sn, d.y, -d.x * sn + d.z * cs);
 
-  // PROJECTS-DIAL STRAIGHTEN (req 2): a stable ~40% of lines straighten into clean RADIAL spokes as
-  // the dial opens, so the globe visibly sprouts straight rays from within. 'dial' gates it ⇒ identity
-  // on the mountain. dR is the un-flowed radial ray out of the centre; co-rotate it by the same spin so
-  // the straightened rays ride the (now slow) ball. straightSel is reused below for the reach/glow.
-  let straightSel = step(0.60, fract(sseed * 13.0));
+  // PROJECTS-DIAL STRAIGHTEN (req 2): a stable ~60% of lines straighten into clean RADIAL spokes as the
+  // dial opens, so the globe fills with DENSE, ordered rays. 'dial' gates it ⇒ identity on the mountain.
+  // dR is the un-flowed radial ray out of the centre; co-rotate it by the same spin so the straightened
+  // rays ride the (slowly drifting) ball. straightSel is reused below for the radial reach + glow.
+  let straightSel = step(0.40, fract(sseed * 13.0));
   let straightW   = smoothstep(0.0, 1.0, dial) * straightSel;
   let dR  = normalize(mdir);
   let sdR = vec3<f32>(dR.x * cs + dR.z * sn, dR.y, -dR.x * sn + dR.z * cs);
@@ -554,15 +554,18 @@ struct FOut {
   let hc = cos(ho); let hs = sin(ho);
   sd = vec3<f32>(sd.x * hc + sd.z * hs, sd.y, -sd.x * hs + sd.z * hc);
 
-  // straightened rays push their TIP through the rim (reach) and root their inner end DEEPER (pull),
-  // so they read as STEMMING FROM INSIDE the globe (req 2). Gate by (1 - drainPre) so this stretch and
-  // the morph-collapse below never fight. at.x is t along the thread (0 inner → 1 tip). Clamp the radial
-  // scale to a small positive so a deep inner end never crosses the centre (NaN-safe direction).
-  let drainPre = clamp(smoothstep(0.06, 0.34, morph) * (1.4 - depth01 * 0.8), 0.0, 1.0);
-  let reach = mix(0.0, 0.55, dial) * straightSel * (1.0 - drainPre);
-  let pull  = mix(0.0, 0.06, dial) * straightSel * (1.0 - at.x) * (1.0 - drainPre);
-  let rDial = max(pumpR + reach * at.x - pull, 0.01); // floor below the min pumpR (~0.0198) so it is a
-  // no-op at dial=0 (home globe stays byte-identical), yet still keeps rDial positive once pull applies
+  // straightened rays sprout OUTWARD from their shell toward the rim — clean, ray-like segments (kept
+  // SHORT so the curl barely bends over their length ⇒ they read as DENSE, ordered rays, not spirals),
+  // capped JUST INSIDE the rim so the bordered ball stays clear (req 3) and the project chart owns the
+  // space OUTSIDE it. at.x is t along the thread (0 inner → 1 tip). A gentle wave keyed to the ray's OWN
+  // longitude breathes their length in an ordered, mesmerizing ripple (req 2) instead of holding dead-
+  // still. straightW gates it ⇒ rDial = pumpR (the byte-identical home globe) at dial = 0; max() keeps
+  // the deep inner end NaN-safe.
+  let rayLon = atan2(mdir.x, mdir.z);
+  let rayBreathe = 1.0 + 0.18 * sin(tt * 1.1 + rayLon * 3.0) * motion;
+  let reach = 0.40 * straightSel * rayBreathe;   // outward length when fully straightened
+  let rayR  = min(pumpR + reach * at.x, 0.95);    // sprout from the shell to JUST INSIDE the rim
+  let rDial = max(mix(pumpR, rayR, straightW), 0.01);
   var world = F_GLOBE_C + F_GLOBE_R * rDial * sd;
 
   // ===== MORPH — the globe is not crossfaded out; it FUNNELS down the summit axis and is consumed
@@ -660,13 +663,13 @@ struct FOut {
   let fr = (at.w - clamp(morph * 2.4, 0.0, 1.4)) * 7.0;
   glow = glow * (1.0 + 1.6 * exp(-fr * fr));
 
-  // PROJECTS-DIAL FORMATION (req 6): as the dial opens the straightening armature IGNITES inner→outer
-  // (a bead of light travels each ray) while the non-straightened silk RECEDES — the chaos resolves
-  // into the organized rays. 'dial' gates it ⇒ identity on the mountain; (x*x) not pow (NaN-safe).
+  // PROJECTS-DIAL FORMATION (req 2): as the dial opens the ordered rays IGNITE inner→outer (a bright bead
+  // races along each ray) while the non-straightened silk RECEDES — the chaos resolves into dense, lit
+  // rays. 'dial' gates it ⇒ identity on the mountain; (x*x) not pow (NaN-safe).
   let fw = (at.x - fract(tt * 0.5)) * 5.0;
   let formWave = exp(-fw * fw);
-  glow = glow * mix(1.0, 0.45, dial * (1.0 - straightSel));
-  glow = glow + straightSel * dial * (0.4 + 1.3 * formWave) * motion;
+  glow = glow * mix(1.0, 0.30, dial * (1.0 - straightSel));
+  glow = glow + straightSel * dial * (0.55 + 1.4 * formWave) * motion;
 
   var o : FOut;
   o.pos  = F.vp * vec4<f32>(world, 1.0);
