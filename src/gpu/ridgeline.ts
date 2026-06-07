@@ -127,10 +127,10 @@ export const CLOUD_CHARS: string[] = CHAR_CLOUD.chars;
    radial shell) → 7 floats; stride 28 B, matching the pipeline's attributes. ---- */
 export const FILAMENT_FLOATS_PER_VERT = 7;
 const FIL_NODES = 48;       // bright convergence points (Fibonacci lattice)
-const FIL_PER_NODE = 24;    // threads spun out from each node
+const FIL_PER_NODE = 16;    // threads spun out from each node (was 24 → a calmer, less overdrawn tangle; the dominant segment count, so this is the main complexity lever)
 const FIL_STEPS = 28;       // points sampled per thread
 const FIL_STEP_ANG = 0.082; // radians advanced per step → a long sweeping arc (~2.2 rad)
-const FIL_SPARKS = 5;       // short bright segments crossing each surface node
+const FIL_SPARKS = 4;       // short bright segments crossing each surface node (was 5; slightly calmer node stars to match the lighter tangle)
 // nested radial shells the curl threads inhabit (a thread is assigned one by f % FIL_SHELLS.length)
 // so the ball reads as a deep, LAYERED VOLUME of filaments — five shells from the deep interior
 // (0.34) out to the crust (1.0), the layered "well" the eye can fall into.
@@ -142,8 +142,8 @@ const NUCLEUS_SPARKS = 96;    // short crossing sparks forming the glowing core 
 // ---- THE DEEP ORRERY additions: interior dust filling the void between shells, counter-precessing
 // great-circle gimbal rings, and a slow halo orbiting the nucleus — all riding the EXISTING sentinel
 // classes so the morph (drain/lift/fade) is untouched and the morph=1 mountain stays byte-identical.
-const MOTE_COUNT = 3600;      // interior dust specks filling the void BETWEEN the shells (class [0,1))
-const RING_COUNT = 14;        // great-circle gimbal rings that counter-precess (armature, class [1,2))
+const MOTE_COUNT = 2400;      // interior dust specks filling the void BETWEEN the shells (class [0,1)) — was 3600; thinner dust reads calmer while still texturing all depths
+const RING_COUNT = 10;        // great-circle gimbal rings that counter-precess (armature, class [1,2)) — was 14; fewer interlocking rings = a cleaner orrery cage
 const RING_SEGS = 132;        // segments per gimbal ring (smooth at globe scale)
 const HALO_SEGS = 96;         // segments per nucleus orbital-halo ring (class [2,3))
 // the line CLASS is encoded as a sentinel range in the `seed` float (at.y), read in the VS via
@@ -404,8 +404,8 @@ const phoneRender = (): boolean =>
   typeof matchMedia === "function" &&
   (matchMedia("(pointer: coarse)").matches || matchMedia("(max-width: 860px)").matches);
 const PHONE_NX = 520, PHONE_NZ = 290;  // terrain mesh LOD (vs 760×420 → ~150k tris, ~76% fewer — TBDR vertex/binning win; contour LINES are shader-drawn so density is unchanged)
-const PHONE_FIL_PER_NODE = 18;         // globe curl-threads per node (vs 24 → a lighter tangle, less additive overdraw)
-const PHONE_MOTE_COUNT = 2400;         // globe interior dust motes (vs 3600)
+const PHONE_FIL_PER_NODE = 13;         // globe curl-threads per node (vs desktop 16 → an even lighter phone tangle, less additive overdraw + smaller init VBO)
+const PHONE_MOTE_COUNT = 1700;         // globe interior dust motes (vs desktop 2400 → lighter phone dust, smaller init VBO)
 const PHONE_LINE_SCALE = 1.25;         // contour spacing ×: 1 = desktop, 1.25 ≈ 20% fewer lines on the mountain (F.lod.x)
 const PHONE_SC_CAP = 2.5;              // HDR scene supersample cap (vs 2 → crisper hairlines at the higher phone DPR)
 
@@ -480,6 +480,28 @@ const ORBIT = (() => {
     elev: Math.asin(ry / radius), // the rest framing's gentle up-tilt
   };
 })();
+
+/* ---- INTRO GLOBE camera fit -------------------------------------------------
+   The mc = 0 end of the morph dolly: a camera radius-scale (× ORBIT.radius) that sizes the
+   intro ball so its silhouette nearly reaches the screen SIDES on every aspect, with a
+   tasteful cap on how far it may spill past the top/bottom of a WIDE frame (a round ball
+   can't reach a wide screen's left/right edges without also exceeding its height). The stage
+   eases globeRadius from this → 1.0 by mc ≈ 0.70, so the finished-mountain framing is
+   byte-identical regardless of what this returns. The DOM letter-cloud + survey project
+   through the SAME ridgeCamera, so the fit stays consistent for free. */
+const GLOBE_FILL_W = 0.9;   // silhouette reaches this fraction of the half-WIDTH where it fits (phones / near-square)
+const GLOBE_BLEED_V = 1.24; // …but never past this fraction of the half-HEIGHT (>1 ⇒ a gentle top/bottom bleed on wide screens)
+export function globeFitRadiusScale(aspect: number): number {
+  const vHalf = FOVY / 2;
+  const hHalf = Math.atan(Math.tan(vHalf) * Math.max(aspect, 0.2));
+  // silhouette half-angle: as wide as the side-fill wants, but clamped by the vertical-bleed cap
+  const theta = Math.min(GLOBE_FILL_W * hHalf, GLOBE_BLEED_V * vHalf);
+  // asin(R / D) = theta ⇒ D = R / sin(theta); the radius-scale is D / ORBIT.radius (D ≈ ORBIT.radius·gs
+  // to < 0.1% — verified by projecting the rim). Clamped so the eye never nears the ball on ultra-wide
+  // nor pulls absurdly far on ultra-tall.
+  const gs = GLOBE.r / Math.sin(theta) / ORBIT.radius;
+  return Math.min(3.6, Math.max(0.85, gs));
+}
 
 /** Absolute elevation clamp (rad): the floor keeps the eye above the dune plain
  *  when tilting up under the peak; the ceiling stops shy of a top-down survey so
@@ -697,7 +719,7 @@ function heightAtJS(x: number, z: number): number {
   const gully = ridged(x * 0.003 + 41.0, z * 0.00118 + 9.0);
   h += gully * 520 * gate;
   const gully2 = ridged(x * 0.0068 + 5.0, z * 0.0025 + 23.0);
-  h += gully2 * 195 * gate;
+  h += gully2 * 120 * gate; // MUST mirror RIDGE_FIELD_WGSL gully2 weight (heightAt) → pickBand parity
   const plain = fbm2(x * 0.00042 + 21.0, z * 0.00052 + 21.0);
   const plain2 = fbm2(x * 0.00022 + 81.0, z * 0.00026 + 81.0);
   h += plain * 220 + plain2 * 300;
@@ -879,7 +901,7 @@ export class RidgelineScene {
     // back as a higher render DPR (sharper lines). Resolved once here at construction. ----
     const phone = phoneRender();
     this.lineScale = phone ? PHONE_LINE_SCALE : 1;
-    this.scCap = phone ? PHONE_SC_CAP : 2;
+    this.scCap = phone ? PHONE_SC_CAP : 2.25; // desktop supersample cap (was 2 → +crispness; the lighter globe/mountain geometry frees the fill budget). Phone stays at PHONE_SC_CAP (fill/thermal-bound).
     const nx = phone ? PHONE_NX : NX;
     const nz = phone ? PHONE_NZ : NZ;
 

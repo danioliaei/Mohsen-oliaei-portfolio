@@ -40,12 +40,26 @@ body::after {
 }
 
 /* ---------------- header ---------------- */
+/* Entrance animations live here (not in `motion`) so the header paints + animates with no
+   JS library on the critical path — see Header.tsx. Mirrors the old framer-motion values:
+   header fade/slide-down (y -18 → 0, 0.9s, delay 0.1s); nav links fade/slide (y -10 → 0,
+   0.6s, per-link delay set inline). `both` fill-mode holds the hidden start state through
+   the delay, matching motion's `initial`. */
+@keyframes header-enter {
+  from { opacity: 0; transform: translateY(-18px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes navlink-enter {
+  from { opacity: 0; transform: translateY(-10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
 header {
   position: fixed;
   top: 0;
   left: 0;
   right: 0;
   z-index: 40;
+  animation: header-enter 0.9s cubic-bezier(0.22, 1, 0.36, 1) 0.1s both;
   /* the bar spans the full width but only the wordmark + nav links should catch
      clicks — let its empty centre band fall through to the apex beacon (and the
      orbit canvas) beneath, which otherwise sit under this z-40 stacking context */
@@ -88,6 +102,15 @@ nav a {
   color: rgba(244, 241, 234, 0.78);
   text-decoration: none;
   transition: color 0.3s ease;
+  animation: navlink-enter 0.6s cubic-bezier(0.22, 1, 0.36, 1) both; /* per-link delay set inline (Header.tsx) */
+}
+/* the scene already honours reduced-motion; the header should too — skip the entrance
+   slide/fade and land straight in its resting state. */
+@media (prefers-reduced-motion: reduce) {
+  header,
+  nav a {
+    animation: none;
+  }
 }
 nav a::after {
   content: "";

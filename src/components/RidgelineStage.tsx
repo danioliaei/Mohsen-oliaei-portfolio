@@ -12,6 +12,7 @@ import {
   pickBand,
   GLOBE,
   GLOBE_SPIN_RATE,
+  globeFitRadiusScale,
   MORPH_DUR,
   CLOUD_CHARS,
   CHAR_CLOUD,
@@ -1517,19 +1518,14 @@ export default function RidgelineStage() {
         }
         focusShiftY += (shiftYTarget - focusShiftY) * fk;
 
-        // a cinematic dolly: the globe sits whole in the middle of the frame, then the camera
-        // flies in as it assembles, settling to the authored mountain framing exactly at mc = 1
-        // (globeRadius → 1, so the end framing is untouched). The START radius is aspect-aware:
-        // FOVY is vertical, so on a tall/narrow phone (aspect → 0.5) a landscape-tuned globe
-        // overflows the width — pull the camera further back there so the ball fits comfortably.
-        // mirrors the mountain's own zoomBase (radiusScale) aspect term. smooth(0,1,mc)=1 at mc=1
-        // ⇒ mix01(globeStart, 1.0, 1) === 1.0 for ANY start, so the mountain dolly is byte-identical.
-        // clamp the portrait shrinkage so a tall PHONE renders the globe BIGGER: treat very-tall
-        // aspects as if ~0.66 wide (less camera pull-back ⇒ a closer, bigger globe). Desktop /
-        // landscape (aspect ≥ 0.66) is unchanged, and the morph endpoint stays byte-identical
-        // (smooth(0,0.70,1)=1 at mc=1). Raise the 0.66 floor toward ~0.72 for an even bigger globe
-        // (watch for the ball clipping the screen sides on very-tall phones).
-        const globeStart = 1.66 + 1.10 * smooth(1.0, 0.5, Math.max(aspectNow, 0.66)); // ~1.66 wide … ~2.5 portrait (bigger globe on phone)
+        // a cinematic dolly: the globe sits whole and LARGE — its silhouette nearly reaching the
+        // screen SIDES (aspect-aware, see globeFitRadiusScale) — then the camera settles to the
+        // authored mountain framing exactly at mc = 1. globeRadius eases globeStart → 1.0 by
+        // mc ≈ 0.70, and mix01(globeStart, 1.0, 1) === 1.0 for ANY start, so the finished-mountain
+        // dolly is byte-identical no matter how big the globe is framed. On wide screens the fit
+        // pulls the camera a touch CLOSER than the mountain (globeStart < 1 ⇒ a gentle pull-back as
+        // it assembles); on tall phones it stays further back (globeStart > 1 ⇒ the fly-in).
+        const globeStart = globeFitRadiusScale(aspectNow);
         // the Projects dial leans the camera a touch closer (DIAL_ZOOM<1) to emphasise the globe's
         // right part; mix01(1, DIAL_ZOOM, 0) === 1 so the Home/CV framing is byte-identical at projAmt 0.
         const globeRadius = mix01(globeStart, 1.0, smooth(0.0, 0.70, mc)) * mix01(1.0, DIAL_ZOOM, pCam);
