@@ -19,11 +19,11 @@ import {
 } from "../gpu/ridgeline";
 import RoleOverlay from "./RoleOverlay";
 import AssignmentOverlay from "./AssignmentOverlay";
-import ProjectsOverlay, { type ProjectsDialDom } from "./ProjectsOverlay";
+import ProjectsOverlay, { type ProjectsDialDom, TL_PAD_FRAC } from "./ProjectsOverlay";
 import type { PerfHandle } from "../perf/harness";
 import type { SceneInfo } from "../perf/types";
 import { STATIONS } from "../data/stations";
-import { PROJECTS, formatMonthYearLong } from "../data/projects";
+import { PROJECTS, formatMonthYearLong, decimalYear, TIME_MIN, TIME_MAX } from "../data/projects";
 
 /* =========================================================================
    RidgelineStage — mounts the monochrome ridgeline experiment.
@@ -76,19 +76,18 @@ const HEADER_SAFE = 110; // px — callouts stay below the full-width site heade
 const APEX = { x: 0, y: 5230, z: 8200 };
 const BEACON_TAU = 0.3; // s — how the beacon eases in / out (overlay open, off-screen)
 
-// ---- Projects "Dial" (see ProjectsOverlay) -------------------------------------
-// The Projects view parks the globe LEFT and zooms into its RIGHT hemisphere, then fans the
-// ~80 project spokes out to the right as a DENSE, tight radial chart (a career almanac) — the
-// selected one resting at 3 o'clock; dragging the globe (a knob) scrolls the selection. These
-// constants drive the screen-space fan the rAF loop welds to the projected globe each frame.
-// SLOT is the dial rotation per project (the selection wheel — NOT the orbit DETENT); the visible
-// window is ±DIAL_VIS spokes mapped LINEARLY across ±DIAL_FAN_HALF, so the fill stays dense no
-// matter the count. Each spoke's inner end roots INSIDE the globe (DIAL_R_INNER_*) so it reads as
-// emerging from within; major projects reach further (DIAL_L_MAJOR) than minor ones (DIAL_L_MINOR).
-// The fan only renders >860px (mobile uses the vertical list), where the globe is large enough.
+// ---- Projects "Transit" timeline (see ProjectsOverlay) -------------------------
+// The Projects view CALMS the globe, shrinks it to a luminous MOON, lifts it into the sky,
+// and plots the whole career as a horizontal RIDGELINE along an ember baseline — ~80 vertical
+// "signal" stems, one per project, placed by date (x) and authored elevation (height), tracing
+// two massifs with a central R&D valley exactly like the WiFi-SSID data-art reference. The moon
+// then TRANSITS the range left↔right as you scrub, riding the cresting skyline; the project under
+// it is the selection. These constants drive the screen-space plot the rAF loop welds each frame
+// (`updateTimeline`) + the moon's flight. The trace is desktop-only (mobile uses the list).
 const DIAL_N = PROJECTS.length; // the project count (>= 1; DIAL_SLOT divides by it)
-const DIAL_SLOT = TWO_PI / DIAL_N; // selection-wheel step
-// a deterministic 0..1 jitter per spoke (FNV-1a over the id) so the dense fan's lengths read
+const DIAL_SLOT = TWO_PI / DIAL_N; // scrub step — `dialAngle` is reused as the (eased) scrub knob
+const DIAL_MAX_ANGLE = (DIAL_N - 1) * DIAL_SLOT; // LINEAR clamp — a timeline doesn't wrap like the old dial
+// a deterministic 0..1 jitter per stem (FNV-1a over the id) so the dense trace's heights/labels read
 // hand-plotted rather than mechanical — stable across frames, no Math.random in the loop.
 const DIAL_JIT = PROJECTS.map((p) => {
   let h = 2166136261;
@@ -98,25 +97,33 @@ const DIAL_JIT = PROJECTS.map((p) => {
   }
   return ((h >>> 0) % 1000) / 1000;
 });
-const DIAL_FAN_HALF = (32 * Math.PI) / 180; // visible half-window — a focused rightward WEDGE off the big globe's
-// right hemisphere (a wider window throws the long spokes off the top/bottom of a globe this size)
-const DIAL_VIS = 26; // spokes drawn on EACH side of the detent (≈53 live at once; the rest wrap to the back & hide)
-const DIAL_ARC_FADE = (7 * Math.PI) / 180; // fade band before the cull at the window edge
-const DIAL_L_MAJOR = 0.92; // flagship spoke reach past the rim (× the globe screen radius) — reaches well out
-const DIAL_L_MINOR = 0.34; // minor / study spoke reach (kept short → strong length contrast, tight near the rim)
-const DIAL_L_SEL_BONUS = 0.14; // extra reach lent to the selected (detent) spoke
-const DIAL_L_JIT = 0.1; // ± per-spoke length jitter (× Rs) — the organic, hand-plotted reference texture
-const DIAL_R_INNER_SEL = 0.3; // selected inner anchor as a fraction of Rs — roots DEEPEST inside the globe
-const DIAL_R_INNER_MIN = 0.5; // near-detent inner anchor (inside the rim)
-const DIAL_R_INNER_MAX = 0.82; // far-spoke inner anchor (still just inside the rim)
-const DIAL_DRAW_STAGGER = 0.16; // projAmt span between the centre spoke drawing out and the outermost
-const DIAL_PAN = 0.6; // NDC_x left-pan of the globe when the dial opens (wide screens only) — parks it further left
-const DIAL_ZOOM = 0.8; // globe camera-radius mult at full dial (smaller = closer = bigger → its right side fills)
-const DIAL_SENS = 1.7; // rad of dial per canvas-height of horizontal drag
-const DIAL_SMOOTH_TAU = 0.15; // s — ease displayed angle → target (a heavier, weightier knob)
+// per-project plot inputs, precomputed once: xFrac (0..1 along the date axis) + the authored tip
+// elevation (−0.4..1.0). The envelope traces two massifs + a central valley (see projects.ts).
+const TL_XFRAC = PROJECTS.map(
+  (p) => (decimalYear(p.date) - TIME_MIN) / (TIME_MAX - TIME_MIN),
+);
+const TL_ELEV = PROJECTS.map((p) => p.elevation);
+
+const TL_PAD = TL_PAD_FRAC; // left/right padding as a fraction of width (matches the year ticks)
+const TL_BASE_Y = 0.7; // baseline height as a fraction of canvas height (the lower third)
+const TL_AMP_UP = 0.34; // a 1.0 elevation tip reaches this fraction of H ABOVE the baseline
+const TL_AMP_DN = 0.16; // a −1.0 tip reaches this fraction of H BELOW the baseline (the study entries)
+const TL_STEM_JIT = 0.035; // ± per-stem height jitter (× H) — the organic, hand-plotted reference texture
+const TL_DRAW_SPAN = 0.4; // projAmt span between the leftmost stem rising and the rightmost (left→right plot-on)
+const TL_DRAW_RISE = 0.42; // how long each individual stem takes to rise (in projAmt)
+
+// the MOON — the calmed, shrunk globe that flies the range ------------------------
+const TL_SHRINK = 4.0; // globe camera-radius mult at full transit (bigger = further = a smaller moon)
+const TL_MOON_SKY = 0.37; // the moon's resting sky altitude (fraction of H from the top) over a 0-elevation tip
+const TL_MOON_FOLLOW = 0.27; // 0..1 — how much the moon's altitude tracks the tip elevation under it (rides the skyline)
+const TL_MOON_MARGIN_X = 0.13; // keep the moon's centre this far (× W) from the screen sides so it never clips off
+const TL_MOON_MIN_Y = 0.19; // never let the moon ride above this (× H) — clear of the header / close control
+const TL_ENTRY_LEFT_POS = 0.0; // the continuous scrub position the moon sweeps IN from on open (0 = the first project, 2014)
+const DIAL_SENS = 1.7; // rad of scrub per canvas-height of horizontal drag
+const DIAL_SMOOTH_TAU = 0.16; // s — ease displayed scrub → target (a weighty glide)
 const DIAL_INERTIA_TAU = 0.6; // s — release-flick decay
 const DIAL_MAX_VEL = 3.4; // rad/s — inertia cap
-const DIAL_SNAP_VEL = 0.06; // rad/s — below this (and not dragging) settle to the detent
+const DIAL_SNAP_VEL = 0.06; // rad/s — below this (and not dragging) settle to the nearest project
 const DIAL_SNAP_TAU = 0.18; // s — detent settle ease
 const PROJ_OPEN_TAU = 0.36; // s — projAmt 0→1
 const PROJ_CLOSE_TAU = 0.24; // s — projAmt 1→0
@@ -533,28 +540,27 @@ export default function RidgelineStage() {
       const mix01 = (a: number, b: number, t: number) => a + (b - a) * t;
       let hintOpacity = 0;      // eased opacity of the bottom "drag to rotate" cue (globe-only, loop-owned)
 
-      // ---- Projects "Dial" loop state (shared by the frame + the projects-mode pointer/key
-      // handlers + updateDial, all in this one closure). projAmt eases the whole dial in/out;
-      // dialAngle is the eased displayed knob angle (tDialAngle its target); selecting reads the
-      // project nearest the 3-o'clock detent. The globe's idle spin fades out as projAmt rises and
-      // the dial drives the spin instead, so the ball turns 1:1 with the knob.
-      let projAmt = 0;            // 0 = no dial … 1 = dial fully open (globe parked left, calmed)
-      let dialAngle = 0;          // eased displayed knob angle (rad)
-      let tDialAngle = 0;         // target knob angle the drag/keys/snap steer
+      // ---- Projects "Transit" loop state (shared by the frame + the projects-mode pointer/key
+      // handlers + updateTimeline, all in this one closure). projAmt eases the whole timeline in/out;
+      // dialAngle is the eased displayed scrub position (tDialAngle its target); selecting reads the
+      // project nearest the scrub detent. The globe's idle spin fades out as projAmt rises and the
+      // scrub drives a gentle roll instead, so the moon turns as it travels the range.
+      let projAmt = 0;            // 0 = no timeline … 1 = fully open (globe calmed → moon, trace plotted)
+      // opens settled on the LATEST project (2026); the moon sweeps IN from the left across the
+      // whole range to land there (see the entry sweep in the frame loop).
+      let dialAngle = DIAL_MAX_ANGLE;  // eased displayed scrub position (rad; 0 = first project … DIAL_MAX_ANGLE = last)
+      let tDialAngle = DIAL_MAX_ANGLE; // target scrub the drag/keys/snap steer (clamped 0..DIAL_MAX_ANGLE)
       let velDial = 0;            // rad/s — release-flick inertia
-      let dialSelected = 0;       // project index nearest the 3-o'clock detent
+      let dialSelected = 0;       // project index nearest the scrub detent
       let dialPrevSelected = -1;  // last frame's selection (roving tabindex / announce on change)
       let dialDragging = false;
       let dialStartAngle = 0, dialStartX = 0; // drag anchor
       let dialLastNotch = 0;      // detent-tick bookkeeping during a drag
-      const dialMobile = () =>    // narrow → the vertical list owns it; the fan never runs
+      const dialMobile = () =>    // narrow → the vertical list owns it; the trace never runs
         typeof matchMedia === "function" && matchMedia("(max-width: 860px)").matches;
-      // snap the dial to project i the SHORT way round (fold the delta to ±π)
+      // glide the moon to project i — LINEAR (clamped to the range; a timeline never wraps)
       const dialGoto = (i: number) => {
-        let delta = (i * DIAL_SLOT - tDialAngle) % TWO_PI;
-        if (delta > Math.PI) delta -= TWO_PI;
-        if (delta < -Math.PI) delta += TWO_PI;
-        tDialAngle += delta;
+        tDialAngle = Math.min(DIAL_MAX_ANGLE, Math.max(0, i * DIAL_SLOT));
         velDial = 0;
         stopInviting();
       };
@@ -677,7 +683,11 @@ export default function RidgelineStage() {
           lastT = e.timeStamp;
           const rot = ((2 * Math.PI) / Math.max(cvs.clientHeight, 1)) * DIAL_SENS;
           const prev = tDialAngle;
-          tDialAngle = dialStartAngle + (e.clientX - dialStartX) * rot; // drag right → next project
+          // drag right → moon glides to a LATER project; clamped to the linear range (no wrap)
+          tDialAngle = Math.min(
+            DIAL_MAX_ANGLE,
+            Math.max(0, dialStartAngle + (e.clientX - dialStartX) * rot),
+          );
           velDial = Math.max(
             -DIAL_MAX_VEL,
             Math.min(DIAL_MAX_VEL, velDial * 0.5 + ((tDialAngle - prev) / ddt) * 0.5),
@@ -799,8 +809,10 @@ export default function RidgelineStage() {
           projectsOpenRef.current &&
           (e.key.startsWith("Arrow") || e.key === "Home" || e.key === "End")
         ) {
-          if (e.key === "ArrowUp" || e.key === "ArrowLeft") tDialAngle -= DIAL_SLOT;
-          else if (e.key === "ArrowDown" || e.key === "ArrowRight") tDialAngle += DIAL_SLOT;
+          if (e.key === "ArrowUp" || e.key === "ArrowLeft")
+            tDialAngle = Math.max(0, tDialAngle - DIAL_SLOT);
+          else if (e.key === "ArrowDown" || e.key === "ArrowRight")
+            tDialAngle = Math.min(DIAL_MAX_ANGLE, tDialAngle + DIAL_SLOT);
           else if (e.key === "Home") dialGoto(0);
           else if (e.key === "End") dialGoto(DIAL_N - 1);
           velDial = 0;
@@ -1194,14 +1206,14 @@ export default function RidgelineStage() {
         }
       };
 
-      // ---- Projects DIAL welder: project the globe centre + a rim point through the LIVE vp,
-      // then lay out the project spokes as a screen-space fan on the globe's right hemisphere —
-      // the selected project horizontal at 3 o'clock, neighbours arcing up/down, the rest wrapping
-      // around the back (hidden). Mirrors updateCloud/updateSurvey: imperative DOM writes only, so
-      // nothing re-renders React and the fan stays welded to the (panned) globe. The fan is
-      // desktop-only; the narrow layout uses the vertical list, which only needs its selected class.
-      const updateDial = (
-        vp: Float32Array,
+      // ---- Projects TIMELINE welder: lay the career out as a horizontal RIDGELINE in pure screen
+      // space — an ember baseline, one vertical "signal" stem per project placed by date (x) and
+      // authored elevation (height), each label standing at its tip (reading upward like the
+      // reference's SSID columns). The stems plot ON left→right as the view opens (pDraw); the labels
+      // resolve last (pLabel); the selected stem lights amber. The moon (the GPU globe) is flown over
+      // the selected tip separately in the frame loop. Imperative DOM writes only — nothing re-renders
+      // React, so scrubbing stays buttery. Desktop-only; the narrow layout uses the vertical list.
+      const updateTimeline = (
         W: number,
         H: number,
         amt: number,
@@ -1212,114 +1224,84 @@ export default function RidgelineStage() {
         const dom = dialDomRef.current;
         if (!dom) return;
         const mobile = dialMobile();
-        // masthead readout + mobile-list selection track every frame (cheap text/class writes).
-        // NAME only now (req 5) — the place is dropped from the live readout.
+        // masthead readout + mobile-list selection track every frame (cheap text/class writes)
         if (dom.plate) dom.plate.textContent = `PLATE ${String(sel + 1).padStart(2, "0")} / ${DIAL_N}`;
         if (dom.live) dom.live.textContent = PROJECTS[sel].title.toUpperCase();
+        // mobile list: selection class + roving tabindex (only the selected row is tabbable, so the
+        // ~80-row list isn't a tab trap — mirrors the desktop label roving tabindex below).
         if (dom.listItems.length === DIAL_N)
-          for (let i = 0; i < DIAL_N; i++)
-            dom.listItems[i].classList.toggle("is-selected", i === sel);
+          for (let i = 0; i < DIAL_N; i++) {
+            const it = dom.listItems[i];
+            it.classList.toggle("is-selected", i === sel);
+            (it as HTMLElement).tabIndex = i === sel ? 0 : -1;
+          }
 
-        const { lines, nodes, glows, labels } = dom;
-        if (labels.length === DIAL_N && !mobile) {
-          const c = projectToScreen(vp, GLOBE.cx, GLOBE.cy, GLOBE.cz, W, H);
-          const ed = projectToScreen(vp, GLOBE.cx + GLOBE.r, GLOBE.cy, GLOBE.cz, W, H);
-          const Rs = Math.hypot(ed.x - c.x, ed.y - c.y) || 1; // projected globe radius (px)
-          // skip the fan layout on a degenerate projection (hold the last-good transforms); the
-          // SR announce below still runs so selection stays accessible.
-          if (c.visible && Rs >= 8 && Rs <= W * 3) {
-            const fadeStart = DIAL_FAN_HALF - DIAL_ARC_FADE;
-            for (let i = 0; i < DIAL_N; i++) {
-              // signed wheel distance from the selected detent, folded to the nearest wrap
-              let k = (((i - sel) % DIAL_N) + DIAL_N) % DIAL_N;
-              if (k > DIAL_N / 2) k -= DIAL_N;
-              const ak = Math.abs(k);
-              const line = lines[i], node = nodes[i], glow = glows[i], label = labels[i];
-              if (ak > DIAL_VIS) {
-                // beyond the visible window → wrapped round the back of the dial, hidden
-                line.style.display = "none";
-                node.style.display = "none";
-                if (glow) glow.style.display = "none";
-                label.style.display = "none";
-                (label as HTMLElement).tabIndex = -1;
-                continue;
-              }
-              const isSel = k === 0;
-              // map k LINEARLY onto the right-hemisphere arc so the fill stays dense at any count
-              // (screen y is down → negate sin for a +up angle)
-              const a = (k / DIAL_VIS) * DIAL_FAN_HALF;
-              const aa = Math.abs(a);
-              const ca = Math.cos(a), sa = Math.sin(a);
+        const { stems, nodes, labels, axis } = dom;
+        if (stems.length === DIAL_N && !mobile) {
+          const padPx = TL_PAD * W;
+          const plotW = W - 2 * padPx;
+          const baseY = TL_BASE_Y * H;
+          const ampUp = TL_AMP_UP * H;
+          const ampDn = TL_AMP_DN * H;
+          const jitH = TL_STEM_JIT * H;
 
-              // INNER endpoint INSIDE the globe (req 2): the selected spoke roots deepest, the far
-              // spokes start near the rim — so every line reads as STEMMING FROM WITHIN the ball.
-              const tNear = 1 - ak / DIAL_VIS; // 1 at the detent → 0 at the window edge
-              const innerFrac = isSel
-                ? DIAL_R_INNER_SEL
-                : DIAL_R_INNER_MIN + (DIAL_R_INNER_MAX - DIAL_R_INNER_MIN) * (1 - tNear);
-              const innerR = Rs * innerFrac;
-              const ix = c.x + innerR * ca, iy = c.y - innerR * sa;
+          // the ember baseline wipes in left→right with the trace (spans the full width; the gradient
+          // stroke fades both screen edges so it bleeds into the dark like the reference's red line).
+          // The fade gradient is userSpaceOnUse, so its x-vector is pinned to the live canvas width
+          // (the 12%/88% stops then track the viewport regardless of how far the wipe has drawn).
+          if (axis) {
+            const pAxis = smooth(0.06, 0.5, amt);
+            axis.setAttribute("x1", "0");
+            axis.setAttribute("y1", baseY.toFixed(1));
+            axis.setAttribute("x2", (W * pAxis).toFixed(1));
+            axis.setAttribute("y2", baseY.toFixed(1));
+            axis.style.opacity = amt.toFixed(3);
+          }
+          if (dom.axisGrad) dom.axisGrad.setAttribute("x2", W.toFixed(0));
 
-              // OUTER reach: major reaches further than minor, plus a stable per-spoke jitter for
-              // the organic texture and a bump for the selected spoke; tapered as it nears the cull.
-              const base = PROJECTS[i].major ? DIAL_L_MAJOR : DIAL_L_MINOR;
-              const jit = (DIAL_JIT[i] - 0.5) * 2 * DIAL_L_JIT;
-              const edgeShorten = aa > fadeStart ? 1 - 0.55 * smooth(fadeStart, DIAL_FAN_HALF, aa) : 1;
-              const Lf = (base + jit + (isSel ? DIAL_L_SEL_BONUS : 0)) * edgeShorten;
-              const fullOutR = Rs + Rs * Math.max(0.12, Lf); // final tip radius (px from centre)
+          for (let i = 0; i < DIAL_N; i++) {
+            const stem = stems[i], node = nodes[i], label = labels[i];
+            const isSel = i === sel;
+            const up = TL_ELEV[i] >= 0;
+            const sx = padPx + TL_XFRAC[i] * plotW;
+            const jit = (DIAL_JIT[i] - 0.5) * 2 * jitH;
+            // tip Y: rise above (positive elevation) or hang below (negative) the baseline, + a touch
+            // of organic jitter so the dense trace reads hand-plotted (screen y grows downward)
+            const tipY = baseY - TL_ELEV[i] * (up ? ampUp : ampDn) - jit;
 
-              // staggered OUTWARD draw (req 6): the centre spoke leads, outer ones trail by an
-              // angular fraction — the fan unfurls from the detent outward, out of the globe.
-              const delay = (ak / DIAL_VIS) * DIAL_DRAW_STAGGER;
-              const grow = smooth(delay, Math.min(1, delay + 0.42), pDraw); // 0→1 for this spoke
-              const headR = innerR + (fullOutR - innerR) * grow;
-              const hx = c.x + headR * ca, hy = c.y - headR * sa; // the live head / node ride this
+            // staggered plot-on: the leftmost stem rises first, the rightmost trails — a seismograph
+            // trace being drawn. Each stem grows from the baseline up to its tip.
+            const delay = TL_XFRAC[i] * TL_DRAW_SPAN;
+            const grow = smooth(delay, Math.min(1, delay + TL_DRAW_RISE), pDraw);
+            const headY = baseY + (tipY - baseY) * grow;
+            const op = (amt * grow).toFixed(3);
 
-              // opacity: edge fade × master amt × this spoke's draw progress
-              const edgeFade = aa > fadeStart ? 1 - smooth(fadeStart, DIAL_FAN_HALF, aa) : 1;
-              const op = (edgeFade * amt * grow).toFixed(3);
+            stem.setAttribute("x1", sx.toFixed(1));
+            stem.setAttribute("y1", baseY.toFixed(1));
+            stem.setAttribute("x2", sx.toFixed(1));
+            stem.setAttribute("y2", headY.toFixed(1));
+            stem.style.opacity = op;
+            node.setAttribute("cx", sx.toFixed(1));
+            node.setAttribute("cy", headY.toFixed(1));
+            node.style.opacity = op;
 
-              line.style.display = "";
-              node.style.display = "";
-              label.style.display = "";
-              line.setAttribute("x1", ix.toFixed(1));
-              line.setAttribute("y1", iy.toFixed(1));
-              line.setAttribute("x2", hx.toFixed(1));
-              line.setAttribute("y2", hy.toFixed(1));
-              line.style.opacity = op;
-              node.setAttribute("cx", hx.toFixed(1));
-              node.setAttribute("cy", hy.toFixed(1));
-              node.style.opacity = op;
-              if (glow) {
-                glow.setAttribute("cx", hx.toFixed(1));
-                glow.setAttribute("cy", hy.toFixed(1));
-                glow.style.display = isSel ? "" : "none";
-              }
+            // the label stands at the tip, reading UPWARD for peaks / DOWNWARD for the below-axis
+            // studies (rotate ∓90°). transform-origin is the box top-left (CSS); the trailing
+            // translateY(-50%) drops the rotated column's centre onto the stem — font-size-relative,
+            // so the selected label (which grows to 12px) stays centred instead of shifting. It rises
+            // into place as it resolves.
+            const labelGrow = smooth(delay, Math.min(1, delay + 0.5), pLabel);
+            const slide = (1 - labelGrow) * (up ? 7 : -7);
+            const ly = tipY + (up ? -9 : 9) + slide;
+            label.style.transform =
+              `translate(${sx.toFixed(1)}px, ${ly.toFixed(1)}px) rotate(${up ? -90 : 90}deg) translateY(-50%)`;
+            label.style.opacity = (amt * labelGrow).toFixed(3);
+            (label as HTMLElement).tabIndex = isSel ? 0 : -1;
 
-              // RADIAL TEXT along the spoke (req 3): rotate the label to the spoke's screen angle.
-              // CSS rotate is clockwise-positive and our `a` is +up ⇒ deg = −a·180/π. The whole fan
-              // lives on the RIGHT hemisphere (|a| ≤ 80° ⇒ cos a > 0), so text always reads outward
-              // and never inverts — no flip needed. The label's transform-origin is its box top-left
-              // (CSS), so the trailing translateY(-50%) drops the text's vertical centre onto the
-              // spoke line; it slides out a touch as it resolves, trailing the drawn head.
-              const deg = (-a * 180) / Math.PI;
-              const labelGrow = smooth(delay, Math.min(1, delay + 0.5), pLabel);
-              const tipX = c.x + (fullOutR + 10) * ca, tipY = c.y - (fullOutR + 10) * sa;
-              const slide = (1 - labelGrow) * 8;
-              label.style.transform =
-                `translate(${tipX.toFixed(1)}px, ${tipY.toFixed(1)}px) rotate(${deg.toFixed(2)}deg)` +
-                ` translate(${slide.toFixed(1)}px, 0) translateY(-50%)`;
-              label.style.opacity = (edgeFade * amt * labelGrow).toFixed(3);
-              (label as HTMLElement).tabIndex = isSel ? 0 : -1;
-
-              // only the selected (amber accent) + major (heavier weight) classes survive — no
-              // near/far tiers now (name-only, req 5)
-              line.classList.toggle("is-selected", isSel);
-              node.classList.toggle("is-selected", isSel);
-              if (glow) glow.classList.toggle("is-selected", isSel);
-              label.classList.toggle("is-selected", isSel);
-              label.classList.toggle("is-major", PROJECTS[i].major);
-            }
+            stem.classList.toggle("is-selected", isSel);
+            node.classList.toggle("is-selected", isSel);
+            label.classList.toggle("is-selected", isSel);
+            label.classList.toggle("is-major", PROJECTS[i].major);
           }
         }
 
@@ -1334,7 +1316,7 @@ export default function RidgelineStage() {
           const act = typeof document !== "undefined" ? document.activeElement : null;
           if (
             act &&
-            (act.classList?.contains("dial-label") || act.classList?.contains("dial-list-item"))
+            (act.classList?.contains("tl-label") || act.classList?.contains("dial-list-item"))
           ) {
             (mobile ? dom.listItems[sel] : labels[sel])?.focus?.();
           }
@@ -1373,41 +1355,41 @@ export default function RidgelineStage() {
           ? mClock
           : mClock * mClock * mClock * (mClock * (mClock * 6 - 15) + 10);
 
-        // ---- Projects DIAL clocks. projAmt eases in only once the globe is actually present
-        // (mc<0.15), so opening from CV waits for the mountain to dissolve. The knob angle eases
-        // toward its target with a release-flick + a detent snap; while closed it unwinds to rest.
+        // ---- Projects TIMELINE clocks. projAmt eases in only once the globe is actually present
+        // (mc<0.15), so opening from CV waits for the mountain to dissolve. The scrub eases toward
+        // its target with a release-flick + a per-project detent snap, clamped to the linear range.
         const projTarget = projectsOpenRef.current && mc < 0.15 ? 1 : 0;
         const projTau = projTarget > projAmt ? PROJ_OPEN_TAU : PROJ_CLOSE_TAU;
         projAmt += (projTarget - projAmt) * (reduceMotion ? 1 : 1 - Math.exp(-dt / projTau));
         if (projTarget === 0 && projAmt < 1e-3) projAmt = 0;
-        // ---- mesmerizing transition phase windows (req 6): sub-ranges of the SAME monotonic
-        // projAmt, so the close reverses the open exactly. pCam LEADS (the camera pans the globe
-        // further left + zooms into its right hemisphere); pDraw unfurls the spokes OUT of the
-        // globe; pLabel resolves the radial labels last, trailing the drawn heads. (The shell
-        // straighten + DoF blur ride F.mph.w = projAmt directly in the shaders, shaped there.)
+        // ---- mesmerizing transition phase windows: sub-ranges of the SAME monotonic projAmt, so the
+        // close reverses the open exactly. pCam LEADS (the globe calms, shrinks to a moon + lifts to
+        // the sky, then flies in from the left); pDraw plots the stems up out of the baseline left→
+        // right; pLabel resolves the labels last. (The filament calm + DoF ride F.mph.w = projAmt in
+        // the shaders, shaped there.)
         const pCam = smooth(0.0, 0.55, projAmt);
-        const pDraw = smooth(0.34, 1.0, projAmt);
-        const pLabel = smooth(0.62, 1.0, projAmt);
+        const pDraw = smooth(0.3, 1.0, projAmt);
+        const pLabel = smooth(0.58, 1.0, projAmt);
         if (projectsOpenRef.current) {
           if (!dialDragging) {
             velDial *= Math.exp(-dt / DIAL_INERTIA_TAU);
             tDialAngle += velDial * dt;
+            // a timeline doesn't wrap: clamp to the linear range and kill the flick at the ends
+            if (tDialAngle <= 0) { tDialAngle = 0; if (velDial < 0) velDial = 0; }
+            else if (tDialAngle >= DIAL_MAX_ANGLE) { tDialAngle = DIAL_MAX_ANGLE; if (velDial > 0) velDial = 0; }
             if (Math.abs(velDial) < DIAL_SNAP_VEL) {
-              const snap = Math.round(tDialAngle / DIAL_SLOT) * DIAL_SLOT; // settle to the nearest detent
+              const snap = Math.min(
+                DIAL_MAX_ANGLE,
+                Math.max(0, Math.round(tDialAngle / DIAL_SLOT) * DIAL_SLOT),
+              ); // settle to the nearest project
               tDialAngle += (snap - tDialAngle) * (reduceMotion ? 1 : 1 - Math.exp(-dt / DIAL_SNAP_TAU));
               if (Math.abs(velDial) < 1e-4) velDial = 0;
             }
-            if (Math.abs(tDialAngle) > 6 * Math.PI) { // unwind a many-flick spin without a visible jump
-              const fold = Math.round(tDialAngle / TWO_PI) * TWO_PI;
-              tDialAngle -= fold; dialAngle -= fold;
-            }
           }
           dialAngle += (tDialAngle - dialAngle) * (reduceMotion ? 1 : 1 - Math.exp(-dt / DIAL_SMOOTH_TAU));
-        } else if (projAmt > 0) {
-          tDialAngle = 0; velDial = 0; // closing: unwind to rest so a reopen starts fresh
-          dialAngle += (0 - dialAngle) * (reduceMotion ? 1 : 1 - Math.exp(-dt / DIAL_SMOOTH_TAU));
         }
-        dialSelected = ((Math.round(dialAngle / DIAL_SLOT) % DIAL_N) + DIAL_N) % DIAL_N;
+        // closing keeps the scrub where the viewer left it, so a reopen lands on the same project.
+        dialSelected = Math.min(DIAL_N - 1, Math.max(0, Math.round(dialAngle / DIAL_SLOT)));
 
         // tighten the pitch walls from the wide GLOBE range to the authored MOUNTAIN range as the
         // morph runs; re-clamp the target so a wide globe tilt eases inside the new walls instead of
@@ -1498,14 +1480,69 @@ export default function RidgelineStage() {
         if (focused) focusBand = selectedRef.current as number;
         else if (focusAmt < 0.01) focusBand = -1;
 
-        // pan the massif into the clear RIGHT of the dossier while focused — but only
-        // on a wide (desktop) viewport, where the overlay is a left column beside the
-        // mountain; on a tall phone the overlay stacks vertically, so keep it centred.
-        // Eased by focusAmt so the slide tracks the dolly in and out.
         const wide = smooth(1.0, 1.4, aspectNow);
-        // the dossier focus pans the massif RIGHT; the Projects dial pans the globe LEFT (so its
-        // right hemisphere faces the open right where the spokes fan). Both are wide-screen only.
-        const focusShift = focusAmt * 0.42 * wide - DIAL_PAN * pCam * wide;
+
+        // a cinematic dolly: the globe sits whole and LARGE — its silhouette nearly reaching the
+        // screen SIDES (aspect-aware, see globeFitRadiusScale) — then the camera settles to the
+        // authored mountain framing exactly at mc = 1. globeRadius eases globeStart → 1.0 by
+        // mc ≈ 0.70, and mix01(globeStart, 1.0, 1) === 1.0 for ANY start, so the finished-mountain
+        // dolly is byte-identical no matter how big the globe is framed. While Projects is open the
+        // globe SHRINKS to a moon (× TL_SHRINK further away), eased by pCam; mix01(1, TL_SHRINK, 0)
+        // === 1 so the Home/CV framing is byte-identical at projAmt 0.
+        // the timeline trace is desktop-only (the narrow layout uses the vertical list), so the
+        // moon shrink + transit run there too; on a phone the globe stays the full calm ball behind
+        // the list. tlActive gates both, and is 0 at projAmt 0 ⇒ Home/CV framing byte-identical.
+        const tlActive = projAmt > 0.001 && !dialMobile();
+        const globeStart = globeFitRadiusScale(aspectNow);
+        const globeRadius =
+          mix01(globeStart, 1.0, smooth(0.0, 0.70, mc)) * mix01(1.0, TL_SHRINK, tlActive ? pCam : 0);
+        const rscale = radiusScale * globeRadius;
+
+        // pan: the dossier focus (mountain) slides the massif RIGHT into the clear flank; the
+        // Projects timeline FLIES the moon over the selected stem. The transit solves the pure lens
+        // shift that lands the projected globe centre on the moon's screen target (moonX, moonY) and
+        // moves the depth-of-field focal point + the CSS spotlight with it, so the moon stays crisp
+        // wherever it travels. Both are wide-screen aware; the dossier term is zero while Projects is up.
+        let focusShift = focusAmt * 0.42 * wide;
+        let transitShiftY = 0;
+        let focalX = 0.5, focalY = 0.5;
+        if (tlActive) {
+          const W = cvs.clientWidth, H = cvs.clientHeight;
+          // the continuous scrub position (eased), then the open-sweep: the moon flies IN from the
+          // left of the range to the selected project as the view opens (entryT), and back on close.
+          const scrubPos = Math.min(DIAL_MAX_ANGLE, Math.max(0, dialAngle)) / DIAL_SLOT;
+          const entryT = smooth(0.18, 0.94, projAmt);
+          const moonPos = TL_ENTRY_LEFT_POS + (scrubPos - TL_ENTRY_LEFT_POS) * entryT;
+          // sample the plot envelope at the (continuous) moon position
+          const i0 = Math.max(0, Math.min(DIAL_N - 1, Math.floor(moonPos)));
+          const i1 = Math.min(DIAL_N - 1, i0 + 1);
+          const f = Math.max(0, Math.min(1, moonPos - i0));
+          const xFrac = TL_XFRAC[i0] + (TL_XFRAC[i1] - TL_XFRAC[i0]) * f;
+          const elev = TL_ELEV[i0] + (TL_ELEV[i1] - TL_ELEV[i0]) * f;
+          // ride the skyline — a resting sky altitude that lifts over peaks / dips into the valley;
+          // both axes clamped so the moon stays fully on screen and clear of the header at the extremes.
+          const moonX = Math.min(
+            (1 - TL_MOON_MARGIN_X) * W,
+            Math.max(TL_MOON_MARGIN_X * W, (TL_PAD + xFrac * (1 - 2 * TL_PAD)) * W),
+          );
+          const moonY = Math.max(TL_MOON_MIN_Y * H, TL_MOON_SKY * H - TL_MOON_FOLLOW * elev * TL_AMP_UP * H);
+          // project the globe centre with NO lens shift, then solve the translation that lands it on
+          // (moonX, moonY). Eased in by pCam ⇒ no shift at projAmt 0 (byte-identical Home/CV).
+          const cu = projectToScreen(
+            ridgeCamera(yaw, pitch, aspectNow, t, rscale, 0, 0).vp,
+            GLOBE.cx, GLOBE.cy, GLOBE.cz, W, H,
+          );
+          focusShift = ((moonX - cu.x) / (W / 2)) * pCam;
+          transitShiftY = ((cu.y - moonY) / (H / 2)) * pCam; // +up
+          focalX = Math.min(1, Math.max(0, moonX / W));
+          focalY = Math.min(1, Math.max(0, moonY / H));
+          // slide the CSS focus spotlight under the moon (the DOM companion to the GPU DoF)
+          const frost = dialDomRef.current?.frost;
+          if (frost) {
+            frost.style.setProperty("--fx", `${(focalX * 100).toFixed(1)}%`);
+            frost.style.setProperty("--fy", `${(focalY * 100).toFixed(1)}%`);
+          }
+        }
 
         // lift the SELECTED ring to a comfortable framing height. The dolly-in keeps
         // aiming at the summit, so without this the low (early-career) rings near the
@@ -1515,7 +1552,8 @@ export default function RidgelineStage() {
         // shiftY = 0): lift the ring toward FOCUS_AIM_Y, but never by more than what
         // keeps the foot at FOCUS_FOOT — so the widest dune rings (whose foot is right
         // at the mesh edge) rise into view without baring black sky below the mountain.
-        // max(0, …) pulls only UP, leaving the high summit rings already-framed.
+        // max(0, …) pulls only UP, leaving the high summit rings already-framed. (Mountain
+        // focus only — selBand is null while Projects is open.)
         let shiftYTarget = 0;
         const selBand = selectedRef.current;
         if (selBand != null) {
@@ -1533,18 +1571,10 @@ export default function RidgelineStage() {
         }
         focusShiftY += (shiftYTarget - focusShiftY) * fk;
 
-        // a cinematic dolly: the globe sits whole and LARGE — its silhouette nearly reaching the
-        // screen SIDES (aspect-aware, see globeFitRadiusScale) — then the camera settles to the
-        // authored mountain framing exactly at mc = 1. globeRadius eases globeStart → 1.0 by
-        // mc ≈ 0.70, and mix01(globeStart, 1.0, 1) === 1.0 for ANY start, so the finished-mountain
-        // dolly is byte-identical no matter how big the globe is framed. On wide screens the fit
-        // pulls the camera a touch CLOSER than the mountain (globeStart < 1 ⇒ a gentle pull-back as
-        // it assembles); on tall phones it stays further back (globeStart > 1 ⇒ the fly-in).
-        const globeStart = globeFitRadiusScale(aspectNow);
-        // the Projects dial leans the camera a touch closer (DIAL_ZOOM<1) to emphasise the globe's
-        // right part; mix01(1, DIAL_ZOOM, 0) === 1 so the Home/CV framing is byte-identical at projAmt 0.
-        const globeRadius = mix01(globeStart, 1.0, smooth(0.0, 0.70, mc)) * mix01(1.0, DIAL_ZOOM, pCam);
-        const rscale = radiusScale * globeRadius;
+        // the vertical shift the moon/mountain renders with: the transit while the desktop timeline
+        // is open, otherwise the eased mountain ring-lift.
+        const fShiftY = tlActive ? transitShiftY : focusShiftY;
+
         gpu.render({
           time: t,
           yaw,
@@ -1558,7 +1588,9 @@ export default function RidgelineStage() {
           focusAmt: landed ? focusAmt : 0,
           radiusScale: rscale,
           focusShift,
-          focusShiftY,
+          focusShiftY: fShiftY,
+          focalX,
+          focalY,
           projAmt,
         });
 
@@ -1578,18 +1610,18 @@ export default function RidgelineStage() {
         // from the mountain on a return Home — and dropped once the mountain is whole.
         const aspect = cvs.clientWidth / Math.max(cvs.clientHeight, 1);
         if (mc < 0.999) {
-          const cam = ridgeCamera(yaw, pitch, aspect, t, rscale, focusShift, focusShiftY);
-          // spinOut (idle + dial) so the cloud co-rotates with the GPU ball in BOTH phases
+          const cam = ridgeCamera(yaw, pitch, aspect, t, rscale, focusShift, fShiftY);
+          // spinOut (idle + scrub roll) so the cloud co-rotates with the GPU ball in BOTH phases
           updateCloud(cam.vp, cam.eye, spinOut, mc, cvs.clientWidth, cvs.clientHeight);
-          // the chaotic letter-cloud is part of "the mess" — fade it out as the dial organises
+          // the chaotic letter-cloud is part of "the mess" — fade it out as the trace organises
           if (cloudRef.current) cloudRef.current.style.opacity = (1 - projAmt).toFixed(3);
-          // weld the Projects dial spokes + labels to the SAME projected (panned) globe
+          // plot the Projects timeline — pure screen space, independent of the (transiting) globe
           if (projAmt > 0.002)
-            updateDial(cam.vp, cvs.clientWidth, cvs.clientHeight, projAmt, dialSelected, pDraw, pLabel);
+            updateTimeline(cvs.clientWidth, cvs.clientHeight, projAmt, dialSelected, pDraw, pLabel);
         } else if (cloudRef.current && cloudRef.current.style.visibility !== "hidden") {
           cloudRef.current.style.visibility = "hidden"; // mountain is whole — drop the cloud
         }
-        updateSurvey(yaw, pitch, t, dt, rscale, focusShift, focusShiftY, mc);
+        updateSurvey(yaw, pitch, t, dt, rscale, focusShift, fShiftY, mc);
         raf = requestAnimationFrame(frame);
       };
       raf = requestAnimationFrame(frame);
