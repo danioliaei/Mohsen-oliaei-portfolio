@@ -1046,8 +1046,11 @@ export class RidgelineScene {
     this.canvas.width = Math.max(1, Math.round(W * dpr));
     this.canvas.height = Math.max(1, Math.round(H * dpr));
     // supersample the HDR scene so the composite box-downsample yields clean,
-    // un-aliased hairlines and ridge silhouettes
-    this.sc = Math.min(dpr * 1.4, 2);
+    // un-aliased hairlines and ridge silhouettes. On a LOW-dpr display the 1.4× boost
+    // earns its fill; on a retina device (dpr ≥ 1.5) the native density is already crisp,
+    // so cap the scene at the canvas dpr rather than paying for an oversized HDR target —
+    // this is the phone throttle lever (keeps the scene ≤ canvas resolution).
+    this.sc = Math.min(dpr * 1.4, Math.max(dpr, 1.5), 2);
     const fit = (d.limits.maxTextureDimension2D - 16) / Math.max(W, H, 1);
     this.sc = Math.max(1, Math.min(this.sc, fit));
     this.rw = Math.max(1, Math.round(W * this.sc));

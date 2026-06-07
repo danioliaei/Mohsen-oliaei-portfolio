@@ -403,7 +403,15 @@ export default function RidgelineStage() {
       teardown.push(() => gpu.dispose());
 
       const resize = () => {
-        const dpr = Math.min(window.devicePixelRatio || 1, 2);
+        // Phones are fill-rate-bound and thermally throttle the full-DPR scene: on-device
+        // telemetry showed a DPR-3 iPhone holding a locked 60fps cold, then settling to
+        // ~45fps after ~75s as the SoC heats (see TELEMETRY.md). Cap the render DPR lower on
+        // small / touch viewports — rendering the 804×1428 HDR target at 1.5× instead of 2×
+        // cuts per-frame fill ~44%, enough headroom to hold 60fps through a soak. Desktop
+        // keeps the crisp 2× cap.
+        const phone =
+          matchMedia("(pointer: coarse)").matches || matchMedia("(max-width: 860px)").matches;
+        const dpr = Math.min(window.devicePixelRatio || 1, phone ? 1.5 : 2);
         gpu.resize(cvs.clientWidth, cvs.clientHeight, dpr);
       };
       resize();
