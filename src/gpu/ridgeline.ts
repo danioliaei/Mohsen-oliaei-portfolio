@@ -457,11 +457,17 @@ export interface RidgeFrame {
   /** Motion gate 0..1 for the intro filament flow: 1 = the threads shimmer/stream, 0 =
    *  the web holds still (set to 0 on prefers-reduced-motion). Defaults to 1. */
   motion?: number;
-  /** Projects-dial CALM 0..1 (mph.w): 0 = the chaotic globe; 1 = the filament threads
-   *  settle toward near-stillness as the Projects dial opens. INERT unless the globe is
-   *  showing — the shader gates it by (morph→0) and the filament pass is skipped at
-   *  morph>=0.72, so it can never alter the finished mountain. Defaults to 0. */
+  /** Projects-timeline CALM 0..1 (mph.w): 0 = the chaotic globe; 1 = the filament threads
+   *  settle toward near-stillness as the Projects timeline opens (the globe becomes a moon).
+   *  INERT unless the globe is showing — the shader gates it by (morph→0) and the filament
+   *  pass is skipped at morph>=0.72, so it can never alter the finished mountain. Defaults to 0. */
   projAmt?: number;
+  /** Depth-of-field FOCAL POINT in composite UV (0..1, y down): the crisp centre the
+   *  Projects DoF keeps in focus while the rest of the frame edges soften. Defaults to
+   *  (0.5, 0.5) — frame centre — so at projAmt 0 the dead DoF branch is byte-identical;
+   *  while the moon transits, this tracks it so it never blurs. (Packed into lod.y/lod.z.) */
+  focalX?: number;
+  focalY?: number;
 }
 
 /* ---- orbit camera: drag to spin a full turn around the summit -------------
@@ -1186,9 +1192,12 @@ export class RidgelineScene {
     // filament flow (0 on reduced-motion → the web holds still), defaulting to 1. projAmt calms the
     // filaments as the Projects dial opens (globe-only; defaults to 0 → today's chaotic ball).
     u[36] = s.morph ?? 1; u[37] = s.globeSpin ?? 0; u[38] = s.motion ?? 1; u[39] = s.projAmt ?? 0;
-    // lod = (contourScale, _, _, _) — widens the mountain's scan-line + fine-contour spacing on
-    // phones (F.lod.x), so the terrain reads with fewer, cleaner lines. 1.0 on desktop.
+    // lod = (contourScale, focalX, focalY, _) — x widens the mountain's scan-line + fine-contour
+    // spacing on phones (1.0 on desktop); y/z carry the Projects depth-of-field FOCAL POINT in
+    // composite UV (default frame-centre 0.5,0.5 ⇒ the DoF dead branch stays byte-identical).
     u[40] = this.lineScale;
+    u[41] = s.focalX ?? 0.5;
+    u[42] = s.focalY ?? 0.5;
     this.g.device.queue.writeBuffer(this.uBuf, 0, u.buffer, 0, 256);
   }
 

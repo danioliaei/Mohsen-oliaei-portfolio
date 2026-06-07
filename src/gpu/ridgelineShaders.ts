@@ -535,12 +535,14 @@ struct FOut {
   let cs = cos(spinAng); let sn = sin(spinAng);
   var sd = vec3<f32>(d.x * cs + d.z * sn, d.y, -d.x * sn + d.z * cs);
 
-  // PROJECTS-DIAL STRAIGHTEN (req 2): a stable ~40% of lines straighten into clean RADIAL spokes as
-  // the dial opens, so the globe visibly sprouts straight rays from within. 'dial' gates it ⇒ identity
-  // on the mountain. dR is the un-flowed radial ray out of the centre; co-rotate it by the same spin so
-  // the straightened rays ride the (now slow) ball. straightSel is reused below for the reach/glow.
+  // PROJECTS SETTLE: as the timeline opens the globe calms to a MOON — a stable ~40% of lines
+  // GENTLY organize toward their radial direction (a faint structuring of the chaos), but do NOT
+  // sprout spokes: the reach below is near-zero so the silhouette stays a clean round ball (the
+  // career now plots as the DOM ridgeline, not GPU rays). 'dial' gates it ⇒ identity on the mountain.
+  // dR is the un-flowed radial ray out of the centre; co-rotate it by the same spin so the organized
+  // lines ride the (now slow) ball. straightSel is reused below for the settle glow.
   let straightSel = step(0.60, fract(sseed * 13.0));
-  let straightW   = smoothstep(0.0, 1.0, dial) * straightSel;
+  let straightW   = smoothstep(0.0, 1.0, dial) * straightSel * 0.5;
   let dR  = normalize(mdir);
   let sdR = vec3<f32>(dR.x * cs + dR.z * sn, dR.y, -dR.x * sn + dR.z * cs);
   sd = normalize(mix(sd, sdR, straightW));
@@ -555,13 +557,14 @@ struct FOut {
   let hc = cos(ho); let hs = sin(ho);
   sd = vec3<f32>(sd.x * hc + sd.z * hs, sd.y, -sd.x * hs + sd.z * hc);
 
-  // straightened rays push their TIP through the rim (reach) and root their inner end DEEPER (pull),
-  // so they read as STEMMING FROM INSIDE the globe (req 2). Gate by (1 - drainPre) so this stretch and
+  // a WHISPER of tip reach / inner pull keeps the organized lines from looking dead-flat, but stays
+  // tiny so the moon's silhouette stays round (the old 0.55 reach sprouted the radial dial spokes —
+  // gone now that the career plots as the DOM ridgeline). Gate by (1 - drainPre) so this stretch and
   // the morph-collapse below never fight. at.x is t along the thread (0 inner → 1 tip). Clamp the radial
   // scale to a small positive so a deep inner end never crosses the centre (NaN-safe direction).
   let drainPre = clamp(smoothstep(0.06, 0.34, morph) * (1.4 - depth01 * 0.8), 0.0, 1.0);
-  let reach = mix(0.0, 0.55, dial) * straightSel * (1.0 - drainPre);
-  let pull  = mix(0.0, 0.06, dial) * straightSel * (1.0 - at.x) * (1.0 - drainPre);
+  let reach = mix(0.0, 0.05, dial) * straightSel * (1.0 - drainPre);
+  let pull  = mix(0.0, 0.04, dial) * straightSel * (1.0 - at.x) * (1.0 - drainPre);
   let rDial = max(pumpR + reach * at.x - pull, 0.01); // floor below the min pumpR (~0.0198) so it is a
   // no-op at dial=0 (home globe stays byte-identical), yet still keeps rDial positive once pull applies
   var world = F_GLOBE_C + F_GLOBE_R * rDial * sd;
@@ -716,13 +719,16 @@ fn hash12(p : vec2<f32>) -> f32 {
   s = s + textureSample(sceneTex, samp, uv + vec2<f32>(-0.5, -0.5) * texel).rgb;
   var col = s * 0.25;
 
-  // ---- PROJECTS-DIAL depth-of-field (req 2): while the dial is open (F.mph.w>0) soften the FRAME
-  // EDGES and far globe rim, keeping the centred focal hemisphere crisp — the "we've focused" cue.
-  // Dead branch at projAmt=0 (Home/CV) ⇒ byte-identical. toC is hoisted here (the vignette reuses it).
+  // ---- PROJECTS depth-of-field: while the timeline is open (F.mph.w>0) soften the frame AWAY from
+  // the moon's focal point, keeping the moon crisp — the "we've focused" cue. The focal point
+  // (F.lod.yz, composite UV) TRACKS the transiting moon so it never blurs as it flies the range.
+  // Dead branch at projAmt=0 (Home/CV) ⇒ byte-identical. toC (frame centre) drives the vignette;
+  // toF (focal) drives the blur.
   let toC = uv - vec2<f32>(0.5, 0.5);
+  let toF = uv - vec2<f32>(F.lod.y, F.lod.z);
   let dof = F.mph.w;
   if (dof > 0.001) {
-    let edgeK = smoothstep(0.18, 0.62, dot(toC, toC) * 2.0); // 0 centre (focal) → 1 corners
+    let edgeK = smoothstep(0.20, 0.70, dot(toF, toF) * 2.0); // 0 on the moon (focal) → 1 away from it
     let blurR = 2.6 * edgeK * dof;
     var b = textureSample(sceneTex, samp, uv + vec2<f32>( 1.0,  0.0) * blurR * texel).rgb;
     b = b + textureSample(sceneTex, samp, uv + vec2<f32>(-1.0,  0.0) * blurR * texel).rgb;

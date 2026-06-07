@@ -1488,48 +1488,51 @@ canvas#ridge:active {
    pointer-events:none on the root so a drag on empty space falls through to the
    canvas (the knob); only the controls catch clicks.
    =========================================================================== */
-.projects-dial-root {
+.projects-tl-root {
   position: fixed;
   inset: 0;
   z-index: 30;
   color: var(--ink);
-  pointer-events: none; /* the empty field stays a drag surface for the globe-knob */
+  pointer-events: none; /* the empty field stays a drag surface for the moon-scrub */
   --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Fira Code", Menlo, Consolas, monospace;
 }
-.projects-dial-root .role-close {
+.projects-tl-root .role-close {
   pointer-events: auto; /* the root is click-through; the close control is not */
 }
 
-/* a whisper-soft top+bottom scrim so the masthead + labels stay legible — NOT the
-   old heavy centre frost; the live globe must read through clear in the middle. */
-.projects-dial-frost {
+/* the focus scrim — a whisper top/bottom wash so the masthead + year axis stay legible, plus a
+   warm SPOTLIGHT pool the rAF loop slides under the transiting moon (vars --fx/--fy, in %): the
+   DOM companion to the GPU depth-of-field, selling "the moon is in focus" as it flies the range. */
+.projects-tl-frost {
   position: absolute;
   inset: 0;
   z-index: 0;
   pointer-events: none;
-  /* a soft radial vignette centred on the focal point (the panned globe's right hemisphere, ~34%
-     across) pools the corners — the CSS companion to the GPU depth-of-field edge blur, selling the
-     "we've focused" cue — over the existing whisper top+bottom scrim that keeps the masthead legible. */
+  /* default focal point matches the moon's resting sky altitude (TL_MOON_SKY ≈ 0.37) so the
+     spotlight doesn't jump on the first open frame before the loop starts writing --fx/--fy. */
+  --fx: 50%;
+  --fy: 37%;
   background:
-    radial-gradient(120% 90% at 34% 50%, rgba(6, 7, 10, 0) 38%, rgba(6, 7, 10, 0.42) 100%),
+    radial-gradient(46% 46% at var(--fx) var(--fy), rgba(255, 196, 92, 0.07) 0%, rgba(255, 196, 92, 0) 70%),
+    radial-gradient(135% 120% at var(--fx) var(--fy), rgba(6, 7, 10, 0) 28%, rgba(6, 7, 10, 0.52) 100%),
     linear-gradient(
       180deg,
-      rgba(6, 7, 10, 0.5) 0%,
-      rgba(6, 7, 10, 0) 26%,
-      rgba(6, 7, 10, 0) 70%,
-      rgba(6, 7, 10, 0.5) 100%
+      rgba(6, 7, 10, 0.55) 0%,
+      rgba(6, 7, 10, 0) 22%,
+      rgba(6, 7, 10, 0) 62%,
+      rgba(6, 7, 10, 0.6) 100%
     );
   opacity: 0;
-  animation: dial-frost-in 0.5s cubic-bezier(0.22, 1, 0.36, 1) 0.1s forwards;
+  animation: tl-frost-in 0.55s cubic-bezier(0.22, 1, 0.36, 1) 0.1s forwards;
 }
-@keyframes dial-frost-in {
+@keyframes tl-frost-in {
   to {
     opacity: 1;
   }
 }
 
 /* masthead — the surveyor spine, top-left, in the shared site grammar */
-.projects-dial-masthead {
+.projects-tl-masthead {
   position: absolute;
   z-index: 4;
   top: clamp(92px, 12vh, 128px);
@@ -1540,7 +1543,7 @@ canvas#ridge:active {
   gap: clamp(8px, 1.4vh, 16px);
   pointer-events: none;
 }
-.projects-dial-eyebrow {
+.projects-tl-eyebrow {
   margin: 0;
   font-size: 11px;
   font-weight: 500;
@@ -1549,7 +1552,7 @@ canvas#ridge:active {
   color: rgba(244, 241, 234, 0.62);
   text-shadow: 0 1px 16px rgba(0, 0, 0, 0.5);
 }
-.projects-dial-title {
+.projects-tl-title {
   margin: 0;
   font-size: clamp(38px, 6.2vw, 80px);
   font-weight: 600;
@@ -1560,7 +1563,7 @@ canvas#ridge:active {
     0 2px 28px rgba(0, 0, 0, 0.55),
     0 1px 2px rgba(0, 0, 0, 0.5);
 }
-.projects-dial-coords {
+.projects-tl-coords {
   margin: 2px 0 0;
   font-family: var(--mono);
   font-size: 11px;
@@ -1571,63 +1574,84 @@ canvas#ridge:active {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.projects-dial-coords .plate {
+.projects-tl-coords .plate {
   color: rgba(244, 241, 234, 0.7);
 }
-.projects-dial-coords .live {
-  color: rgba(244, 241, 234, 0.6);
+.projects-tl-coords .live {
+  color: var(--c-education);
 }
 
-/* the spoke layer — geometry written each frame; pointer-events off so the canvas
+/* the trace layer — geometry written each frame; pointer-events off so the canvas
    stays a drag surface (the label buttons below catch the clicks) */
-.projects-dial-svg {
+.projects-tl-svg {
   position: absolute;
   inset: 0;
   z-index: 1;
   overflow: visible;
   pointer-events: none;
 }
-/* the dense radial spokes — NO transitions (53 live nodes rewritten every frame would thrash a
-   stroke/fill transition). The base stroke is the inner-fade gradient so each line dissolves into
-   the globe; the selected spoke overrides to a solid amber you-are-here accent. */
-.dial-line {
+/* the ember baseline — the "red line" of the reference, faded at both ends by the gradient stroke */
+.tl-axis {
   fill: none;
-  stroke: url(#dial-spoke-fade);
-  stroke-width: 0.8;
+  stroke: url(#tl-axis-fade);
+  stroke-width: 1.2;
   stroke-linecap: round;
 }
-.dial-line.is-selected {
+/* the dense vertical stems — NO transitions (≈80 nodes rewritten every frame would thrash a
+   stroke/fill transition). Faint by default; major projects read a touch brighter, the selected
+   one is the solid amber you-are-here accent. */
+.tl-stem {
+  fill: none;
+  stroke: rgba(244, 241, 234, 0.3);
+  stroke-width: 1;
+  stroke-linecap: round;
+}
+.tl-stem.is-major {
+  stroke: rgba(244, 241, 234, 0.52);
+}
+.tl-stem.is-selected {
   stroke: var(--c-education);
-  stroke-width: 1.6;
+  stroke-width: 1.8;
 }
-.dial-node {
-  fill: rgba(244, 241, 234, 0.42);
-  r: 1.5;
+.tl-node {
+  fill: rgba(244, 241, 234, 0.5);
+  r: 1.4;
 }
-.dial-node.is-selected {
+.tl-node.is-selected {
   fill: var(--c-education);
   r: 3;
-  filter: drop-shadow(0 0 6px rgba(255, 196, 92, 0.55));
+  filter: drop-shadow(0 0 7px rgba(255, 196, 92, 0.6));
 }
-.dial-node-glow {
-  fill: none;
-  stroke: var(--c-education);
-  opacity: 0;
+
+/* the year axis — static, placed by the same fractional x-map as the stems */
+.tl-years {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
 }
-.dial-node-glow.is-selected {
-  opacity: 0.22;
+.tl-year {
+  position: absolute;
+  top: calc(70% + 16px);
+  transform: translateX(-50%);
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  color: rgba(244, 241, 234, 0.36);
+  text-shadow: 0 1px 10px rgba(0, 0, 0, 0.6);
 }
 
 /* the label layer — each project is a positioned button (its own hit target) */
-.projects-dial-labels {
+.projects-tl-labels {
   position: absolute;
   inset: 0;
   z-index: 2;
 }
-/* a single radial NAME (req 5), rotated along its spoke by the rAF loop. transform-origin is the
-   box top-left so the loop's trailing translateY(-50%) centres the text on the spoke line. No flex
-   stack, no bloom-to-record — the selected one just brightens to the amber you-are-here accent. */
-.dial-label {
+/* a single NAME standing at the stem tip, rotated ∓90° by the rAF loop to read up the column
+   (down for the below-axis studies) like the reference's SSID labels. transform-origin is the box
+   top-left; the loop's small x offset re-centres the rotated column on the stem. No bloom-to-record
+   — the selected one just brightens to the amber you-are-here accent. */
+.tl-label {
   position: absolute;
   top: 0;
   left: 0;
@@ -1640,50 +1664,43 @@ canvas#ridge:active {
   pointer-events: auto;
   opacity: 0; /* the rAF loop owns transform + opacity */
   -webkit-tap-highlight-color: transparent;
-  white-space: nowrap; /* radial text never wraps */
+  white-space: nowrap; /* the column never wraps */
   transform-origin: 0 0;
   will-change: transform, opacity;
 }
-.dial-label:focus-visible {
+.tl-label:focus-visible {
   outline: 2px solid rgba(255, 250, 240, 0.85);
-  outline-offset: 4px;
+  outline-offset: 3px;
   border-radius: 3px;
 }
-.dial-label-name {
+.tl-label-name {
   font-family: var(--mono);
-  font-size: 10.5px;
+  font-size: 9.5px;
   font-weight: 500;
-  letter-spacing: 0.14em;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
-  color: rgba(244, 241, 234, 0.58);
+  color: rgba(244, 241, 234, 0.5);
   text-shadow:
-    0 0 10px rgba(0, 0, 0, 0.8),
+    0 0 8px rgba(0, 0, 0, 0.85),
     0 1px 2px rgba(0, 0, 0, 0.6);
 }
-/* major projects read a touch heavier / brighter — the longer spokes carry more weight */
-.dial-label.is-major .dial-label-name {
+/* major projects read a touch heavier / brighter — they carry more weight in the trace */
+.tl-label.is-major .tl-label-name {
   font-weight: 600;
-  color: rgba(244, 241, 234, 0.78);
+  color: rgba(244, 241, 234, 0.8);
 }
 /* the selected name is the sparing amber accent */
-.dial-label.is-selected .dial-label-name {
-  font-size: 12.5px;
-  letter-spacing: 0.18em;
+.tl-label.is-selected .tl-label-name {
+  font-size: 12px;
+  letter-spacing: 0.16em;
   color: var(--c-education);
   text-shadow:
-    0 0 12px rgba(255, 196, 92, 0.45),
+    0 0 12px rgba(255, 196, 92, 0.5),
     0 1px 2px rgba(0, 0, 0, 0.7);
-}
-/* req 5: the old full-record children no longer render; keep any straggler hidden */
-.dial-label-title,
-.dial-label-desc,
-.dial-label-meta,
-.dial-label-short {
-  display: none;
 }
 
 /* a visually-hidden live region announces the selected project to screen readers */
-.dial-live {
+.tl-live {
   position: absolute;
   width: 1px;
   height: 1px;
@@ -1701,16 +1718,17 @@ canvas#ridge:active {
 }
 
 @media (max-width: 860px) {
-  .projects-dial-svg,
-  .projects-dial-labels {
+  .projects-tl-svg,
+  .projects-tl-labels,
+  .tl-years {
     display: none;
   }
-  .projects-dial-masthead {
+  .projects-tl-masthead {
     top: clamp(70px, 10vh, 96px);
     left: 16px;
     right: 16px;
   }
-  .projects-dial-title {
+  .projects-tl-title {
     font-size: clamp(30px, 8.5vw, 46px);
   }
   .dial-list {
@@ -1773,13 +1791,13 @@ canvas#ridge:active {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .projects-dial-frost {
+  .projects-tl-frost {
     animation: none;
     opacity: 1;
   }
-  .dial-line,
-  .dial-node,
-  .dial-node-glow {
+  .tl-axis,
+  .tl-stem,
+  .tl-node {
     transition: none;
   }
 }
