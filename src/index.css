@@ -1988,3 +1988,404 @@ canvas#ridge:active {
     transition: none;
   }
 }
+
+/* ===========================================================================
+   "Book me" — the 1:1 session menu (BookOverlay).
+   Reuses the role-overlay shell (base light frost via .role-overlay::before, the
+   shared .role-close / .role-back / .role-* masthead grammar), but lays the content
+   out as a CENTRED, full-width editorial spread — the reference pitch slide redrawn
+   in the site's own voice: a left-set masthead, a surveyor "slow way → one session"
+   instrument axis, then a row of frosted liquid-glass session cards. Inter only;
+   amber (--c-education) is the one sparing accent (the entry card + every fee).
+   =========================================================================== */
+
+/* an EVEN heavy frost across the whole frame (the dossier's left-masked split is for
+   reading a lit slice on the open right — here the content spans full width, so the
+   live scene reads as one quiet, blurred backdrop behind every card). Sits on top of
+   the .role-overlay::before light base layer. */
+.book-frost {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  -webkit-backdrop-filter: blur(20px) saturate(1.05) brightness(0.82);
+  backdrop-filter: blur(20px) saturate(1.05) brightness(0.82);
+  /* a soft centre→edge vignette over an even scrim: pools the corners so the cards
+     read, while the middle stays the least-darkened (the scene still glows through) */
+  background:
+    radial-gradient(130% 110% at 50% 32%, rgba(6, 7, 10, 0.34) 0%, rgba(6, 7, 10, 0.66) 100%);
+  /* reuse the dossier's frost-in ramp so the two panels open with one grammar */
+  opacity: 0;
+  animation: role-frost-in 0.4s cubic-bezier(0.22, 1, 0.36, 1) 0.06s forwards;
+}
+
+/* the full-frame scroll container — the scrollbar rides the far right edge (the
+   page's quiet navigation line), the CONTENT is a centred column via .book-doc. */
+.book-scroll {
+  position: absolute;
+  inset: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: clamp(96px, 13vh, 150px) clamp(24px, 5vw, 80px) clamp(56px, 9vh, 96px);
+  /* fade scrolling content out before it slides under the fixed site header */
+  -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 86px);
+  mask-image: linear-gradient(180deg, transparent 0, #000 86px);
+  scrollbar-width: thin;
+  scrollbar-color: rgba(244, 241, 234, 0.22) transparent;
+}
+.book-scroll::-webkit-scrollbar {
+  width: 11px;
+}
+.book-scroll::-webkit-scrollbar-thumb {
+  background: rgba(244, 241, 234, 0.22);
+  border-radius: 999px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+.book-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(244, 241, 234, 0.36);
+  background-clip: content-box;
+}
+.book-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.book-doc {
+  display: flex;
+  flex-direction: column;
+  gap: clamp(16px, 2.2vh, 24px);
+  /* a generous centred measure so the four cards read as one full-width row, like
+     the reference slide — wider than the dossier's left column */
+  max-width: 1180px;
+  margin: 0 auto;
+}
+
+/* ---- the surveyor instrument axis: "figuring it out alone → one session" -------- */
+.book-axis {
+  display: flex;
+  align-items: flex-start;
+  gap: clamp(16px, 2.4vw, 40px);
+  margin: clamp(6px, 1.2vh, 14px) 0 clamp(2px, 0.6vh, 8px);
+  max-width: 860px;
+  color: rgba(244, 241, 234, 0.62);
+}
+.book-axis-stop {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 7px;
+}
+.book-axis-stop--to {
+  align-items: flex-end;
+  text-align: right;
+}
+.book-axis-clocks {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.book-clock {
+  width: 15px;
+  height: 15px;
+  flex: none;
+  color: rgba(244, 241, 234, 0.66);
+}
+.book-axis-coins {
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.16em;
+  line-height: 1;
+  color: rgba(244, 241, 234, 0.5);
+}
+.book-axis-cap {
+  margin-top: 1px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: rgba(244, 241, 234, 0.5);
+}
+/* the connecting line + arrowhead — a thin instrument rule sweeping right, aligned
+   to the clock row at the top of each stop */
+.book-axis-track {
+  flex: 1 1 auto;
+  min-width: 40px;
+  height: 15px;
+  display: flex;
+  align-items: center;
+  gap: 1px;
+}
+.book-axis-line {
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    rgba(244, 241, 234, 0.12),
+    rgba(244, 241, 234, 0.42)
+  );
+}
+.book-axis-arrow {
+  width: 11px;
+  height: 11px;
+  flex: none;
+  color: rgba(244, 241, 234, 0.55);
+}
+
+/* ---- the session cards: a row of liquid-glass plates -------------------------- */
+.book-section {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-top: clamp(8px, 1.6vh, 18px);
+}
+.book-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: clamp(14px, 1.4vw, 20px);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.book-grid li {
+  display: flex; /* let the card stretch to the tallest in its row */
+}
+.book-card {
+  position: relative;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: clamp(20px, 1.7vw, 28px);
+  border: 1px solid rgba(244, 241, 234, 0.14);
+  border-radius: 22px;
+  background: rgba(12, 14, 18, 0.42);
+  -webkit-backdrop-filter: blur(14px) saturate(1.06);
+  backdrop-filter: blur(14px) saturate(1.06);
+  color: var(--ink);
+  text-decoration: none;
+  box-shadow:
+    0 18px 50px rgba(0, 0, 0, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  transition:
+    transform 0.35s cubic-bezier(0.22, 1, 0.36, 1),
+    border-color 0.35s ease,
+    background 0.35s ease,
+    box-shadow 0.35s ease;
+}
+.book-card:hover,
+.book-card:focus-visible {
+  transform: translateY(-4px);
+  border-color: rgba(244, 241, 234, 0.34);
+  background: rgba(20, 22, 28, 0.5);
+  box-shadow:
+    0 24px 60px rgba(0, 0, 0, 0.46),
+    inset 0 1px 0 rgba(255, 255, 255, 0.09),
+    0 0 24px 1px rgba(244, 241, 234, 0.05);
+}
+/* the entry card — the booking-page answer to the reference slide's singled-out
+   plate: a faint amber-tinted glass + amber hairline, the one accent on the page */
+.book-card--accent {
+  border-color: rgba(255, 196, 92, 0.34);
+  background: linear-gradient(
+    180deg,
+    rgba(255, 196, 92, 0.1) 0%,
+    rgba(12, 14, 18, 0.46) 70%
+  );
+  box-shadow:
+    0 18px 50px rgba(0, 0, 0, 0.4),
+    inset 0 1px 0 rgba(255, 196, 92, 0.1),
+    0 0 30px -6px rgba(255, 196, 92, 0.18);
+}
+.book-card--accent:hover,
+.book-card--accent:focus-visible {
+  transform: translateY(-4px);
+  border-color: rgba(255, 196, 92, 0.55);
+  background: linear-gradient(
+    180deg,
+    rgba(255, 196, 92, 0.15) 0%,
+    rgba(20, 22, 28, 0.5) 70%
+  );
+  box-shadow:
+    0 24px 60px rgba(0, 0, 0, 0.46),
+    inset 0 1px 0 rgba(255, 196, 92, 0.14),
+    0 0 34px -4px rgba(255, 196, 92, 0.26);
+}
+.book-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 22px;
+}
+.book-card-index {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  color: rgba(244, 241, 234, 0.42);
+}
+.book-card-flag {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--c-education);
+}
+.book-card-dur {
+  padding: 4px 10px;
+  border: 1px solid rgba(244, 241, 234, 0.16);
+  border-radius: 999px;
+  background: rgba(8, 9, 12, 0.3);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: rgba(244, 241, 234, 0.7);
+}
+.book-card-title {
+  margin: 2px 0 0;
+  font-size: clamp(20px, 1.5vw, 24px);
+  font-weight: 600;
+  line-height: 1.12;
+  letter-spacing: -0.015em;
+  color: var(--ink);
+}
+.book-card-price {
+  margin: 0 0 2px;
+  display: flex;
+  align-items: baseline;
+  gap: 1px;
+  font-size: clamp(26px, 2.2vw, 32px);
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  color: rgba(244, 241, 234, 0.92);
+}
+.book-card-price .cur {
+  font-size: 0.6em;
+  font-weight: 500;
+  margin-right: 1px;
+  color: rgba(244, 241, 234, 0.6);
+}
+.book-card--accent .book-card-price {
+  color: var(--c-education);
+}
+.book-card--accent .book-card-price .cur {
+  color: rgba(255, 196, 92, 0.72);
+}
+.book-card-desc {
+  margin: 0;
+  flex: 1; /* push the CTA to the card's foot, so the row stays tidy */
+  font-size: 13.5px;
+  font-weight: 300;
+  line-height: 1.55;
+  color: rgba(244, 241, 234, 0.76);
+}
+.book-card-cta {
+  margin-top: 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: rgba(244, 241, 234, 0.56);
+  transition:
+    color 0.3s ease,
+    gap 0.3s ease;
+}
+.book-card-cta svg {
+  width: 15px;
+  height: 15px;
+  transition: transform 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.book-card:hover .book-card-cta,
+.book-card:focus-visible .book-card-cta {
+  color: var(--ink);
+  gap: 11px;
+}
+.book-card:hover .book-card-cta svg,
+.book-card:focus-visible .book-card-cta svg {
+  transform: translateX(3px);
+}
+.book-card--accent .book-card-cta {
+  color: rgba(255, 196, 92, 0.82);
+}
+.book-card--accent:hover .book-card-cta,
+.book-card--accent:focus-visible .book-card-cta {
+  color: var(--c-education);
+}
+
+/* the quiet email fallback — reuses .assign-foot, just a touch wider + lower */
+.book-foot {
+  max-width: 64ch;
+  margin-top: clamp(20px, 3vh, 36px);
+}
+
+/* row collapses: 4 → 2 → 1 across the breakpoints */
+@media (max-width: 1080px) {
+  .book-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 860px) {
+  /* the overlay itself scrolls on mobile (.role-overlay rule above), so pin the frost
+     to the viewport and let .book-scroll flow in the normal document */
+  .book-frost {
+    position: fixed;
+  }
+  .book-scroll {
+    position: static;
+    overflow: visible;
+    padding: clamp(88px, 13vh, 124px) 16px calc(48px + env(safe-area-inset-bottom));
+    -webkit-mask-image: none;
+    mask-image: none;
+  }
+  .book-doc {
+    max-width: 100%;
+  }
+}
+@media (max-width: 760px) {
+  .book-axis {
+    gap: 16px;
+  }
+  .book-clock {
+    width: 13px;
+    height: 13px;
+  }
+  .book-axis-cap {
+    font-size: 9px;
+    letter-spacing: 0.12em;
+  }
+}
+@media (max-width: 620px) {
+  .book-grid {
+    grid-template-columns: 1fr;
+  }
+}
+/* the two-cluster axis can't fit a phone — the lead paragraph carries its meaning */
+@media (max-width: 560px) {
+  .book-axis {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .book-frost {
+    animation: none;
+    opacity: 1;
+  }
+  .book-card {
+    transition: border-color 0.3s ease, background 0.3s ease;
+  }
+  .book-card:hover,
+  .book-card:focus-visible,
+  .book-card--accent:hover,
+  .book-card--accent:focus-visible {
+    transform: none;
+  }
+}

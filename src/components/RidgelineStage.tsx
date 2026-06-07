@@ -19,6 +19,7 @@ import {
 } from "../gpu/ridgeline";
 import RoleOverlay from "./RoleOverlay";
 import AssignmentOverlay from "./AssignmentOverlay";
+import BookOverlay from "./BookOverlay";
 import ProjectsOverlay, { type ProjectsDialDom, TL_PAD_FRAC } from "./ProjectsOverlay";
 import type { PerfHandle } from "../perf/harness";
 import type { SceneInfo } from "../perf/types";
@@ -202,6 +203,20 @@ export default function RidgelineStage() {
   const dialGotoRef = useRef<(i: number) => void>(() => {});
   const onDialSelect = useCallback((i: number) => dialGotoRef.current(i), []);
 
+  // ---- "Book me" session menu overlay --------------------------------------
+  // A fourth focused surface, a flat sibling of the assignment brief: the "Book me"
+  // nav link / #book route opens the liquid-glass session cards OVER whichever scene
+  // (globe or mountain) is live — no morph change. `bookOpenRef` is the value the rAF
+  // loop reads each frame to quiet the scene/beacon behind it; `closeBookRef` is the
+  // stable handle the once-registered window keydown listener reaches the close setter
+  // through (same indirection as closeProjectsRef).
+  const [bookOpen, setBookOpen] = useState(false);
+  const bookOpenRef = useRef(false);
+  const closeBookRef = useRef<() => void>(() => {});
+  const bookCloseBtnRef = useRef<HTMLButtonElement>(null);
+  const bookLastFocusRef = useRef<HTMLElement | null>(null);
+  const bookWasOpenRef = useRef(false);
+
   const openAssignment = useCallback(() => {
     // drop focus off the beacon BEFORE the next commit makes it aria-hidden, so the
     // focused element is never momentarily inside an aria-hidden subtree; the
@@ -240,6 +255,24 @@ export default function RidgelineStage() {
     setProjectsOpen(false);
     // restore the route to whatever scene sits behind the timeline (globe or mountain)
     if (typeof location !== "undefined" && location.hash === "#projects") {
+      const hash = morphTargetRef.current === 1 ? "#cv" : "#home";
+      history.replaceState(null, "", hash);
+    }
+  }, []);
+
+  const openBook = useCallback(() => {
+    // book is a flat overlay over whatever scene is live (like the assignment brief),
+    // so it never touches the morph. Drop focus off the beacon first (same defensiveness
+    // as openProjects) so it never sits inside an aria-hidden subtree once book commits.
+    beaconRef.current?.blur();
+    bookOpenRef.current = true;
+    setBookOpen(true);
+  }, []);
+  const closeBook = useCallback(() => {
+    bookOpenRef.current = false;
+    setBookOpen(false);
+    // restore the route to whatever scene sits behind the cards (globe or mountain)
+    if (typeof location !== "undefined" && location.hash === "#book") {
       const hash = morphTargetRef.current === 1 ? "#cv" : "#home";
       history.replaceState(null, "", hash);
     }
@@ -284,14 +317,17 @@ export default function RidgelineStage() {
     selectRef.current = select;
     closeAssignRef.current = closeAssignment;
     closeProjectsRef.current = closeProjects;
+    closeBookRef.current = closeBook;
     navToRef.current = navTo;
   });
 
-  // hash routing: the header's Home/CV/Projects links (and the browser back/forward button)
-  // drive the view through the URL hash. #cv assembles the mountain, #home returns to the
-  // globe, #projects opens the timeline OVER whichever scene is live. A #cv or #projects
-  // deep-link on mount lands straight on it; an empty hash stays the clean globe landing.
-  // Other hashes (#about/#contact) are left untouched here.
+  // hash routing: the header's Home/CV/Projects/Book me links (and the browser back/forward
+  // button) drive the view through the URL hash. #cv assembles the mountain, #home returns to
+  // the globe, #projects opens the timeline and #book the session menu OVER whichever scene is
+  // live. A #cv / #projects / #book deep-link on mount lands straight on it; an empty hash stays
+  // the clean globe landing. The two flat overlays (#projects, #book) are mutually exclusive —
+  // switching between them (or to #cv/#home) closes the other. Other hashes (#about/#contact)
+  // are left untouched here.
   useEffect(() => {
     if (location.hash === "#cv") {
       morphTargetRef.current = 1;
@@ -299,21 +335,32 @@ export default function RidgelineStage() {
     } else if (location.hash === "#projects") {
       projectsOpenRef.current = true;
       setProjectsOpen(true);
+    } else if (location.hash === "#book") {
+      bookOpenRef.current = true;
+      setBookOpen(true);
     }
     const onHash = () => {
       const h = location.hash;
-      if (h === "#projects") openProjects();
-      else if (h === "#cv") {
+      if (h === "#projects") {
+        closeBook();
+        openProjects();
+      } else if (h === "#book") {
+        closeProjects();
+        closeAssignment();
+        openBook();
+      } else if (h === "#cv") {
+        closeBook();
         closeProjects();
         navTo("cv");
       } else if (h === "#home" || h === "") {
+        closeBook();
         closeProjects();
         navTo("home");
       }
     };
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
-  }, [navTo, openProjects, closeProjects]);
+  }, [navTo, openProjects, closeProjects, openBook, closeBook, closeAssignment]);
 
   // focus management: on open, remember what was focused and move focus into the
   // dialog; on close (only after an actual open), restore it to the trigger. The
@@ -368,6 +415,25 @@ export default function RidgelineStage() {
       (prev && prev !== document.body ? prev : navLink)?.focus?.();
     }
   }, [projectsOpen]);
+
+  // the same focus dance for the "Book me" session menu: remember what held focus
+  // (the Book me nav link), move focus to its close control on open, restore on close —
+  // falling back to the nav link when nothing meaningful held it.
+  useEffect(() => {
+    if (bookOpen) {
+      bookLastFocusRef.current = document.activeElement as HTMLElement | null;
+      bookCloseBtnRef.current?.focus();
+      bookWasOpenRef.current = true;
+    } else if (bookWasOpenRef.current) {
+      bookWasOpenRef.current = false;
+      const prev = bookLastFocusRef.current;
+      const navLink =
+        typeof document !== "undefined"
+          ? document.querySelector<HTMLElement>('nav a[href="#book"]')
+          : null;
+      (prev && prev !== document.body ? prev : navLink)?.focus?.();
+    }
+  }, [bookOpen]);
 
   useEffect(() => {
     const cvs = canvasRef.current;
@@ -795,8 +861,14 @@ export default function RidgelineStage() {
       };
 
       const onKey = (e: KeyboardEvent) => {
-        // Escape dismisses an open surface before any orbit handling — the Projects
-        // timeline first, then the summit brief, then a focused career slice
+        // Escape dismisses an open surface before any orbit handling — the "Book me"
+        // menu first, then the Projects timeline, then the summit brief, then a focused
+        // career slice
+        if (e.key === "Escape" && bookOpenRef.current) {
+          closeBookRef.current();
+          e.preventDefault();
+          return;
+        }
         if (e.key === "Escape" && projectsOpenRef.current) {
           closeProjectsRef.current();
           e.preventDefault();
@@ -953,7 +1025,8 @@ export default function RidgelineStage() {
         const focusActive =
           selectedRef.current != null ||
           assignmentOpenRef.current ||
-          projectsOpenRef.current;
+          projectsOpenRef.current ||
+          bookOpenRef.current;
         const fsel = selectedRef.current ?? -1;
         if (!labelEls) {
           labelEls = overlay.querySelectorAll<HTMLElement>(".survey-callout");
@@ -1133,7 +1206,8 @@ export default function RidgelineStage() {
           const open =
             selectedRef.current != null ||
             assignmentOpenRef.current ||
-            projectsOpenRef.current;
+            projectsOpenRef.current ||
+            bookOpenRef.current;
           const target = open || !inFrame || !clearHeader ? 0 : 1;
           const bk = reduceMotion ? 1 : 1 - Math.exp(-dt / BEACON_TAU);
           beaconOp += (target - beaconOp) * bk;
@@ -1649,7 +1723,7 @@ export default function RidgelineStage() {
     );
   }
 
-  const overlayOpen = selected !== null || assignmentOpen || projectsOpen;
+  const overlayOpen = selected !== null || assignmentOpen || projectsOpen || bookOpen;
 
   return (
     <div
@@ -1779,6 +1853,19 @@ export default function RidgelineStage() {
             onClose={closeProjects}
             domRef={dialDomRef}
             onSelect={onDialSelect}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* the "Book me" session menu — opened by the Book me nav link / #book route.
+          A flat liquid-glass spread over whichever scene is live (like the brief),
+          with the session cards reproduced in the site's own voice. */}
+      <AnimatePresence>
+        {bookOpen && (
+          <BookOverlay
+            key="book-overlay"
+            ref={bookCloseBtnRef}
+            onClose={closeBook}
           />
         )}
       </AnimatePresence>
