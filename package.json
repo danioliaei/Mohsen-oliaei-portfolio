@@ -3,7 +3,7 @@
   "private": true,
   "version": "1.0.0",
   "type": "module",
-  "description": "Mohsèn Oliaei — portfolio homepage. A monochrome WebGPU mountain you orbit, mapping a professional path up the slope.",
+  "description": "Daniel Oliaei — portfolio homepage. A monochrome WebGPU mountain you orbit, mapping a professional path up the slope.",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",

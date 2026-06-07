@@ -1,4 +1,4 @@
-# Mohsèn Oliaei — Portfolio
+# Daniel Oliaei — Portfolio
 
 > _A mountain, drawn in light._ — a monochrome WebGPU homepage: a single peak
 > built from stacked contour lines, orbitable by drag, with surveyor callouts
