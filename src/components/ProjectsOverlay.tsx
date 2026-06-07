@@ -80,9 +80,9 @@ const ProjectsOverlay = forwardRef<HTMLButtonElement, Props>(
       };
     }, [domRef]);
 
-    // trap Tab inside the dialog (the focusable set is just the close control + the
-    // single roving-tabbable selected label, or the mobile list rows); arrows / Home /
-    // End / Escape are owned by the RidgelineStage window key handler (they step the knob).
+    // trap Tab inside the dialog (the focusable set is just the close control + the single
+    // roving-tabbable selected label); arrows / Home / End / Escape are owned by the
+    // RidgelineStage window key handler (they step the knob).
     const onRootKeyDown = (e: React.KeyboardEvent) => {
       if (e.key !== "Tab") return;
       const root = rootRef.current;
