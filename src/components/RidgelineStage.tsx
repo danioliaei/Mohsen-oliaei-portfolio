@@ -247,18 +247,25 @@ export default function RidgelineStage() {
   // closes any open dossier/brief (those career slices don't exist on the globe). Drives the
   // morph target the rAF loop eases toward, and keeps the URL hash in sync so the header
   // links and the browser back/forward stay authoritative.
+  // syncHash defaults true (an explicit navigation OWNS the URL). The in-canvas globe TAP passes
+  // false so a casual tap grows the mountain WITHOUT persisting #cv — that way a reload returns to
+  // the clean globe landing instead of re-opening straight on the CV. Genuine deep-links (the header
+  // CV/Home links, or a typed/shared #cv) still flow through the hash, so they stay addressable and
+  // browser back/forward stays authoritative.
   const navTo = useCallback(
-    (v: "home" | "cv") => {
+    (v: "home" | "cv", syncHash = true) => {
       morphTargetRef.current = v === "cv" ? 1 : 0;
       setViewState(v);
       if (v === "home") {
         select(null);
         closeAssignment();
       }
-      const hash = v === "cv" ? "#cv" : "#home";
-      if (typeof location !== "undefined" && location.hash !== hash) {
-        // replaceState (not location.hash =) so we don't re-fire our own hashchange listener
-        history.replaceState(null, "", hash);
+      if (syncHash) {
+        const hash = v === "cv" ? "#cv" : "#home";
+        if (typeof location !== "undefined" && location.hash !== hash) {
+          // replaceState (not location.hash =) so we don't re-fire our own hashchange listener
+          history.replaceState(null, "", hash);
+        }
       }
     },
     [select, closeAssignment],
@@ -728,6 +735,14 @@ export default function RidgelineStage() {
         try { cvs.releasePointerCapture(e.pointerId); } catch { /* already gone */ }
         cvs.style.cursor = "grab";
 
+        // a CANCELLED pointer is NEVER a deliberate tap: the browser fires pointercancel when it
+        // claims the gesture for a scroll/pinch, the touch is interrupted, or the window loses the
+        // pointer — and the very FIRST touch landing on the canvas is often cancelled this way. Bail
+        // here (after the drag-state cleanup above) so a cancel can't reach the click test and
+        // auto-assemble the mountain. This was the "the site opens straight into the CV by itself on
+        // first visit" bug; a real tap still arrives as pointerup and navigates as intended.
+        if (e.type === "pointercancel") return;
+
         // a click (no real travel, released quickly, left button) focuses the slice
         // it lands on. Cast the same camera ray the hover uses, at the live focus
         // dolly so the pick matches what's on screen. While a panel is already open
@@ -739,7 +754,7 @@ export default function RidgelineStage() {
         if (isClick) {
           // globe phase: a tap ANYWHERE on the ball assembles the mountain (navigates to the
           // CV view) — and never tries to pick a career slice that isn't there yet.
-          if (mEase < 0.985) { navToRef.current("cv"); return; }
+          if (mEase < 0.985) { navToRef.current("cv", false); return; }
           const r = cvs.getBoundingClientRect();
           const px = e.clientX - r.left;
           const py = e.clientY - r.top;
