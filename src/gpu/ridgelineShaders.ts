@@ -80,6 +80,33 @@ fn ridged(p : vec2<f32>) -> f32 {
   }
   return s;
 }
+// ---- CHEAP reduced-octave twins of fbm/ridged, for the terrain FS's COSMETIC surface weave only
+// (the draped-contour domain-warp, the snow-line raggedness, the crevice darkening). The full
+// fbm/ridged stay reserved for heightAt() — the actual geometry, which is mirrored in heightAtJS for
+// pick parity and must NOT change. These run per-fragment on the 2× supersampled target, so halving
+// their octave count is the dominant fill-cost saving; the slightly smoother result also reads as a
+// calmer, less-busy weave (the "a bit less intense" the brief asks for). 3 octaves ≈ half the noise
+// ALU of the 5-/6-octave originals, with no visible banding (only the finest crinkle is dropped).
+fn fbm3(p : vec2<f32>) -> f32 {
+  var s = 0.0; var a = 0.5; var f = 1.0;
+  for (var i = 0; i < 3; i = i + 1) {
+    s = s + a * vnoise(p * f);
+    f = f * 2.0; a = a * 0.5;
+  }
+  return s;
+}
+fn ridged3(p : vec2<f32>) -> f32 {
+  var s = 0.0; var a = 0.5; var f = 1.0; var prev = 1.0;
+  for (var i = 0; i < 3; i = i + 1) {
+    var n = vnoise(p * f);
+    n = 1.0 - abs(2.0 * n - 1.0);
+    n = n * n;
+    s = s + a * n * prev;
+    prev = n;
+    f = f * 2.0; a = a * 0.5;
+  }
+  return s;
+}
 fn heightAt(x : f32, z : f32) -> f32 {
   let dx = x - PEAK_X;
   let dz = z - PEAK_Z;
@@ -284,14 +311,24 @@ struct VsOut {
   // each ring wanders like a real cut-line carved into the slope rather than a
   // compass-drawn circle — yet, being level-sets of one single field, the rings
   // bend and pinch but never cross. Keep RINGS in sync with STATIONS (RidgelineStage).
-  let dxp = i.wpos.x - PEAK_X;
-  let dzp = i.wpos.z - PEAK_Z;
-  // the height field's own anisotropy (a touch wider in depth) so the rings are the
-  // mountain's planted ellipses, not perfect circles laid on top
-  let baseR = sqrt(dxp * dxp * 1.05 + dzp * dzp * 0.58);
-  let warp = (fbm(vec2<f32>(i.wpos.x * 0.00026, i.wpos.z * 0.00023) + 47.0) - 0.5) * 980.0
-           + (fbm(vec2<f32>(i.wpos.x * 0.00090, i.wpos.z * 0.00078) + 12.0) - 0.5) * 210.0;
-  let rw = baseR + warp;
+  // The slice plan-radius rw is needed ONLY to centre the hover wash / focus isolation below — both
+  // gated on F.hov.* and INACTIVE at rest (no slice hovered or focused, the steady state). So its two
+  // fbm taps (~10 octaves of noise per fragment, on the 2× supersampled target) are gated behind
+  // ringActive: at rest every terrain fragment skips them and the output is byte-IDENTICAL (rw is
+  // unused there). The branch is on UNIFORMS (F.hov.*), so it is uniform across the whole draw — no
+  // per-fragment divergence, and the derivative-free fbm inside is safe in non-uniform-looking flow.
+  let ringActive = (F.hov.x >= 0.0 && F.hov.y > 0.0001) || (F.hov.w > 0.0001 && F.hov.z >= 0.0);
+  var rw = 0.0;
+  if (ringActive) {
+    let dxp = i.wpos.x - PEAK_X;
+    let dzp = i.wpos.z - PEAK_Z;
+    // the height field's own anisotropy (a touch wider in depth) so the rings are the
+    // mountain's planted ellipses, not perfect circles laid on top
+    let baseR = sqrt(dxp * dxp * 1.05 + dzp * dzp * 0.58);
+    let warp = (fbm(vec2<f32>(i.wpos.x * 0.00026, i.wpos.z * 0.00023) + 47.0) - 0.5) * 980.0
+             + (fbm(vec2<f32>(i.wpos.x * 0.00090, i.wpos.z * 0.00078) + 12.0) - 0.5) * 210.0;
+    rw = baseR + warp;
+  }
   // The slice plan-radius rw is kept only to centre the HOVER wash below; the
   // dividing ring contours (and their flanking moat) are no longer painted, so
   // the career borders are invisible at rest. A slice surfaces only as a soft glow
@@ -375,8 +412,10 @@ struct VsOut {
   //     they weave like the reference, at FINE spacing for dense detail. Crisp via fwidth,
   //     dissolved where they project tighter than a pixel (anti-moire). Computed in UNIFORM
   //     control flow (fwidth requires it) and only USED on the realistic side below. ===
-  let lnWarp = (fbm(vec2<f32>(i.wpos.x * 0.00095, i.wpos.z * 0.00115) + 5.0) - 0.5) * 150.0
-             + (ridged(vec2<f32>(i.wpos.x * 0.0040, i.wpos.z * 0.0030) + 9.0) - 0.40) * 85.0;
+  // cheap reduced-octave warp (fbm3/ridged3): half the noise ALU of the full fbm/ridged, and the
+  // ridged amplitude eased 85 → 72 so the contours weave a touch calmer (the "less intense" lines).
+  let lnWarp = (fbm3(vec2<f32>(i.wpos.x * 0.00095, i.wpos.z * 0.00115) + 5.0) - 0.5) * 150.0
+             + (ridged3(vec2<f32>(i.wpos.x * 0.0040, i.wpos.z * 0.0030) + 9.0) - 0.40) * 72.0;
   let LINE_SP = 32.0 * F.lod.x;                    // world units between fine contour lines (was 24 → calmer, fewer draped contours; ×F.lod.x — fewer still on phone)
   let cv = (i.wy + lnWarp) / LINE_SP;
   let aaw = max(fwidth(cv), 1e-5);
@@ -392,12 +431,12 @@ struct VsOut {
     let ndl = clamp(dot(n, L), 0.0, 1.0);          // key light
     let slopeUp = clamp(n.y, 0.0, 1.0);            // 1 on flat/up-faces -> 0 on vertical cliffs
     // --- ragged snow line: high elevation AND shallow up-slope ---
-    let snowNoise = fbm(vec2<f32>(i.wpos.x * 0.0016, i.wpos.z * 0.0014) + 31.0);
+    let snowNoise = fbm3(vec2<f32>(i.wpos.x * 0.0016, i.wpos.z * 0.0014) + 31.0);
     let snowMask = clamp(smoothstep(0.34, 0.60, hN + (snowNoise - 0.5) * 0.14)
                        * smoothstep(0.26, 0.66, slopeUp), 0.0, 1.0);
     // --- HIGH-CONTRAST tonal relief base: near-black rock, brighter snow, shaped by the
     //     key, with deep crevice darkening so gullies pool to black (no soft clay) ---
-    let crev = clamp(ridged(vec2<f32>(i.wpos.x * 0.0044, i.wpos.z * 0.0017) + 19.0), 0.0, 1.0);
+    let crev = clamp(ridged3(vec2<f32>(i.wpos.x * 0.0044, i.wpos.z * 0.0017) + 19.0), 0.0, 1.0);
     let rockTone = 0.03 + 0.15 * ndl;              // dark rock; lit faces lift just a touch
     let snowTone = 0.20 + 0.52 * ndl;              // snow much brighter under the key
     let base = mix(rockTone, snowTone, snowMask) * (0.40 + 0.60 * smoothstep(0.08, 0.55, crev));
@@ -405,7 +444,7 @@ struct VsOut {
     // (brighter where lit, sinking into shadow) — kept mostly under the 0.82 bloom threshold
     // so the lines stay CRISP; only summit snow lines glow a little.
     let lineLum = mix(0.40 + 0.42 * ndl, 0.98, snowMask);
-    var surf = base + lines * lineLum + fine * lineLum * 0.18;   // dark tonal relief + bright fine weave (fine weight was 0.35 → calmer micro-detail)
+    var surf = base + lines * lineLum + fine * lineLum * 0.12;   // dark tonal relief + bright fine weave (fine weight 0.35 → 0.18 → 0.12: calmer micro-detail after the reveal, the "less detailed" the brief asks for)
     surf = surf + rim * (0.10 + 0.26 * snowMask);  // grazing ridge light against the black sky
     let depthF = smoothstep(ZN, ZF * 0.9, i.wpos.z);
     let lowF = 1.0 - smoothstep(0.05, 0.30, hN);
