@@ -104,7 +104,7 @@ fn heightAt(x : f32, z : f32) -> f32 {
   let gully = ridged(vec2<f32>(x * 0.00300, z * 0.00118) + vec2<f32>(41.0, 9.0));
   h = h + gully * 520.0 * gate;
   let gully2 = ridged(vec2<f32>(x * 0.00680, z * 0.00250) + vec2<f32>(5.0, 23.0));
-  h = h + gully2 * 195.0 * gate;                   // finer micro-texture
+  h = h + gully2 * 120.0 * gate;                   // finer micro-texture (was 195 → calmer micro-relief; MIRRORED in ridgeline.ts heightAtJS for pickBand parity)
 
   // a smooth, low, flowing dune plain everywhere (calm flanks + foreground)
   let plain  = fbm(vec2<f32>(x * 0.00042, z * 0.00052) + 21.0);
@@ -153,7 +153,7 @@ const TWO_PI : f32 = 6.28318530718;
   let rings = r / RING;
   let rd = 0.5 - abs(fract(rings) - 0.5);
   let raa = max(fwidth(rings), 1e-4);
-  let ring = 1.0 - smoothstep(0.0, raa * 1.5, rd);
+  let ring = 1.0 - smoothstep(0.0, raa * 1.15, rd);   // crisper halo rings (was 1.5); kept ≥1.1 so the spinning rings don't crawl
 
   // tangential dashes whose count scales with radius → near-constant arc length,
   // i.e. a field of small dots marching around each ring (the radar / vinyl look)
@@ -166,7 +166,7 @@ const TWO_PI : f32 = 6.28318530718;
   let env = smoothstep(0.035, 0.14, r) * (1.0 - smoothstep(0.42, 0.66, r));
 
   // one crisp defined circle near the inner edge (the bright ring hugging the peak)
-  let circ = (1.0 - smoothstep(0.0, raa * 2.2, abs(rings - 8.4))) * smoothstep(0.0, 0.02, r);
+  let circ = (1.0 - smoothstep(0.0, raa * 1.7, abs(rings - 8.4))) * smoothstep(0.0, 0.02, r);   // crisper hero ring (was 2.2; kept a touch wider than the dotted rings as it crosses the bloom threshold)
 
   // dim the halo by the focus amount (hov.w) so the sky recedes with the slopes
   // when a slice is selected, keeping the lit ring the sole bright element
@@ -267,11 +267,11 @@ struct VsOut {
   // signature stacked profiles stay painted on the surface and glued to the same
   // ground as the camera orbits. These are the quiet texture the survey RINGS are
   // cut across (head-on they read as horizontal bands; from the flank, obliquely).
-  let Z_STEP = 66.0 * F.lod.x;                // world units between scan-lines (×F.lod.x — wider/fewer on phone)
+  let Z_STEP = 88.0 * F.lod.x;                // world units between scan-lines (was 66 → fewer, cleaner hairlines; ×F.lod.x — wider still on phone)
   let f = i.wpos.z / Z_STEP;
   let dist = 0.5 - abs(fract(f) - 0.5);       // 0 on a line, 0.5 between
   let aa = max(fwidth(f), 1e-5);
-  var hair = 1.0 - smoothstep(0.0, aa * 1.25, dist);
+  var hair = 1.0 - smoothstep(0.0, aa * 0.95, dist);   // crisper hairlines (was 1.25); the moire-dissolve below still guards far/steep faces
   // dissolve where the projected lines pack tighter than the pixel grid so far /
   // steep faces read as smooth tone instead of a buzzing moiré
   hair = hair * (1.0 - smoothstep(0.48, 1.10, aa));
@@ -377,14 +377,14 @@ struct VsOut {
   //     control flow (fwidth requires it) and only USED on the realistic side below. ===
   let lnWarp = (fbm(vec2<f32>(i.wpos.x * 0.00095, i.wpos.z * 0.00115) + 5.0) - 0.5) * 150.0
              + (ridged(vec2<f32>(i.wpos.x * 0.0040, i.wpos.z * 0.0030) + 9.0) - 0.40) * 85.0;
-  let LINE_SP = 24.0 * F.lod.x;                    // world units between fine contour lines (×F.lod.x — fewer on phone)
+  let LINE_SP = 32.0 * F.lod.x;                    // world units between fine contour lines (was 24 → calmer, fewer draped contours; ×F.lod.x — fewer still on phone)
   let cv = (i.wy + lnWarp) / LINE_SP;
   let aaw = max(fwidth(cv), 1e-5);
-  var lines = (1.0 - smoothstep(0.0, aaw * 1.05, 0.5 - abs(fract(cv) - 0.5)))   // crisp thin AA lines
+  var lines = (1.0 - smoothstep(0.0, aaw * 0.85, 0.5 - abs(fract(cv) - 0.5)))   // crisp thin AA lines (was 1.05; rendered into the supersampled HDR target)
             * (1.0 - smoothstep(0.55, 1.30, aaw));                              // dissolve where too tight (anti-moire)
   let cv2 = cv * 2.0;                              // a finer harmonic (half spacing) so it reads dense up close
   let aaw2 = aaw * 2.0;                            // = fwidth(cv2); no second derivative call
-  var fine = (1.0 - smoothstep(0.0, aaw2 * 1.1, 0.5 - abs(fract(cv2) - 0.5)))
+  var fine = (1.0 - smoothstep(0.0, aaw2 * 0.9, 0.5 - abs(fract(cv2) - 0.5)))   // crisper finer harmonic (was 1.1)
            * (1.0 - smoothstep(0.55, 1.30, aaw2));
 
   var cReal = 0.0;
@@ -405,7 +405,7 @@ struct VsOut {
     // (brighter where lit, sinking into shadow) — kept mostly under the 0.82 bloom threshold
     // so the lines stay CRISP; only summit snow lines glow a little.
     let lineLum = mix(0.40 + 0.42 * ndl, 0.98, snowMask);
-    var surf = base + lines * lineLum + fine * lineLum * 0.35;   // dark tonal relief + bright fine weave
+    var surf = base + lines * lineLum + fine * lineLum * 0.18;   // dark tonal relief + bright fine weave (fine weight was 0.35 → calmer micro-detail)
     surf = surf + rim * (0.10 + 0.26 * snowMask);  // grazing ridge light against the black sky
     let depthF = smoothstep(ZN, ZF * 0.9, i.wpos.z);
     let lowF = 1.0 - smoothstep(0.05, 0.30, hN);
