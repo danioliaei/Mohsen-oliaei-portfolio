@@ -1,0 +1,7 @@
+# Cloudflare Pages configuration
+# Docs: https://developers.cloudflare.com/pages/functions/wrangler-configuration/
+name = "mohsen-oliaei-portfolio"
+compatibility_date = "2026-06-07"
+
+# The directory `vite build` writes the production bundle to.
+pages_build_output_dir = "dist"

@@ -24,6 +24,36 @@ npm run preview  # preview the production build
 > Requires a WebGPU-capable browser (recent Chrome, Edge, Safari, or Firefox).
 > Without it the page shows a graceful notice.
 
+## Deploy to Cloudflare Pages
+
+This repo is configured for [Cloudflare Pages](https://developers.cloudflare.com/pages/).
+The build settings live in [`wrangler.toml`](wrangler.toml), an SPA fallback in
+[`public/_redirects`](public/_redirects), and the Node version in
+[`.nvmrc`](.nvmrc).
+
+**Option A — Git integration (auto-deploy on push, recommended)**
+
+1. In the Cloudflare dashboard: **Workers & Pages → Create → Pages → Connect to Git**.
+2. Pick this repository.
+3. Set the build settings:
+   - **Framework preset:** `Vite`
+   - **Build command:** `npm run build`
+   - **Build output directory:** `dist`
+4. Save & deploy. Every push to the production branch ships a new build, and each
+   pull request gets its own preview URL.
+
+**Option B — Direct upload from your machine (Wrangler CLI)**
+
+```bash
+npx wrangler login      # one-time browser auth
+npm run cf:preview      # build + preview locally at http://localhost:8788
+npm run deploy          # build + upload to Cloudflare Pages
+```
+
+> The first `wrangler pages deploy` will prompt to create the Pages project
+> (name `mohsen-oliaei-portfolio`). After that it publishes a live URL like
+> `https://mohsen-oliaei-portfolio.pages.dev`.
+
 ## Structure
 
 ```
