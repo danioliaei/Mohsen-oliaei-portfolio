@@ -575,8 +575,8 @@ function mul(a: Mat4, b: Mat4): Mat4 {
 /* ---- survey-station geometry: where a ring's callout pins to the massif ------
    The index contours are concentric RINGS (the RINGS array in
    ridgelineShaders.ts) — each career station is the plan RADIUS of one surveyed
-   ring about the summit axis. RidgelineStage (its STATIONS array) carries the
-   radii and pins a DOM callout to where each ring crosses the mountain's near,
+   ring about the summit axis. src/data/stations.ts (the STATIONS array) carries
+   the radii and pins a DOM callout to where each ring crosses the mountain's near,
    camera-facing face; ringAnchor() below resolves that world point. */
 const PEAK_Z = 8200; // summit depth (mirrors TGT.z and the shader's PEAK_Z)
 const PEAK_H = 3300; // summit height (mirrors the shader's PEAK_H)
@@ -740,7 +740,7 @@ function heightAtJS(x: number, z: number): number {
 
 /** Cast the camera ray through pointer pixel (px,py) and return the index of the
  *  career SLICE (0 = tight summit ring … 6 = wide dune ring) the ray's terrain hit
- *  falls on — matching RINGS in the shader and STATIONS in RidgelineStage — or -1
+ *  falls on — matching RINGS in the shader and STATIONS in src/data/stations.ts — or -1
  *  when the ray misses the mountain or lands past the widest surveyed ring. */
 export function pickBand(
   yaw: number,
@@ -953,12 +953,19 @@ export class RidgelineScene {
   static async create(canvas: HTMLCanvasElement): Promise<RidgelineScene | null> {
     const g = await createGPU();
     if (!g) return null;
+    let scene: RidgelineScene | null = null;
     try {
-      const scene = new RidgelineScene(g, canvas);
+      scene = new RidgelineScene(g, canvas);
       await scene.init();
       return scene;
     } catch (e) {
       console.error("[ridgeline] scene init failed — falling back:", e);
+      // release the constructor-allocated buffers + the device so a failed init
+      // (a WGSL compile error, a pipeline rejection) doesn't leak the whole GPU
+      // context. dispose() already calls device.destroy(); the else covers a
+      // throw inside the constructor itself, before `scene` was assigned.
+      if (scene) scene.dispose();
+      else g.device.destroy();
       return null;
     }
   }

@@ -343,6 +343,7 @@ export default function RidgelineStage() {
       const h = location.hash;
       if (h === "#projects") {
         closeBook();
+        closeAssignment();
         openProjects();
       } else if (h === "#book") {
         closeProjects();
@@ -500,6 +501,10 @@ export default function RidgelineStage() {
       // piggybacks on this component's rAF — one perf.frame(now) call in the loop below —
       // so it measures the exact render cadence with no second animation loop.
       await startHarness(() => gpu.info());
+      // unmounted during the harness dynamic import? cleanup already ran gpu.dispose() —
+      // bail before registering listeners or the rAF loop on a disposed scene (mirrors
+      // the post-create() guard above). Only reachable on the ?perf=1 import path.
+      if (disposed) return;
 
       // ---- orbit controls — left-drag (mouse / touch) or the arrow keys spin
       // around the summit. The pointer steers a TARGET; the camera EASES toward
@@ -1009,7 +1014,7 @@ export default function RidgelineStage() {
         // labels land and fade out (~0.85), so the words arrive with the finished mountain.
         if (m < 0.80) {
           if (labelEls) labelEls.forEach((el) => { el.style.opacity = "0"; });
-          if (leaderEls) leaderEls.forEach((el) => { (el as SVGElement).style.opacity = "0"; });
+          if (leaderEls) leaderEls.forEach((el) => { el.style.opacity = "0"; });
           if (beaconRef.current) {
             // also kill pointer events so the rAF loop — not just React's aria-hidden
             // / tabindex — is authoritative for the hidden beacon (no stray click-through
@@ -1307,7 +1312,7 @@ export default function RidgelineStage() {
           for (let i = 0; i < DIAL_N; i++) {
             const it = dom.listItems[i];
             it.classList.toggle("is-selected", i === sel);
-            (it as HTMLElement).tabIndex = i === sel ? 0 : -1;
+            it.tabIndex = i === sel ? 0 : -1;
           }
 
         const { stems, nodes, labels, axis } = dom;
@@ -1370,7 +1375,7 @@ export default function RidgelineStage() {
             label.style.transform =
               `translate(${sx.toFixed(1)}px, ${ly.toFixed(1)}px) rotate(${up ? -90 : 90}deg) translateY(-50%)`;
             label.style.opacity = (amt * labelGrow).toFixed(3);
-            (label as HTMLElement).tabIndex = isSel ? 0 : -1;
+            label.tabIndex = isSel ? 0 : -1;
 
             stem.classList.toggle("is-selected", isSel);
             node.classList.toggle("is-selected", isSel);
@@ -1540,7 +1545,8 @@ export default function RidgelineStage() {
         // focus dolly + isolation: ease the camera lean-in and the dim toward the
         // selected state. focusBand is held sticky until the dim has fully faded so
         // it eases off the right band on dismiss rather than snapping to none.
-        const focused = selectedRef.current != null;
+        const sel = selectedRef.current;
+        const focused = sel != null;
         // on a tall/narrow phone, hold the camera a touch further back so the whole
         // massif and its survey labels breathe instead of cropping at the edges; wide
         // (desktop) viewports keep the authored framing (zoomBase = 1). The focus
@@ -1551,7 +1557,7 @@ export default function RidgelineStage() {
         const fk = reduceMotion ? 1 : 1 - Math.exp(-dt / FOCUS_TAU);
         radiusScale += (rTgt - radiusScale) * fk;
         focusAmt += ((focused ? 1 : 0) - focusAmt) * fk;
-        if (focused) focusBand = selectedRef.current as number;
+        if (sel != null) focusBand = sel;
         else if (focusAmt < 0.01) focusBand = -1;
 
         const wide = smooth(1.0, 1.4, aspectNow);
@@ -1682,9 +1688,10 @@ export default function RidgelineStage() {
         // frame (same rscale / breathing), so the glyphs never drift off the ball. Shown
         // whenever the globe is at all present (mc < 1) — including while DISSOLVING back
         // from the mountain on a return Home — and dropped once the mountain is whole.
-        const aspect = cvs.clientWidth / Math.max(cvs.clientHeight, 1);
         if (mc < 0.999) {
-          const cam = ridgeCamera(yaw, pitch, aspect, t, rscale, focusShift, fShiftY);
+          // reuse aspectNow from the top of the frame — the canvas can't resize
+          // mid-frame, so a second clientWidth/clientHeight read would be redundant.
+          const cam = ridgeCamera(yaw, pitch, aspectNow, t, rscale, focusShift, fShiftY);
           // spinOut (idle + scrub roll) so the cloud co-rotates with the GPU ball in BOTH phases
           updateCloud(cam.vp, cam.eye, spinOut, mc, cvs.clientWidth, cvs.clientHeight);
           // the chaotic letter-cloud is part of "the mess" — fade it out as the trace organises
@@ -1713,7 +1720,7 @@ export default function RidgelineStage() {
       <div className="ridge-stage ridge-notice">
         <div className="gpu-notice-inner">
           <p className="gpu-notice-eyebrow">WebGPU required</p>
-          <h1 className="gpu-notice-title">A mountain, drawn in light.</h1>
+          <p className="gpu-notice-title">A mountain, drawn in light.</p>
           <p className="gpu-notice-body">
             This piece is rendered in real time with WebGPU. Open it in a recent
             Chrome, Edge, Safari, or Firefox to see it.
@@ -1730,7 +1737,10 @@ export default function RidgelineStage() {
       className={`ridge-stage${overlayOpen ? " is-overlay-open" : ""}${view === "home" ? " is-globe" : ""}`}
       id="home"
     >
-      <canvas id="ridge" ref={canvasRef} />
+      {/* the live WebGPU render is decorative: the readable CV is mirrored in the survey
+          callouts + overlays and the page's sr-only <h1>, and orbit is keyboard-operable
+          via the window-level arrow-key handler — so it's hidden from assistive tech. */}
+      <canvas id="ridge" ref={canvasRef} aria-hidden="true" />
 
       {/* the intro "ball of lines & letters" — the career record DECOMPOSED into individual
           characters scattered through the spinning globe's volume at every depth, co-rotated with

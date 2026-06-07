@@ -32,14 +32,14 @@ export type RoleCode = {
 };
 
 export type StationDetail = {
-  // a slightly fuller lead than the one-breath `body` used on the callout panel
+  // a fuller lead for the focused dossier (RoleOverlay)
   summary: string;
   // a handful of concrete wins, rendered as a ticked survey list
-  highlights: string[];
+  highlights: readonly string[];
   // tools / standards, rendered as hairline chips
-  tools: string[];
+  tools: readonly string[];
   // image / video plates (empty `src` → framed placeholder slot)
-  media: RoleMedia[];
+  media: readonly RoleMedia[];
   // one optional interactive code sample (copy-to-clipboard)
   code?: RoleCode;
 };
@@ -49,11 +49,12 @@ export type Station = {
   label: string;
   short: string;
   role: string;
-  // ---- LinkedIn-style survey block (drives the stacked mountain callout) ------
-  // `role` is the big title line; these four fill the smaller lines beneath it,
-  // newest → oldest. `duration` is "" for the education stations (their callout
-  // shows just the years). `place` is kept to city + country so the floating
-  // label stays tight over the scene.
+  // ---- extended survey block (authored CV data) ------------------------------
+  // The live desktop callout renders only `role` + `company` (with `short` as the
+  // compact mobile label). The fields below — `dates`, `duration`, `place`,
+  // `body`, `meta`, `cta` — are authored data retained for a fuller callout /
+  // overlay; they are not rendered today. `duration` is "" for the education
+  // stations; `place` is kept to city + country.
   company: string;
   dates: string;
   duration: string;
@@ -64,7 +65,7 @@ export type Station = {
   detail: StationDetail;
 };
 
-export const STATIONS: Station[] = [
+export const STATIONS: readonly Station[] = [
   {
     radius: 720,
     label: "STEGRA · STOCKHOLM · 2025",

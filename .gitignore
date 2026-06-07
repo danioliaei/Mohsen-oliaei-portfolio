@@ -37,5 +37,6 @@ pnpm-debug.log*
 *.tsbuildinfo
 node_modules/.tmp
 
-# local Claude Code settings (machine-specific)
+# local Claude Code settings (machine-specific) + runtime lock
 .claude/settings.local.json
+.claude/scheduled_tasks.lock

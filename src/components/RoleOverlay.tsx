@@ -1,4 +1,4 @@
-import { forwardRef, useRef, useState } from "react";
+import { forwardRef, useEffect, useRef, useState } from "react";
 import { motion, useReducedMotion } from "motion/react";
 import { STATIONS } from "../data/stations";
 
@@ -32,6 +32,10 @@ const RoleOverlay = forwardRef<HTMLButtonElement, Props>(function RoleOverlay(
   const reduce = useReducedMotion();
   const rootRef = useRef<HTMLDivElement>(null);
   const [copied, setCopied] = useState(false);
+  const copyTimer = useRef<number | undefined>(undefined);
+
+  // clear the "Copied" reset timer if the dossier unmounts before it fires.
+  useEffect(() => () => window.clearTimeout(copyTimer.current), []);
 
   const s = STATIONS[index];
   const d = s.detail;
@@ -68,7 +72,8 @@ const RoleOverlay = forwardRef<HTMLButtonElement, Props>(function RoleOverlay(
     try {
       await navigator.clipboard.writeText(d.code.code);
       setCopied(true);
-      window.setTimeout(() => setCopied(false), 1600);
+      window.clearTimeout(copyTimer.current);
+      copyTimer.current = window.setTimeout(() => setCopied(false), 1600);
     } catch {
       /* clipboard blocked — the code is still selectable */
     }

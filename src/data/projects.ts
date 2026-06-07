@@ -16,9 +16,11 @@
    Dial read like a radial astronomical calendar — hundreds of tight radial
    ticks fanning out, the major ones reaching further.
 
-   The fields beyond `elevation` (descriptor, place, tags) feed the
-   accessible per-point label and the masthead's live coordinate readout.
-   The Dial itself renders ONLY `short` (radial text); the rest lives in data.
+   Beyond `elevation`, only `place` is currently consumed downstream — it joins
+   `title` + the formatted date in the per-point aria-label and the masthead's
+   live coordinate readout. `descriptor` and `tags` are authored content kept
+   for a future detail / tooltip surface; they are not rendered today. The Dial
+   itself renders ONLY `short` (radial text); the rest lives in data.
    ========================================================================= */
 
 export type Project = {
@@ -35,10 +37,10 @@ export type Project = {
   major: boolean;
   descriptor: string;
   place: string;
-  tags: string[];
+  tags: readonly string[];
 };
 
-export const PROJECTS: Project[] = [
+export const PROJECTS: readonly Project[] = [
   { id: "boomshahr-2014",      title: "Boomshahr Paydar — First BIM",         short: "Boomshahr",    date: "2014-09", elevation: 0.12,  major: false, descriptor: "First professional BIM modelling in ArchiCAD, alongside undergrad studies", place: "Tehran, Iran",       tags: ["ArchiCAD", "BIM", "Residential"] },
   { id: "office-fitout-2014",  title: "Office Fit-out Set",                   short: "Fit-out",      date: "2014-11", elevation: 0.10,  major: false, descriptor: "Tenant fit-out documentation, first taste of working drawings",         place: "Tehran, Iran",       tags: ["ArchiCAD", "Documentation", "Interiors"] },
   { id: "villa-darband-2014",  title: "Darband Villa Documentation",          short: "Darband",      date: "2014-12", elevation: 0.18,  major: false, descriptor: "Hillside villa construction set, hand-checked sections in ArchiCAD",     place: "Tehran, Iran",       tags: ["ArchiCAD", "Documentation", "Residential"] },
@@ -120,7 +122,6 @@ export const PROJECTS: Project[] = [
   { id: "carbon-dash-2026",    title: "Embodied-Carbon Dashboard",            short: "Carbon",       date: "2026-06", elevation: 0.80,  major: true,  descriptor: "Power BI board joining quantities to an embodied-carbon dataset",        place: "Stockholm, Sweden",  tags: ["Power BI", "Carbon", "Sustainability"] },
 ];
 
-const MONTHS = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"] as const;
 const MONTHS_LONG = [
   "January", "February", "March", "April", "May", "June",
   "July", "August", "September", "October", "November", "December",
@@ -130,12 +131,6 @@ const MONTHS_LONG = [
 export const decimalYear = (date: string): number => {
   const [y, m] = date.split("-").map(Number);
   return y + (m - 1) / 12;
-};
-
-/** the vertical-date label, uppercase mono, e.g. "APR 2025" */
-export const formatMonthYear = (date: string): string => {
-  const [y, m] = date.split("-").map(Number);
-  return `${MONTHS[m - 1]} ${y}`;
 };
 
 /** screen-reader date fragment, e.g. "April 2025" */

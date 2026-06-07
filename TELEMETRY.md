@@ -136,7 +136,7 @@ no second animation loop.
 - **Which render path is live** — `navigator.gpu` presence, secure-context flag, and
   the live `RidgelineScene.info()` (`backend: "webgpu"`, adapter `hasF16` /
   `hasTimestamp`). Surfaced prominently; **`❌ NO WEBGPU`** means the run is void.
-- **Effective `devicePixelRatio`** in use (after the `min(dpr, 2)` clamp) and the
+- **Effective `devicePixelRatio`** in use (after the DPR clamp — 2× desktop, 2.5× phone) and the
   internal **supersample** factor + HDR render-target resolution (the real
   fill-rate driver).
 - **Draw calls / triangles / filament line-segments** last frame (this renderer's
@@ -227,7 +227,7 @@ Each record's shape:
    (`navigator.gpu` exists but the device/adapter failed), `"none"` (no WebGPU at all —
    almost always an insecure HTTP context). **Anything but `"webgpu"` in the final record ⇒
    the run is void; fix HTTPS and re-run.** (On an iPhone, `device.rawDpr` is typically 3 but
-   `scene.dpr` clamps to 2 — confirm the clamp is taking effect.)
+   `scene.dpr` clamps to 2.5 on phone (2 on desktop) — confirm the clamp is taking effect.)
 2. **`frameMs.p95` / `.p99` / `.max`** and **`overBudget`** — is the tail within the
    60 fps (16.7 ms) budget? p99/max expose the stutters an average hides.
 3. **`windows` trend** — compare the **last few windows to the first few**. If p50/p95
@@ -254,7 +254,8 @@ same numbers — so each delta is attributable. Apply in this priority order (hi
 expected impact first for *this* workload, which is fill-rate-bound):
 
 1. **DPR / supersample clamp.** This app renders the HDR scene at
-   `supersample = min(dpr × 1.4, 2)` on top of a DPR clamped to 2 — so a DPR-3
+   `supersample = min(dpr × 1.4, scCap)` (scCap = 2.25 desktop / 2.75 phone) on top
+   of a DPR clamped to 2× desktop / 2.5× phone — so a DPR-3
    iPhone pushes a render target up to ~2× CSS pixels per axis (~4× the pixels),
    plus a half-res bloom. Lowering the clamp (e.g. cap DPR at 1.5, or supersample at
    1.25 on phones) is the biggest single fill-rate lever. → `RidgelineStage.tsx`

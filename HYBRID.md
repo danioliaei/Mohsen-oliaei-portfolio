@@ -99,8 +99,9 @@ variant is constrained to `rgba16float` (no float32 filtering). **It makes phone
    fill-bound path **and** shrinks the one-time init build.
 
 3. **Desktop supersample** nudged 2 → 2.25 (crisper desktop lines), paid for by the freed geometry
-   budget. **Phone supersample/DPR left unchanged** — phone is fill/thermal-bound, so phone sharpness
-   comes only from the (free) AA tightening, never more pixels.
+   budget. Phone supersample/DPR were left unchanged in *this* pass — phone is fill/thermal-bound, so
+   phone sharpness came from the (free) AA tightening, not more pixels. (A later pass nudged
+   `PHONE_SC_CAP` 2.5 → 2.75 for crisper phone hairlines; the phone DPR cap stays 2.5.)
 
 ---
 
@@ -110,7 +111,7 @@ These are runtime/thermal wins that need on-device telemetry to tune (per `TELEM
 are deliberately left as separate, measurable steps rather than bundled blindly here:
 
 1. **DPR / supersample clamp on phone** — the single biggest fill lever. Lower the `RidgelineStage`
-   phone DPR cap (currently 2.5) and `PHONE_SC_CAP` (2.5) and re-run the soak test. A DPR-3 phone
+   phone DPR cap (currently 2.5) and `PHONE_SC_CAP` (currently 2.75) and re-run the soak test. A DPR-3 phone
    rasterizes ~4× the pixels; this trades a little hairline crispness for sustained frame time.
 2. **Visibility pause** — the rAF runs unconditionally; gate it on `visibilitychange` + an
    `IntersectionObserver` on the canvas so a backgrounded/scrolled-away tab stops cooking the SoC.
@@ -118,7 +119,7 @@ are deliberately left as separate, measurable steps rather than bundled blindly 
 3. **Frame cap to 30 fps** on throttling phones — the loop already has `dt`; add an accumulator. A
    stable 30 reads better than a jittery 45 and roughly halves heat.
 4. **Overdraw / pass reduction** — trim bloom taps/resolution on small viewports.
-5. **Throttle per-frame DOM work** (`updateCloud`/`updateSurvey`/`updateDial`) when nothing moves.
+5. **Throttle per-frame DOM work** (`updateCloud`/`updateSurvey`/`updateTimeline`) when nothing moves.
 
 **Stop** when the soak test holds a stable frame time within budget across all windows. Don't keep
 optimizing past that — and don't reach for a bake pipeline: it is not the lever for this scene.
