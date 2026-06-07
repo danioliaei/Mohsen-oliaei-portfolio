@@ -14,6 +14,9 @@ dist-ssr
 # logs
 logs
 *.log
+
+# on-device perf telemetry capture (?perf=1 harness → collector)
+telemetry.jsonl
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
