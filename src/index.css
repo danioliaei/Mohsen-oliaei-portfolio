@@ -1899,6 +1899,20 @@ canvas#ridge:active {
   border: 0;
 }
 
+/* generic screen-reader-only utility (e.g. the page-level <h1>): present in the
+   DOM and the accessibility tree, but clipped out of the visual layout. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 /* the mobile fallback — a compact vertical list; the GPU globe stays behind it */
 .dial-list {
   display: none;

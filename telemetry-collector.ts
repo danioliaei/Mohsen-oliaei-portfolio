@@ -100,7 +100,6 @@ export function telemetryCollector(options: { file?: string } = {}): Plugin {
 
   const mount = (server: ViteDevServer | PreviewServer) => {
     server.middlewares.use(handler);
-    // eslint-disable-next-line no-console
     console.log(`\n  [telemetry] POST /telemetry → ${file}\n`);
   };
 

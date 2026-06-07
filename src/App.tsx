@@ -13,10 +13,18 @@ const RidgelineStage = lazy(() => import("./components/RidgelineStage"));
 export default function App() {
   return (
     <>
+      {/* the page's single level-1 heading — visually hidden (the WebGPU hero IS the
+          visual title) but present so screen readers and search engines get a real
+          page-level heading; the overlay <h2>s sit correctly beneath it. */}
+      <h1 className="sr-only">Daniel Oliaei — BIM Specialist &amp; Developer</h1>
       <Header />
-      <Suspense fallback={<div className="ridge-stage" aria-hidden="true" />}>
-        <RidgelineStage />
-      </Suspense>
+      {/* the primary content lives in a <main> landmark (present in every state —
+          the Suspense fallback and the WebGPU-unsupported notice included). */}
+      <main>
+        <Suspense fallback={<div className="ridge-stage" aria-hidden="true" />}>
+          <RidgelineStage />
+        </Suspense>
+      </main>
     </>
   );
 }
