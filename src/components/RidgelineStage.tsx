@@ -80,9 +80,10 @@ const BEACON_TAU = 0.3; // s — how the beacon eases in / out (overlay open, of
 // constants drive the screen-space fan the rAF loop welds to the projected globe each frame.
 // SLOT is the dial rotation per project (the selection wheel — NOT the orbit DETENT); the visible
 // window is ±DIAL_VIS spokes mapped LINEARLY across ±DIAL_FAN_HALF, so the fill stays dense no
-// matter the count. Each spoke's inner end roots INSIDE the globe (DIAL_R_INNER_*) so it reads as
-// emerging from within; major projects reach further (DIAL_L_MAJOR) than minor ones (DIAL_L_MINOR).
-// The fan only renders >860px (mobile uses the vertical list), where the globe is large enough.
+// matter the count. Each spoke roots JUST OUTSIDE the globe's clearly-defined rim (req 3) so the
+// bordered ball stays clear inside; major projects reach further (DIAL_L_MAJOR) than minor ones
+// (DIAL_L_MINOR). The fan now renders on mobile too (req 4), tuned tighter (taller + shorter) for
+// the narrow portrait frame — the same look as desktop, no vertical-list fallback.
 const DIAL_N = PROJECTS.length; // the project count (>= 1; DIAL_SLOT divides by it)
 const DIAL_SLOT = TWO_PI / DIAL_N; // selection-wheel step
 // a deterministic 0..1 jitter per spoke (FNV-1a over the id) so the dense fan's lengths read
@@ -103,12 +104,11 @@ const DIAL_L_MAJOR = 0.92; // flagship spoke reach past the rim (× the globe sc
 const DIAL_L_MINOR = 0.34; // minor / study spoke reach (kept short → strong length contrast, tight near the rim)
 const DIAL_L_SEL_BONUS = 0.14; // extra reach lent to the selected (detent) spoke
 const DIAL_L_JIT = 0.1; // ± per-spoke length jitter (× Rs) — the organic, hand-plotted reference texture
-const DIAL_R_INNER_SEL = 0.3; // selected inner anchor as a fraction of Rs — roots DEEPEST inside the globe
-const DIAL_R_INNER_MIN = 0.5; // near-detent inner anchor (inside the rim)
-const DIAL_R_INNER_MAX = 0.82; // far-spoke inner anchor (still just inside the rim)
 const DIAL_DRAW_STAGGER = 0.16; // projAmt span between the centre spoke drawing out and the outermost
 const DIAL_PAN = 0.6; // NDC_x left-pan of the globe when the dial opens (wide screens only) — parks it further left
-const DIAL_ZOOM = 0.8; // globe camera-radius mult at full dial (smaller = closer = bigger → its right side fills)
+const DIAL_ZOOM = 0.92; // globe camera-radius mult at full dial (smaller = closer = bigger → its right side fills).
+// raised from 0.8 to ABSORB the bigger home globe (req 5 lowered globeStart) so the dial globe stays the
+// same size it was tuned at: 1.45·0.92 ≈ 1.66·0.80 (wide). Only the dial is affected (pCam = 0 elsewhere).
 const DIAL_SENS = 1.7; // rad of dial per canvas-height of horizontal drag
 const DIAL_SMOOTH_TAU = 0.15; // s — ease displayed angle → target (a heavier, weightier knob)
 const DIAL_INERTIA_TAU = 0.6; // s — release-flick decay
@@ -499,8 +499,6 @@ export default function RidgelineStage() {
       let dialDragging = false;
       let dialStartAngle = 0, dialStartX = 0; // drag anchor
       let dialLastNotch = 0;      // detent-tick bookkeeping during a drag
-      const dialMobile = () =>    // narrow → the vertical list owns it; the fan never runs
-        typeof matchMedia === "function" && matchMedia("(max-width: 860px)").matches;
       // snap the dial to project i the SHORT way round (fold the delta to ±π)
       const dialGoto = (i: number) => {
         let delta = (i * DIAL_SLOT - tDialAngle) % TWO_PI;
@@ -1142,8 +1140,8 @@ export default function RidgelineStage() {
       // then lay out the project spokes as a screen-space fan on the globe's right hemisphere —
       // the selected project horizontal at 3 o'clock, neighbours arcing up/down, the rest wrapping
       // around the back (hidden). Mirrors updateCloud/updateSurvey: imperative DOM writes only, so
-      // nothing re-renders React and the fan stays welded to the (panned) globe. The fan is
-      // desktop-only; the narrow layout uses the vertical list, which only needs its selected class.
+      // nothing re-renders React and the fan stays welded to the (panned) globe. The fan now runs on
+      // EVERY viewport (req 4); mobile just tunes it tighter (taller + shorter) for the narrow frame.
       const updateDial = (
         vp: Float32Array,
         W: number,
@@ -1155,24 +1153,37 @@ export default function RidgelineStage() {
       ) => {
         const dom = dialDomRef.current;
         if (!dom) return;
-        const mobile = dialMobile();
-        // masthead readout + mobile-list selection track every frame (cheap text/class writes).
-        // NAME only now (req 5) — the place is dropped from the live readout.
+        const mobile = W < 760; // the fan now runs on mobile too (req 4) — just tuned tighter below
+        // masthead readout tracks every frame (a cheap text write). NAME only (req 5).
         if (dom.plate) dom.plate.textContent = `PLATE ${String(sel + 1).padStart(2, "0")} / ${DIAL_N}`;
         if (dom.live) dom.live.textContent = PROJECTS[sel].title.toUpperCase();
-        if (dom.listItems.length === DIAL_N)
-          for (let i = 0; i < DIAL_N; i++)
-            dom.listItems[i].classList.toggle("is-selected", i === sel);
 
         const { lines, nodes, glows, labels } = dom;
-        if (labels.length === DIAL_N && !mobile) {
+        if (labels.length === DIAL_N) {
           const c = projectToScreen(vp, GLOBE.cx, GLOBE.cy, GLOBE.cz, W, H);
           const ed = projectToScreen(vp, GLOBE.cx + GLOBE.r, GLOBE.cy, GLOBE.cz, W, H);
           const Rs = Math.hypot(ed.x - c.x, ed.y - c.y) || 1; // projected globe radius (px)
+          // weld the clearly-defined rim circle to the projected ball (req 3) — the crisp border the
+          // organized rays stay INSIDE of, and the project chart fans OUTSIDE of.
+          if (dom.rim) {
+            if (c.visible && Rs >= 8 && Rs <= W * 3) {
+              dom.rim.setAttribute("cx", c.x.toFixed(1));
+              dom.rim.setAttribute("cy", c.y.toFixed(1));
+              dom.rim.setAttribute("r", Rs.toFixed(1));
+              dom.rim.style.opacity = (amt * 0.85).toFixed(3);
+            } else {
+              dom.rim.style.opacity = "0";
+            }
+          }
+          // mobile fans a TALLER, SHORTER chart (more vertical room, less width) so it fits the narrow
+          // portrait frame; desktop keeps the wide reaching wedge.
+          const fanHalf = mobile ? (52 * Math.PI) / 180 : DIAL_FAN_HALF;
+          const lMajor = mobile ? 0.66 : DIAL_L_MAJOR;
+          const lMinor = mobile ? 0.26 : DIAL_L_MINOR;
           // skip the fan layout on a degenerate projection (hold the last-good transforms); the
           // SR announce below still runs so selection stays accessible.
           if (c.visible && Rs >= 8 && Rs <= W * 3) {
-            const fadeStart = DIAL_FAN_HALF - DIAL_ARC_FADE;
+            const fadeStart = fanHalf - DIAL_ARC_FADE;
             for (let i = 0; i < DIAL_N; i++) {
               // signed wheel distance from the selected detent, folded to the nearest wrap
               let k = (((i - sel) % DIAL_N) + DIAL_N) % DIAL_N;
@@ -1191,24 +1202,20 @@ export default function RidgelineStage() {
               const isSel = k === 0;
               // map k LINEARLY onto the right-hemisphere arc so the fill stays dense at any count
               // (screen y is down → negate sin for a +up angle)
-              const a = (k / DIAL_VIS) * DIAL_FAN_HALF;
+              const a = (k / DIAL_VIS) * fanHalf;
               const aa = Math.abs(a);
               const ca = Math.cos(a), sa = Math.sin(a);
 
-              // INNER endpoint INSIDE the globe (req 2): the selected spoke roots deepest, the far
-              // spokes start near the rim — so every line reads as STEMMING FROM WITHIN the ball.
-              const tNear = 1 - ak / DIAL_VIS; // 1 at the detent → 0 at the window edge
-              const innerFrac = isSel
-                ? DIAL_R_INNER_SEL
-                : DIAL_R_INNER_MIN + (DIAL_R_INNER_MAX - DIAL_R_INNER_MIN) * (1 - tNear);
-              const innerR = Rs * innerFrac;
+              // every spoke roots JUST OUTSIDE the rim (req 3) — the bordered globe stays clear inside;
+              // the whole project chart lives outside it. The selected spoke lifts a hair further out.
+              const innerR = Rs * (isSel ? 1.07 : 1.03);
               const ix = c.x + innerR * ca, iy = c.y - innerR * sa;
 
               // OUTER reach: major reaches further than minor, plus a stable per-spoke jitter for
               // the organic texture and a bump for the selected spoke; tapered as it nears the cull.
-              const base = PROJECTS[i].major ? DIAL_L_MAJOR : DIAL_L_MINOR;
+              const base = PROJECTS[i].major ? lMajor : lMinor;
               const jit = (DIAL_JIT[i] - 0.5) * 2 * DIAL_L_JIT;
-              const edgeShorten = aa > fadeStart ? 1 - 0.55 * smooth(fadeStart, DIAL_FAN_HALF, aa) : 1;
+              const edgeShorten = aa > fadeStart ? 1 - 0.55 * smooth(fadeStart, fanHalf, aa) : 1;
               const Lf = (base + jit + (isSel ? DIAL_L_SEL_BONUS : 0)) * edgeShorten;
               const fullOutR = Rs + Rs * Math.max(0.12, Lf); // final tip radius (px from centre)
 
@@ -1220,7 +1227,7 @@ export default function RidgelineStage() {
               const hx = c.x + headR * ca, hy = c.y - headR * sa; // the live head / node ride this
 
               // opacity: edge fade × master amt × this spoke's draw progress
-              const edgeFade = aa > fadeStart ? 1 - smooth(fadeStart, DIAL_FAN_HALF, aa) : 1;
+              const edgeFade = aa > fadeStart ? 1 - smooth(fadeStart, fanHalf, aa) : 1;
               const op = (edgeFade * amt * grow).toFixed(3);
 
               line.style.display = "";
@@ -1276,11 +1283,8 @@ export default function RidgelineStage() {
             dom.liveRegion.textContent =
               `${PROJECTS[sel].title}, ${formatMonthYearLong(PROJECTS[sel].date)}, ${PROJECTS[sel].place}`;
           const act = typeof document !== "undefined" ? document.activeElement : null;
-          if (
-            act &&
-            (act.classList?.contains("dial-label") || act.classList?.contains("dial-list-item"))
-          ) {
-            (mobile ? dom.listItems[sel] : labels[sel])?.focus?.();
+          if (act && act.classList?.contains("dial-label")) {
+            labels[sel]?.focus?.();
           }
         }
       };
@@ -1358,9 +1362,10 @@ export default function RidgelineStage() {
         pLo = mix01(GLOBE_PITCH_LO, PITCH_LO, mEase);
         pHi = mix01(GLOBE_PITCH_HI, PITCH_HI, mEase);
         tPitch = clampPitch(tPitch);
-        // idle planet spin — fades out EARLY as the dial opens (the ball parks calm before the
-        // spokes finish drawing, req 2; the knob then drives the spin instead, below)
-        globeSpin += SPIN * (1 - smooth(0.15, 0.6, mc)) * (1 - smooth(0.0, 0.45, projAmt)) * dt;
+        // idle planet spin — eases out as the mountain forms; during the Projects dial it keeps a SLOW
+        // ordered drift (req 2: mesmerizing movement) rather than freezing, so the organized rays keep
+        // turning. The knob (dialAngle) adds on top when the viewer drags.
+        globeSpin += SPIN * (1 - smooth(0.15, 0.6, mc)) * (1 - 0.62 * smooth(0.0, 0.45, projAmt)) * dt;
         // the GPU globe + the DOM letter-cloud both read this summed spin, so the ball turns 1:1
         // with the knob (dialAngle) while the dial is open and resumes its idle drift when closed.
         const spinOut = globeSpin + dialAngle * projAmt;
@@ -1446,9 +1451,11 @@ export default function RidgelineStage() {
         // mountain; on a tall phone the overlay stacks vertically, so keep it centred.
         // Eased by focusAmt so the slide tracks the dolly in and out.
         const wide = smooth(1.0, 1.4, aspectNow);
-        // the dossier focus pans the massif RIGHT; the Projects dial pans the globe LEFT (so its
-        // right hemisphere faces the open right where the spokes fan). Both are wide-screen only.
-        const focusShift = focusAmt * 0.42 * wide - DIAL_PAN * pCam * wide;
+        // the dossier focus pans the massif RIGHT (wide screens only). The Projects dial pans the globe
+        // LEFT on EVERY viewport (req 4: the fan shows on mobile too), a touch further on desktop, so its
+        // right hemisphere faces the open space where the spokes fan.
+        const dialPan = DIAL_PAN * pCam * (0.6 + 0.4 * wide);
+        const focusShift = focusAmt * 0.42 * wide - dialPan;
 
         // lift the SELECTED ring to a comfortable framing height. The dolly-in keeps
         // aiming at the summit, so without this the low (early-career) rings near the
@@ -1483,7 +1490,7 @@ export default function RidgelineStage() {
         // overflows the width — pull the camera further back there so the ball fits comfortably.
         // mirrors the mountain's own zoomBase (radiusScale) aspect term. smooth(0,1,mc)=1 at mc=1
         // ⇒ mix01(globeStart, 1.0, 1) === 1.0 for ANY start, so the mountain dolly is byte-identical.
-        const globeStart = 1.66 + 1.10 * smooth(1.0, 0.5, aspectNow); // ~1.66 wide … ~2.76 portrait — a touch smaller on both
+        const globeStart = 1.45 + 1.00 * smooth(1.0, 0.5, aspectNow); // ~1.45 wide … ~2.45 portrait — a bit BIGGER home globe (req 5)
         // the Projects dial leans the camera a touch closer (DIAL_ZOOM<1) to emphasise the globe's
         // right part; mix01(1, DIAL_ZOOM, 0) === 1 so the Home/CV framing is byte-identical at projAmt 0.
         const globeRadius = mix01(globeStart, 1.0, smooth(0.0, 0.70, mc)) * mix01(1.0, DIAL_ZOOM, pCam);
@@ -1522,9 +1529,12 @@ export default function RidgelineStage() {
         const aspect = cvs.clientWidth / Math.max(cvs.clientHeight, 1);
         if (mc < 0.999) {
           const cam = ridgeCamera(yaw, pitch, aspect, t, rscale, focusShift, focusShiftY);
-          // spinOut (idle + dial) so the cloud co-rotates with the GPU ball in BOTH phases
-          updateCloud(cam.vp, cam.eye, spinOut, mc, cvs.clientWidth, cvs.clientHeight);
-          // the chaotic letter-cloud is part of "the mess" — fade it out as the dial organises
+          // the chaotic letter-cloud is part of "the mess" — it fades out as the dial organises, so once
+          // the dial is (nearly) fully open skip its ~128 per-glyph DOM writes entirely (req 6 perf).
+          if (projAmt < 0.985) {
+            // spinOut (idle + dial) so the cloud co-rotates with the GPU ball in BOTH phases
+            updateCloud(cam.vp, cam.eye, spinOut, mc, cvs.clientWidth, cvs.clientHeight);
+          }
           if (cloudRef.current) cloudRef.current.style.opacity = (1 - projAmt).toFixed(3);
           // weld the Projects dial spokes + labels to the SAME projected (panned) globe
           if (projAmt > 0.002)
@@ -1633,20 +1643,21 @@ export default function RidgelineStage() {
         </span>
       </button>
 
-      {/* bottom drag hint — a tracked small-caps cue flanked by two little CURVED arrows
-          (curving outward, one pointing left, one right) signalling the globe can be spun.
-          Globe-only: opacity is driven from the rAF loop (1 while mc≈0 & still inviting, else
-          0) and retired by stopInviting on the first rotate. aria-hidden + pointer-events:none
-          so a drag passes straight through to the canvas beneath. */}
+      {/* bottom drag hint — a tracked small-caps cue flanked by two little curved arrows that hug the
+          globe's lower limb, each arrowhead aligned TANGENT to its arc so it clearly reads as a
+          left/right spin (req 1: heads rotated to the curve, no CSS mirror). Globe-only: opacity is
+          driven from the rAF loop (1 while mc≈0 & still inviting, else 0) and retired by stopInviting on
+          the first rotate. aria-hidden + pointer-events:none so a drag passes straight through to the
+          canvas beneath. */}
       <div className="globe-hint" ref={hintRef} aria-hidden="true">
-        <svg className="globe-hint-arrow" viewBox="0 0 24 20" fill="none" aria-hidden="true">
-          <path d="M21 13.5 Q12 6.5 3 10.5" />
-          <path d="M3 10.5 L6 6.9 M3 10.5 L7.4 11.4" />
+        <svg className="globe-hint-arrow" viewBox="0 0 26 14" fill="none" aria-hidden="true">
+          <path d="M23 5 Q13 10 3 6" />
+          <path d="M3 6 L5.6 9.7 M3 6 L7.4 5.1" />
         </svg>
         <span className="globe-hint-text">drag to rotate</span>
-        <svg className="globe-hint-arrow" viewBox="0 0 24 20" fill="none" aria-hidden="true">
-          <path d="M3 13.5 Q12 6.5 21 10.5" />
-          <path d="M21 10.5 L18 6.9 M21 10.5 L16.6 11.4" />
+        <svg className="globe-hint-arrow" viewBox="0 0 26 14" fill="none" aria-hidden="true">
+          <path d="M3 5 Q13 10 23 6" />
+          <path d="M23 6 L20.4 9.7 M23 6 L18.6 5.1" />
         </svg>
       </div>
 

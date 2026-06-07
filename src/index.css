@@ -363,7 +363,7 @@ canvas#ridge:active {
 }
 .globe-hint-arrow {
   width: 26px;
-  height: 19px;
+  height: 14px;
   stroke: currentColor;
   stroke-width: 1.7;
   stroke-linecap: round;
@@ -371,7 +371,7 @@ canvas#ridge:active {
   fill: none;
   overflow: visible;
   flex: none;
-  transform: scaleY(-1); /* req 4 — vertically mirror the drag arrows (they now arc downward) */
+  /* heads are drawn tangent to each arc in the SVG itself (req 1) — no CSS mirror needed */
 }
 /* breathe a subtle downward drift (transform only — opacity stays loop-owned) */
 @keyframes globe-hint-breathe {
@@ -395,7 +395,7 @@ canvas#ridge:active {
   }
   .globe-hint-arrow {
     width: 21px;
-    height: 15px;
+    height: 11px;
     stroke-width: 1.8;
   }
 }
@@ -1564,9 +1564,19 @@ canvas#ridge:active {
   overflow: visible;
   pointer-events: none;
 }
+/* the clearly-defined globe border (req 3) — a crisp ivory ring welded to the projected ball each
+   frame. The organized rays stay inside it; the project chart fans outside it. */
+.dial-rim {
+  fill: none;
+  stroke: rgba(244, 241, 234, 0.5);
+  stroke-width: 1.1;
+  opacity: 0; /* the rAF loop owns this (eased with the dial) */
+  filter: drop-shadow(0 0 6px rgba(244, 241, 234, 0.16));
+}
 /* the dense radial spokes — NO transitions (53 live nodes rewritten every frame would thrash a
-   stroke/fill transition). The base stroke is the inner-fade gradient so each line dissolves into
-   the globe; the selected spoke overrides to a solid amber you-are-here accent. */
+   stroke/fill transition). The base stroke is a rim→tip gradient (dim at the rim, brighter outward)
+   so each line reads as fanning OUT of the bordered ball; the selected spoke overrides to a solid
+   amber you-are-here accent. */
 .dial-line {
   fill: none;
   stroke: url(#dial-spoke-fade);
@@ -1672,16 +1682,10 @@ canvas#ridge:active {
   border: 0;
 }
 
-/* the mobile fallback — a compact vertical list; the GPU globe stays behind it */
-.dial-list {
-  display: none;
-}
-
+/* req 4: the radial fan now runs on mobile too — the SAME look as desktop. The globe parks left, its
+   right hemisphere fills the frame, and the chart fans out; dragging the ball spins the knob (with
+   haptics) and tapping a name selects it. The old vertical-list fallback is gone. */
 @media (max-width: 860px) {
-  .projects-dial-svg,
-  .projects-dial-labels {
-    display: none;
-  }
   .projects-dial-masthead {
     top: clamp(70px, 10vh, 96px);
     left: 16px;
@@ -1690,62 +1694,14 @@ canvas#ridge:active {
   .projects-dial-title {
     font-size: clamp(30px, 8.5vw, 46px);
   }
-  .dial-list {
-    position: absolute;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    top: 44vh;
-    z-index: 3;
-    display: flex;
-    flex-direction: column;
-    gap: 1px;
-    padding: 0 16px calc(24px + env(safe-area-inset-bottom));
-    overflow-y: auto;
-    -webkit-overflow-scrolling: touch;
-    pointer-events: auto;
-    /* fade the top edge so rows dissolve up under the masthead */
-    -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 40px);
-    mask-image: linear-gradient(180deg, transparent 0, #000 40px);
-  }
-  .dial-list-item {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    width: 100%;
-    margin: 0;
-    padding: 12px 14px;
-    border: 1px solid rgba(244, 241, 234, 0.08);
-    border-radius: 7px;
-    background: rgba(8, 9, 12, 0.28);
-    color: inherit;
-    text-align: left;
-    cursor: pointer;
-    -webkit-tap-highlight-color: transparent;
-    transition:
-      background 0.25s ease,
-      border-color 0.25s ease;
-  }
-  .dial-list-item.is-selected {
-    background: rgba(22, 24, 30, 0.6);
-    border-color: rgba(244, 241, 234, 0.34);
-  }
-  .dial-list-item .short {
-    font-size: 12px;
-    font-weight: 500;
+  /* the dense mobile fan packs tighter, so trim the radial names a touch (the selected one still
+     brightens to the amber accent + larger size set above) */
+  .dial-label-name {
+    font-size: 9px;
     letter-spacing: 0.1em;
-    text-transform: uppercase;
-    color: rgba(244, 241, 234, 0.84);
   }
-  .dial-list-item .year {
-    margin-left: auto;
-    font-family: var(--mono);
-    font-size: 10px;
-    letter-spacing: 0.08em;
-    color: rgba(244, 241, 234, 0.5);
-  }
-  .dial-list-item.is-selected .year {
-    color: var(--c-education);
+  .dial-label.is-selected .dial-label-name {
+    font-size: 11px;
   }
 }
 

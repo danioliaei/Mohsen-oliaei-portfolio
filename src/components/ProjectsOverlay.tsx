@@ -31,11 +31,11 @@ const TOTAL = PROJECTS.length;
 /** the live DOM handles the RidgelineStage rAF loop welds each frame */
 export type ProjectsDialDom = {
   root: HTMLDivElement | null;
+  rim: SVGCircleElement | null; // the clearly-defined globe border (req 3)
   lines: SVGLineElement[];
   nodes: SVGCircleElement[];
   glows: SVGCircleElement[];
   labels: HTMLElement[];
-  listItems: HTMLElement[];
   plate: HTMLElement | null;
   live: HTMLElement | null; // masthead "title · place" readout
   liveRegion: HTMLElement | null; // visually-hidden aria-live announcer
@@ -49,14 +49,11 @@ type Props = {
   onSelect: (i: number) => void;
 };
 
-const yy = (date: string) => `'${date.slice(2, 4)}`; // "2025-04" → "'25"
-
 const ProjectsOverlay = forwardRef<HTMLButtonElement, Props>(
   function ProjectsOverlay({ onClose, domRef, onSelect }, closeButtonRef) {
     const rootRef = useRef<HTMLDivElement>(null);
     const svgRef = useRef<SVGSVGElement>(null);
     const labelsRef = useRef<HTMLDivElement>(null);
-    const listRef = useRef<HTMLDivElement>(null);
     const plateRef = useRef<HTMLSpanElement>(null);
     const liveRef = useRef<HTMLSpanElement>(null);
     const announceRef = useRef<HTMLDivElement>(null);
@@ -69,13 +66,11 @@ const ProjectsOverlay = forwardRef<HTMLButtonElement, Props>(
       if (!svg || !labelsWrap) return;
       domRef.current = {
         root: rootRef.current,
+        rim: svg.querySelector<SVGCircleElement>(".dial-rim"),
         lines: Array.from(svg.querySelectorAll<SVGLineElement>(".dial-line")),
         nodes: Array.from(svg.querySelectorAll<SVGCircleElement>(".dial-node")),
         glows: Array.from(svg.querySelectorAll<SVGCircleElement>(".dial-node-glow")),
         labels: Array.from(labelsWrap.querySelectorAll<HTMLElement>(".dial-label")),
-        listItems: listRef.current
-          ? Array.from(listRef.current.querySelectorAll<HTMLElement>(".dial-list-item"))
-          : [],
         plate: plateRef.current,
         live: liveRef.current,
         liveRegion: announceRef.current,
@@ -159,18 +154,19 @@ const ProjectsOverlay = forwardRef<HTMLButtonElement, Props>(
           </p>
         </div>
 
-        {/* the spoke layer — geometry welded each frame (desktop fan) */}
+        {/* the spoke layer — geometry welded each frame (the fan now runs on mobile too, req 4) */}
         <svg className="projects-dial-svg" ref={svgRef} aria-hidden="true">
           <defs>
-            {/* each spoke's INNER segment fades to nothing inside the globe, so the line reads as
-                emerging from within the ball (req 2). objectBoundingBox space: since every spoke
-                fans to the RIGHT (outer x > inner x), x=0 is always the inner end, x=1 the tip. */}
+            {/* each spoke roots at the rim and brightens outward, so the chart reads as fanning OUT
+                of the bordered ball (req 3). objectBoundingBox space: since every spoke fans to the
+                RIGHT (outer x > inner x), x=0 is always the inner end (the rim), x=1 the tip. */}
             <linearGradient id="dial-spoke-fade" x1="0" y1="0" x2="1" y2="0">
-              <stop offset="0" stopColor="rgb(244,241,234)" stopOpacity="0" />
-              <stop offset="0.42" stopColor="rgb(244,241,234)" stopOpacity="0.5" />
-              <stop offset="1" stopColor="rgb(244,241,234)" stopOpacity="0.95" />
+              <stop offset="0" stopColor="rgb(244,241,234)" stopOpacity="0.32" />
+              <stop offset="1" stopColor="rgb(244,241,234)" stopOpacity="0.92" />
             </linearGradient>
           </defs>
+          {/* the clearly-defined globe border (req 3) — welded to the projected ball each frame */}
+          <circle className="dial-rim" cx="0" cy="0" r="0" />
           {PROJECTS.map((p) => (
             <g key={p.id}>
               <line className="dial-line" x1="0" y1="0" x2="0" y2="0" />
@@ -198,23 +194,6 @@ const ProjectsOverlay = forwardRef<HTMLButtonElement, Props>(
               onClick={() => onSelect(i)}
             >
               <span className="dial-label-name">{p.title}</span>
-            </button>
-          ))}
-        </div>
-
-        {/* the mobile fallback — a compact vertical list (the fan needs width). Tapping
-            a row still spins the GPU globe via the same selection path. */}
-        <div className="dial-list" ref={listRef} role="list" aria-label="Projects, 2014 to 2026">
-          {PROJECTS.map((p, i) => (
-            <button
-              type="button"
-              className="dial-list-item"
-              key={p.id}
-              onClick={() => onSelect(i)}
-              aria-label={`Project ${i + 1} of ${TOTAL}: ${p.title}, ${formatMonthYearLong(p.date)}, ${p.place}`}
-            >
-              <span className="short">{p.short}</span>
-              <span className="year">{yy(p.date)}</span>
             </button>
           ))}
         </div>
