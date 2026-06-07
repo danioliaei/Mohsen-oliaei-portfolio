@@ -1,5 +1,3 @@
-import { motion } from "motion/react";
-
 const NAV = [
   // Home = the spinning globe of lines & letters; CV = the mountain it assembles
   // into. RidgelineStage listens for these two hashes and morphs between the views.
@@ -10,15 +8,15 @@ const NAV = [
   { label: "Contact", href: "#contact" },
 ];
 
-const ease = [0.22, 1, 0.36, 1] as const;
-
+/* The header carries no `motion` import on purpose: it's the first thing painted, so its
+   entrance (header fade/slide + staggered nav links) is plain CSS (see index.css
+   `header` / `nav a` animations). Keeping `motion` out of the eager path lets it live only
+   in the lazy RidgelineStage chunk — the initial bundle paints the wordmark/nav without
+   downloading the animation library (see HYBRID.md, "code-split"). The per-link stagger is
+   the one dynamic bit, set inline to mirror the old `delay: 0.35 + i * 0.08`. */
 export default function Header() {
   return (
-    <motion.header
-      initial={{ opacity: 0, y: -18 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.9, ease, delay: 0.1 }}
-    >
+    <header>
       <a
         className="wordmark"
         href="https://www.linkedin.com/in/daniol/"
@@ -29,17 +27,15 @@ export default function Header() {
       </a>
       <nav>
         {NAV.map((item, i) => (
-          <motion.a
+          <a
             key={item.href}
             href={item.href}
-            initial={{ opacity: 0, y: -10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.6, ease, delay: 0.35 + i * 0.08 }}
+            style={{ animationDelay: `${(0.35 + i * 0.08).toFixed(2)}s` }}
           >
             {item.label}
-          </motion.a>
+          </a>
         ))}
       </nav>
-    </motion.header>
+    </header>
   );
 }
