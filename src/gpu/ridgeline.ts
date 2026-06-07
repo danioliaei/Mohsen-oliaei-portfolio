@@ -127,7 +127,7 @@ export const CLOUD_CHARS: string[] = CHAR_CLOUD.chars;
    radial shell) → 7 floats; stride 28 B, matching the pipeline's attributes. ---- */
 export const FILAMENT_FLOATS_PER_VERT = 7;
 const FIL_NODES = 48;       // bright convergence points (Fibonacci lattice)
-const FIL_PER_NODE = 16;    // threads spun out from each node (was 24 → a calmer, less overdrawn tangle; the dominant segment count, so this is the main complexity lever)
+const FIL_PER_NODE = 12;    // threads spun out from each node (was 16 → an even calmer, less overdrawn tangle; the dominant segment count, so this is the main complexity lever)
 const FIL_STEPS = 28;       // points sampled per thread
 const FIL_STEP_ANG = 0.082; // radians advanced per step → a long sweeping arc (~2.2 rad)
 const FIL_SPARKS = 4;       // short bright segments crossing each surface node (was 5; slightly calmer node stars to match the lighter tangle)
@@ -136,14 +136,14 @@ const FIL_SPARKS = 4;       // short bright segments crossing each surface node 
 // (0.34) out to the crust (1.0), the layered "well" the eye can fall into.
 const FIL_SHELLS = [0.34, 0.52, 0.7, 0.86, 1.0] as const;
 const CORE_TRAIL_FRAC = 0.46; // fraction of curl threads that DIVE inward to the core near their tip
-const SPOKE_COUNT = 64;       // radial sight-lines from the nucleus out to the rim (the armature)
+const SPOKE_COUNT = 48;       // radial sight-lines from the nucleus out to the rim (the armature) (was 64 → fewer spokes for a simpler cage)
 const SPOKE_DASHES = 8;       // dash segments per spoke (read as travelling measurement ticks)
-const NUCLEUS_SPARKS = 96;    // short crossing sparks forming the glowing core AT the centre
+const NUCLEUS_SPARKS = 64;    // short crossing sparks forming the glowing core AT the centre (was 96 → a simpler, less busy core to match the dimmer "glooming" centre)
 // ---- THE DEEP ORRERY additions: interior dust filling the void between shells, counter-precessing
 // great-circle gimbal rings, and a slow halo orbiting the nucleus — all riding the EXISTING sentinel
 // classes so the morph (drain/lift/fade) is untouched and the morph=1 mountain stays byte-identical.
-const MOTE_COUNT = 2400;      // interior dust specks filling the void BETWEEN the shells (class [0,1)) — was 3600; thinner dust reads calmer while still texturing all depths
-const RING_COUNT = 10;        // great-circle gimbal rings that counter-precess (armature, class [1,2)) — was 14; fewer interlocking rings = a cleaner orrery cage
+const MOTE_COUNT = 1600;      // interior dust specks filling the void BETWEEN the shells (class [0,1)) — was 2400; thinner dust reads calmer while still texturing all depths
+const RING_COUNT = 7;         // great-circle gimbal rings that counter-precess (armature, class [1,2)) — was 10; fewer interlocking rings = a cleaner orrery cage
 const RING_SEGS = 132;        // segments per gimbal ring (smooth at globe scale)
 const HALO_SEGS = 96;         // segments per nucleus orbital-halo ring (class [2,3))
 // the line CLASS is encoded as a sentinel range in the `seed` float (at.y), read in the VS via
@@ -404,10 +404,10 @@ const phoneRender = (): boolean =>
   typeof matchMedia === "function" &&
   (matchMedia("(pointer: coarse)").matches || matchMedia("(max-width: 860px)").matches);
 const PHONE_NX = 520, PHONE_NZ = 290;  // terrain mesh LOD (vs 760×420 → ~150k tris, ~76% fewer — TBDR vertex/binning win; contour LINES are shader-drawn so density is unchanged)
-const PHONE_FIL_PER_NODE = 13;         // globe curl-threads per node (vs desktop 16 → an even lighter phone tangle, less additive overdraw + smaller init VBO)
-const PHONE_MOTE_COUNT = 1700;         // globe interior dust motes (vs desktop 2400 → lighter phone dust, smaller init VBO)
+const PHONE_FIL_PER_NODE = 10;         // globe curl-threads per node (vs desktop 12 → an even lighter phone tangle, less additive overdraw + smaller init VBO)
+const PHONE_MOTE_COUNT = 1100;         // globe interior dust motes (vs desktop 1600 → lighter phone dust, smaller init VBO)
 const PHONE_LINE_SCALE = 1.25;         // contour spacing ×: 1 = desktop, 1.25 ≈ 20% fewer lines on the mountain (F.lod.x)
-const PHONE_SC_CAP = 2.5;              // HDR scene supersample cap (vs 2 → crisper hairlines at the higher phone DPR)
+const PHONE_SC_CAP = 2.75;             // HDR scene supersample cap (raised from 2.5 → crisper, more-supersampled hairlines on phone; paid for by the lighter globe/mountain geometry above)
 
 /** Per-frame inputs from the stage (orbit offsets + clock). */
 export interface RidgeFrame {
@@ -489,8 +489,8 @@ const ORBIT = (() => {
    eases globeRadius from this → 1.0 by mc ≈ 0.70, so the finished-mountain framing is
    byte-identical regardless of what this returns. The DOM letter-cloud + survey project
    through the SAME ridgeCamera, so the fit stays consistent for free. */
-const GLOBE_FILL_W = 0.9;   // silhouette reaches this fraction of the half-WIDTH where it fits (phones / near-square)
-const GLOBE_BLEED_V = 1.24; // …but never past this fraction of the half-HEIGHT (>1 ⇒ a gentle top/bottom bleed on wide screens)
+const GLOBE_FILL_W = 0.95;  // silhouette reaches this fraction of the half-WIDTH where it fits (phones / near-square) — raised from 0.9 so the phone globe grows to a tiny margin from the side borders
+const GLOBE_BLEED_V = 0.9;  // …but never past this fraction of the half-HEIGHT — LOWERED from 1.24 (which bled off the top/bottom of wide 4k screens) to 0.9 so the whole globe FITS on desktop with a comfortable margin for the header nav + footer/framing scrims (the camera aims a touch above centre, so the silhouette sits slightly low — 0.9 keeps the bottom rim clear of the footer)
 export function globeFitRadiusScale(aspect: number): number {
   const vHalf = FOVY / 2;
   const hHalf = Math.atan(Math.tan(vHalf) * Math.max(aspect, 0.2));

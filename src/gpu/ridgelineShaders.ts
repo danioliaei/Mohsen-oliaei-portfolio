@@ -267,11 +267,11 @@ struct VsOut {
   // signature stacked profiles stay painted on the surface and glued to the same
   // ground as the camera orbits. These are the quiet texture the survey RINGS are
   // cut across (head-on they read as horizontal bands; from the flank, obliquely).
-  let Z_STEP = 88.0 * F.lod.x;                // world units between scan-lines (was 66 → fewer, cleaner hairlines; ×F.lod.x — wider still on phone)
+  let Z_STEP = 100.0 * F.lod.x;               // world units between scan-lines (was 88 → fewer, cleaner hairlines for a simpler mountain; ×F.lod.x — wider still on phone)
   let f = i.wpos.z / Z_STEP;
   let dist = 0.5 - abs(fract(f) - 0.5);       // 0 on a line, 0.5 between
   let aa = max(fwidth(f), 1e-5);
-  var hair = 1.0 - smoothstep(0.0, aa * 0.95, dist);   // crisper hairlines (was 1.25); the moire-dissolve below still guards far/steep faces
+  var hair = 1.0 - smoothstep(0.0, aa * 0.68, dist);   // crisper hairlines (was 0.95 → sharper still, esp. on phone); the moire-dissolve below still guards far/steep faces
   // dissolve where the projected lines pack tighter than the pixel grid so far /
   // steep faces read as smooth tone instead of a buzzing moiré
   hair = hair * (1.0 - smoothstep(0.48, 1.10, aa));
@@ -656,10 +656,10 @@ struct FOut {
   // stays lit from any angle); the bloom pass lifts it into a luminous orb with no extra pass.
   let coreK = clamp((0.18 - at.w) / 0.18, 0.0, 1.0);
   let somaBeat = 0.8 + 0.2 * sin(tt * 1.15) * motion;
-  glow = glow + coreK * coreK * 2.6 * somaBeat;
+  glow = glow + coreK * coreK * 1.5 * somaBeat;        // was 2.6 → a softer, "glooming" core, no longer blown-out at the centre
   // FIRING WAVE — the instant the climb begins, a brightness wave discharges core→shell
   let fr = (at.w - clamp(morph * 2.4, 0.0, 1.4)) * 7.0;
-  glow = glow * (1.0 + 1.6 * exp(-fr * fr));
+  glow = glow * (1.0 + 0.9 * exp(-fr * fr));           // was 1.6 → calms the over-bright core at home (this term peaks at the centre when morph=0)
 
   // PROJECTS-DIAL FORMATION (req 6): as the dial opens the straightening armature IGNITES inner→outer
   // (a bead of light travels each ray) while the non-straightened silk RECEDES — the chaos resolves
