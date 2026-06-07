@@ -19,6 +19,8 @@ import {
 import RoleOverlay from "./RoleOverlay";
 import AssignmentOverlay from "./AssignmentOverlay";
 import ProjectsOverlay, { type ProjectsDialDom } from "./ProjectsOverlay";
+import type { PerfHandle } from "../perf/harness";
+import type { SceneInfo } from "../perf/types";
 import { STATIONS } from "../data/stations";
 import { PROJECTS, formatMonthYearLong } from "../data/projects";
 
@@ -360,6 +362,33 @@ export default function RidgelineStage() {
     const teardown: Array<() => void> = [];
 
     (async () => {
+      // ---- ?perf=1 on-device telemetry harness (hoisted above scene creation). It is
+      // started in BOTH outcomes so the HUD also appears when WebGPU FAILS — the
+      // secure-context trap the task warns about: over plain http://<lan-ip>,
+      // navigator.gpu is undefined, the scene never initialises, and the HUD must still
+      // scream "❌ NO WEBGPU / ⚠ INSECURE CTX" so the operator fixes the HTTPS tunnel
+      // instead of trusting a void run.
+      //
+      // A plain `vite build` dead-code-eliminates the whole block (and the dynamic
+      // import): `import.meta.env.DEV` folds to `false` in prod, and `=== "1"` folds the
+      // VITE_PERF term to `false` — the `&&` short-circuits and esbuild drops it. These
+      // comparisons are load-bearing for that fold; do NOT loosen them (=== not ==).
+      let perf: PerfHandle | null = null;
+      const perfEnabled =
+        (import.meta.env.DEV || import.meta.env.VITE_PERF === "1") &&
+        typeof location !== "undefined" &&
+        new URLSearchParams(location.search).has("perf");
+      const startHarness = async (
+        getSceneInfo: () => SceneInfo | null,
+        sceneFailed = false,
+      ) => {
+        if (!perfEnabled || perf) return;
+        const { startPerf } = await import("../perf/harness");
+        if (disposed) return;
+        perf = startPerf({ getSceneInfo, sceneFailed });
+        teardown.push(() => perf?.stop());
+      };
+
       const gpu = await RidgelineScene.create(cvs);
       if (disposed) {
         gpu?.dispose();
@@ -368,6 +397,7 @@ export default function RidgelineStage() {
       if (!gpu || !gpu.attach()) {
         gpu?.dispose();
         setUnsupported(true);
+        await startHarness(() => null, true); // WebGPU unavailable/failed — HUD still diagnoses it
         return;
       }
       teardown.push(() => gpu.dispose());
@@ -379,6 +409,11 @@ export default function RidgelineStage() {
       resize();
       window.addEventListener("resize", resize);
       teardown.push(() => window.removeEventListener("resize", resize));
+
+      // start the telemetry harness for the LIVE scene (see the hoisted helper above). It
+      // piggybacks on this component's rAF — one perf.frame(now) call in the loop below —
+      // so it measures the exact render cadence with no second animation loop.
+      await startHarness(() => gpu.info());
 
       // ---- orbit controls — left-drag (mouse / touch) or the arrow keys spin
       // around the summit. The pointer steers a TARGET; the camera EASES toward
@@ -1289,6 +1324,7 @@ export default function RidgelineStage() {
       let prev = performance.now();
       const startT = prev;
       const frame = (now: number) => {
+        perf?.frame(now); // ?perf=1 telemetry: raw frame cadence (no-op when perf is off)
         const dt = Math.min((now - prev) / 1000, 0.05);
         prev = now;
         const t = (now - startT) / 1000;

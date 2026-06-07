@@ -26,6 +26,7 @@ import {
   BRIGHT_WGSL,
   BLUR_WGSL,
 } from "./ridgelineShaders";
+import type { SceneInfo } from "../perf/types";
 
 const HDR: GPUTextureFormat = "rgba16float";
 
@@ -822,6 +823,13 @@ export class RidgelineScene {
   private rw = 1;
   private rh = 1;
   private sc = 1;
+  private dprUsed = 1;
+
+  // ---- perf telemetry counters (read by the ?perf=1 harness via info(); set
+  // each render() — three integer writes, no cost when the harness isn't watching)
+  private lastDraws = 0;
+  private lastTris = 0;
+  private lastLines = 0;
 
   private constructor(g: GPUCtx, canvas: HTMLCanvasElement) {
     this.g = g;
@@ -1034,6 +1042,7 @@ export class RidgelineScene {
 
   resize(W: number, H: number, dpr: number): void {
     const d = this.g.device;
+    this.dprUsed = dpr; // the effective (already-clamped) DPR — surfaced via info()
     this.canvas.width = Math.max(1, Math.round(W * dpr));
     this.canvas.height = Math.max(1, Math.round(H * dpr));
     // supersample the HDR scene so the composite box-downsample yields clean,
@@ -1154,12 +1163,20 @@ export class RidgelineScene {
     pass.drawIndexed(this.indexCount);
     // the intro filament ball — additive flowing threads over the sphere. Drawn only while the
     // globe is still showing (it has fully faded by morph 0.70); skipped on the finished mountain.
-    if ((s.morph ?? 1) < 0.72) {
+    const filamentDrew = (s.morph ?? 1) < 0.72;
+    if (filamentDrew) {
       pass.setPipeline(this.filamentPipe);
       pass.setVertexBuffer(0, this.filaVBO);
       pass.draw(this.filaVertexCount);
     }
     pass.end();
+
+    // perf counters: backdrop + terrain (+ optional filament) in the HDR pass, then
+    // bright + blurH + blurV + composite full-screen passes = 6 draws (7 with filament).
+    // Triangles = the terrain mesh (indexCount/3) + the five full-screen-triangle passes.
+    this.lastDraws = 6 + (filamentDrew ? 1 : 0);
+    this.lastTris = this.indexCount / 3 + 5;
+    this.lastLines = filamentDrew ? (this.filaVertexCount / 2) | 0 : 0;
 
     // ---- bloom: bright-pass then one separable blur iteration (→ bloomA) ----
     this.blit(enc, this.brightPipe, this.bgBright, this.bloomAV);
@@ -1200,6 +1217,25 @@ export class RidgelineScene {
     pass.setBindGroup(0, bg);
     pass.draw(3);
     pass.end();
+  }
+
+  /** Live render-path snapshot for the ?perf=1 telemetry harness (this app's
+   *  `renderer.info`). Cheap field reads — only ever called when perf is on. */
+  info(): SceneInfo {
+    return {
+      backend: "webgpu",
+      hasF16: this.g.hasF16,
+      hasTimestamp: this.g.hasTimestamp,
+      drawCalls: this.lastDraws,
+      triangles: this.lastTris,
+      lines: this.lastLines,
+      renderW: this.rw,
+      renderH: this.rh,
+      supersample: this.sc,
+      canvasW: this.canvas.width,
+      canvasH: this.canvas.height,
+      dpr: this.dprUsed,
+    };
   }
 
   dispose(): void {
