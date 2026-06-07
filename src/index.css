@@ -371,6 +371,7 @@ canvas#ridge:active {
   fill: none;
   overflow: visible;
   flex: none;
+  transform: scaleY(-1); /* req 4 — vertically mirror the drag arrows (they now arc downward) */
 }
 /* breathe a subtle downward drift (transform only — opacity stays loop-owned) */
 @keyframes globe-hint-breathe {
@@ -1483,13 +1484,18 @@ canvas#ridge:active {
   inset: 0;
   z-index: 0;
   pointer-events: none;
-  background: linear-gradient(
-    180deg,
-    rgba(6, 7, 10, 0.5) 0%,
-    rgba(6, 7, 10, 0) 26%,
-    rgba(6, 7, 10, 0) 70%,
-    rgba(6, 7, 10, 0.5) 100%
-  );
+  /* a soft radial vignette centred on the focal point (the panned globe's right hemisphere, ~34%
+     across) pools the corners — the CSS companion to the GPU depth-of-field edge blur, selling the
+     "we've focused" cue — over the existing whisper top+bottom scrim that keeps the masthead legible. */
+  background:
+    radial-gradient(120% 90% at 34% 50%, rgba(6, 7, 10, 0) 38%, rgba(6, 7, 10, 0.42) 100%),
+    linear-gradient(
+      180deg,
+      rgba(6, 7, 10, 0.5) 0%,
+      rgba(6, 7, 10, 0) 26%,
+      rgba(6, 7, 10, 0) 70%,
+      rgba(6, 7, 10, 0.5) 100%
+    );
   opacity: 0;
   animation: dial-frost-in 0.5s cubic-bezier(0.22, 1, 0.36, 1) 0.1s forwards;
 }
@@ -1558,39 +1564,32 @@ canvas#ridge:active {
   overflow: visible;
   pointer-events: none;
 }
+/* the dense radial spokes — NO transitions (53 live nodes rewritten every frame would thrash a
+   stroke/fill transition). The base stroke is the inner-fade gradient so each line dissolves into
+   the globe; the selected spoke overrides to a solid amber you-are-here accent. */
 .dial-line {
   fill: none;
-  stroke: rgba(244, 241, 234, 0.3);
-  stroke-width: 1;
+  stroke: url(#dial-spoke-fade);
+  stroke-width: 0.8;
   stroke-linecap: round;
-  transition:
-    stroke 0.3s ease,
-    stroke-width 0.3s ease;
-}
-.dial-line.is-near {
-  stroke: rgba(244, 241, 234, 0.5);
-  stroke-width: 1.1;
 }
 .dial-line.is-selected {
-  stroke: var(--ink);
-  stroke-width: 1.7;
+  stroke: var(--c-education);
+  stroke-width: 1.6;
 }
 .dial-node {
-  fill: rgba(244, 241, 234, 0.55);
-  transition: fill 0.3s ease;
-}
-.dial-node.is-near {
-  fill: rgba(244, 241, 234, 0.72);
+  fill: rgba(244, 241, 234, 0.42);
+  r: 1.5;
 }
 .dial-node.is-selected {
   fill: var(--c-education);
+  r: 3;
   filter: drop-shadow(0 0 6px rgba(255, 196, 92, 0.55));
 }
 .dial-node-glow {
   fill: none;
   stroke: var(--c-education);
   opacity: 0;
-  transition: opacity 0.3s ease;
 }
 .dial-node-glow.is-selected {
   opacity: 0.22;
@@ -1602,6 +1601,9 @@ canvas#ridge:active {
   inset: 0;
   z-index: 2;
 }
+/* a single radial NAME (req 5), rotated along its spoke by the rAF loop. transform-origin is the
+   box top-left so the loop's trailing translateY(-50%) centres the text on the spoke line. No flex
+   stack, no bloom-to-record — the selected one just brightens to the amber you-are-here accent. */
 .dial-label {
   position: absolute;
   top: 0;
@@ -1611,89 +1613,50 @@ canvas#ridge:active {
   border: 0;
   background: none;
   color: inherit;
-  text-align: left;
   cursor: pointer;
   pointer-events: auto;
   opacity: 0; /* the rAF loop owns transform + opacity */
   -webkit-tap-highlight-color: transparent;
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-  white-space: nowrap;
+  white-space: nowrap; /* radial text never wraps */
+  transform-origin: 0 0;
   will-change: transform, opacity;
-  text-shadow:
-    0 0 12px rgba(0, 0, 0, 0.75),
-    0 1px 3px rgba(0, 0, 0, 0.6);
 }
 .dial-label:focus-visible {
   outline: 2px solid rgba(255, 250, 240, 0.85);
-  outline-offset: 5px;
+  outline-offset: 4px;
   border-radius: 3px;
 }
-/* per-state children: far / near show the compact name; selected blooms to the record */
-.dial-label-title,
-.dial-label-desc,
-.dial-label-meta {
-  display: none;
-}
-.dial-label-short {
-  font-size: 11px;
+.dial-label-name {
+  font-family: var(--mono);
+  font-size: 10.5px;
   font-weight: 500;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: rgba(244, 241, 234, 0.62);
+  color: rgba(244, 241, 234, 0.58);
+  text-shadow:
+    0 0 10px rgba(0, 0, 0, 0.8),
+    0 1px 2px rgba(0, 0, 0, 0.6);
 }
-.dial-label.is-near .dial-label-short {
-  color: rgba(244, 241, 234, 0.82);
-}
-.dial-label.is-selected {
-  gap: 9px;
-  white-space: normal;
-}
-.dial-label.is-selected .dial-label-short {
-  display: none;
-}
-.dial-label.is-selected .dial-label-title {
-  display: block;
-}
-.dial-label.is-selected .dial-label-desc {
-  display: block;
-}
-.dial-label.is-selected .dial-label-meta {
-  display: flex;
-}
-.dial-label-title {
-  font-size: clamp(20px, 2.6vw, 27px);
+/* major projects read a touch heavier / brighter — the longer spokes carry more weight */
+.dial-label.is-major .dial-label-name {
   font-weight: 600;
-  line-height: 1.12;
-  letter-spacing: -0.015em;
-  color: var(--ink);
-  max-width: min(34vw, 360px);
-  white-space: normal;
+  color: rgba(244, 241, 234, 0.78);
 }
-.dial-label-desc {
-  font-size: 13.5px;
-  font-weight: 300;
-  line-height: 1.5;
-  color: rgba(244, 241, 234, 0.82);
-  max-width: min(30vw, 320px);
-  white-space: normal;
-}
-.dial-label-meta {
-  align-items: center;
-  gap: 8px;
-  margin-top: 1px;
-  font-family: var(--mono);
-  font-size: 11px;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: rgba(244, 241, 234, 0.6);
-}
-.dial-label-meta .date {
+/* the selected name is the sparing amber accent */
+.dial-label.is-selected .dial-label-name {
+  font-size: 12.5px;
+  letter-spacing: 0.18em;
   color: var(--c-education);
+  text-shadow:
+    0 0 12px rgba(255, 196, 92, 0.45),
+    0 1px 2px rgba(0, 0, 0, 0.7);
 }
-.dial-label-meta .dot {
-  color: rgba(244, 241, 234, 0.3);
+/* req 5: the old full-record children no longer render; keep any straggler hidden */
+.dial-label-title,
+.dial-label-desc,
+.dial-label-meta,
+.dial-label-short {
+  display: none;
 }
 
 /* a visually-hidden live region announces the selected project to screen readers */
