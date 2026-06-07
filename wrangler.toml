@@ -1,7 +1,11 @@
-# Cloudflare Pages configuration
-# Docs: https://developers.cloudflare.com/pages/functions/wrangler-configuration/
+# Cloudflare Workers (Static Assets) configuration
+# Docs: https://developers.cloudflare.com/workers/static-assets/
 name = "mohsen-oliaei-portfolio"
 compatibility_date = "2026-06-07"
 
-# The directory `vite build` writes the production bundle to.
-pages_build_output_dir = "dist"
+# Serve the `vite build` output as a static-assets-only Worker (no `main`).
+# `single-page-application` serves index.html (200) for any unmatched route,
+# which is the SPA fallback this site needs.
+[assets]
+directory = "./dist"
+not_found_handling = "single-page-application"

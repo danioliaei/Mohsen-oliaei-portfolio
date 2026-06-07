@@ -1,2 +1,0 @@
-# SPA fallback — serve index.html for any unmatched route (200, not a redirect)
-/*    /index.html   200
