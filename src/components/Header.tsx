@@ -29,19 +29,28 @@ import { useEffect, useRef, useState } from "react";
 
 type Link = { label: string; href: string; external?: boolean };
 
-// the three LARGE primary links — the site's interactive experiences
+// the primary links — Home (back to the globe) + the site's interactive experiences (req 4)
 const PRIMARY: Link[] = [
+  { label: "Home", href: "#home" },
   { label: "CV", href: "#cv" },
   { label: "Projects", href: "#projects" },
   { label: "Book me", href: "#book" },
 ];
 
+// returning Home can't rely on the hash alone: an in-canvas globe tap grows the mountain without
+// persisting #cv, so the URL can sit on #home while the CV shows — a #home click then fires no
+// hashchange and nothing resets. RidgelineStage listens for this idempotent event and always eases
+// back to the globe (closing any overlay). Fired alongside the normal href so the URL stays correct.
+const goHome = () => {
+  if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("site:home"));
+};
+
 // the secondary link groups (one column on mobile, three across on wider screens)
 const GROUPS: { title: string; links: Link[] }[] = [
   {
     title: "General",
+    // Home now lives in PRIMARY (rendered in both the bar and the overlay), so it's not repeated here
     links: [
-      { label: "Home", href: "#home" },
       { label: "About", href: "#about" },
       { label: "Contact", href: "#contact" },
     ],
@@ -134,7 +143,8 @@ export default function Header() {
   return (
     <>
       <header>
-        <a className="wordmark" href="#home">
+        {/* the wordmark IS the home control (req 4) — clicking it eases back to the globe */}
+        <a className="wordmark" href="#home" onClick={goHome}>
           Daniel Oliaei
         </a>
         {/* the right cluster: an inline nav on desktop (the three primary experiences),
@@ -144,7 +154,11 @@ export default function Header() {
         <div className="header-right">
           <nav className="header-nav" aria-label="Primary">
             {PRIMARY.map((item) => (
-              <a key={item.href + item.label} href={item.href}>
+              <a
+                key={item.href + item.label}
+                href={item.href}
+                onClick={item.href === "#home" ? goHome : undefined}
+              >
                 {item.label}
               </a>
             ))}
@@ -180,7 +194,12 @@ export default function Header() {
         <div className="menu-inner" onClick={onBackdrop}>
           {/* the overlay top bar mirrors the header */}
           <div className="menu-bar">
-            <a className="wordmark" href="#home" tabIndex={tab} onClick={closeMenu}>
+            <a
+              className="wordmark"
+              href="#home"
+              tabIndex={tab}
+              onClick={() => { goHome(); closeMenu(); }}
+            >
               Daniel Oliaei
             </a>
             <button
@@ -202,7 +221,7 @@ export default function Header() {
                 href={item.href}
                 tabIndex={tab}
                 style={stagger()}
-                onClick={closeMenu}
+                onClick={() => { if (item.href === "#home") goHome(); closeMenu(); }}
               >
                 {item.label}
               </a>
@@ -237,7 +256,7 @@ export default function Header() {
                       <a
                         href={item.href}
                         tabIndex={tab}
-                        onClick={closeMenu}
+                        onClick={() => { if (item.href === "#home") goHome(); closeMenu(); }}
                         {...(item.external
                           ? { target: "_blank", rel: "noopener" }
                           : null)}
