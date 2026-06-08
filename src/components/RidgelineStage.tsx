@@ -24,7 +24,7 @@ import ProjectsOverlay, { type ProjectsDialDom, TL_PAD_FRAC } from "./ProjectsOv
 import type { PerfHandle } from "../perf/harness";
 import type { SceneInfo } from "../perf/types";
 import { STATIONS } from "../data/stations";
-import { PROJECTS, formatMonthYearLong, decimalYear, TIME_MIN, TIME_MAX } from "../data/projects";
+import { PROJECTS, formatMonthYearLong, decimalYear, timeFrac, TIMELINE_TICKS, SPLIT_YEAR } from "../data/projects";
 
 /* =========================================================================
    RidgelineStage — mounts the monochrome ridgeline experiment.
@@ -93,12 +93,12 @@ const DIAL_MAX_ANGLE = (DIAL_N - 1) * DIAL_SLOT; // LINEAR clamp — a timeline 
 // per-project plot inputs, precomputed once: xFrac (0..1 along the date axis). The authored
 // elevation (−0.4..1.0) drives the per-year peak height below; its envelope traces two massifs +
 // a central valley (see projects.ts), so the year peaks read as a sinus skyline.
-const TL_XFRAC = PROJECTS.map(
-  (p) => (decimalYear(p.date) - TIME_MIN) / (TIME_MAX - TIME_MIN),
-);
+// 0..1 along the axis via the SHARED piecewise map (dense past + compressed future tail) — single
+// source of truth with the year ruler, so lines + ticks always agree.
+const TL_XFRAC = PROJECTS.map((p) => timeFrac(decimalYear(p.date)));
 
 const TL_PAD = TL_PAD_FRAC; // left/right padding as a fraction of width (matches the year ruler)
-const TL_BASE_Y = 0.6; // FALLBACK baseline height (fraction of H); the loop WELDS it to where the
+const TL_BASE_Y = 0.55; // FALLBACK baseline height (fraction of H); the loop WELDS it to where the
 // folding globe collapses (the projected globe centre), so the line lands on the glowing fold.
 
 // ---- straight-line plot geometry (px unless noted). The WiFi-survey look: one vertical hairline
@@ -113,13 +113,12 @@ const TL_FLOOR = 18; // px shortest line in a group (keeps even the earliest rea
 const TL_PEAK_MIN = 0.05; // a year-peak's floor (fraction of H)
 const TL_PEAK_RANGE = 0.3; // …+ this × the group's max |elevation| → the sinus envelope height
 const TL_MAJOR_BONUS = 0.045; // a flagship-bearing year reaches a touch further (fraction of H)
-const TL_TOP_MARGIN = 0.2; // up-lines never rise above this (× H) on a tall viewport (the skyline cap)
-// the vertical names extend UPWARD past each tip (req 1), so on a SHORT viewport 0.2·H isn't enough
-// to keep the tallest names out from under the fixed header. The up-line tip is therefore floored at
-// whichever is lower (further from the top): 0.2·H or this absolute px reserve — header (~86) + the
-// label offset + a long short-name (~80) — so the name's top always clears the header chrome.
-const TL_TOP_RESERVE_PX = 176;
-const TL_BOT_MARGIN = 0.1; // down-lines never drop past (1 − this) × H — clear of the year ruler
+const TL_TOP_MARGIN = 0.12; // up-lines never rise above this (× H) — the skyline cap below the header
+// the names are HORIZONTAL in right-hand columns now (not vertical above the tips), so a tall up-tip
+// only needs to clear the fixed header chrome (~86px) — this absolute reserve floors the tallest up-tip
+// just below it on a short viewport (whichever is lower / further from the top: TL_TOP_MARGIN·H or this).
+const TL_TOP_RESERVE_PX = 100;
+const TL_BOT_MARGIN = 0.09; // down-lines never drop past (1 − this) × H — clear of the year ruler
 const TL_DRAW_SPAN = 0.45; // draw clock span between the leftmost line rising and the rightmost
 const TL_DRAW_RISE = 0.5; // how long each individual line takes to grow out (in the draw clock)
 // the names are HORIZONTAL + LEFT-ALIGNED again: grouped into date CLUSTERS, each cluster's names
@@ -138,6 +137,16 @@ const TL_PAN_MAX_VEL = 4200; // px/s — release-flick cap for the mobile pan
 // hx/hy stay −1 on touch, so the highlight never sticks on a phone.
 const TL_HOVER_X = 15;
 
+// the HOVER FOCUS-LENS (req: hovering a cluster spreads the overlapping lines so the title reads, and
+// the timeline locally "extends"). A push-lens centred on the cursor: within TL_LENS_R the line spacing
+// MAGNIFIES; beyond it everything rigidly shifts outward by the width the lens added — so neighbours are
+// PUSHED apart (and the right side eased into the future tail) rather than merely redistributed. Eased
+// in/out by lensAmt so it never snaps.
+const TL_LENS_R = 160;        // px — lens radius (a local "cluster"); or TL_LENS_R_FRAC·width if larger
+const TL_LENS_R_FRAC = 0.12;  // fraction-of-plot-width floor for the radius on wide screens
+const TL_LENS_PUSH = 0.6;     // peak one-side push as a fraction of R (centre line-spacing ≈ ×1.9)
+const TL_LENS_DIM = 0.5;      // far lines/names recede to (1 − this) under the lens → the focus reads "forward"
+
 // the names sit to the RIGHT of the lines again (req 2/3), so the date axis can't run to the right
 // edge or the latest cluster's column would clip off-screen. Reserve a right gutter sized to the
 // widest name (+ the column gap), and map the lines / ruler across the remaining span. The reserve
@@ -149,11 +158,13 @@ const tlLabelReserve = (W: number) =>
 const tlAxisSpan = (W: number) =>
   Math.max(1, W * (1 - TL_PAD) - tlLabelReserve(W) - TL_LABEL_GAP);
 
-// the integer year ticks (MUST mirror ProjectsOverlay's YEARS), as 0..1 fractions along the date
-// axis — the rAF loop positions the ruler from these each frame so it tracks the mobile zoom + pan.
-const TL_YEARS: number[] = [];
-for (let y = Math.ceil(TIME_MIN); y <= Math.floor(TIME_MAX); y++) TL_YEARS.push(y);
-const TL_YEAR_FRAC = TL_YEARS.map((y) => (y - TIME_MIN) / (TIME_MAX - TIME_MIN));
+// the year ticks (the SHARED TIMELINE_TICKS — dense past + sparse future milestones) as 0..1
+// fractions via the same piecewise map — the rAF loop positions the ruler from these each frame so
+// it tracks the mobile zoom + pan, and they always line up with the project x-placement above.
+const TL_YEAR_FRAC = TIMELINE_TICKS.map((y) => timeFrac(y));
+// the "now" SPLIT as a 0..1 fraction (where the dense past hands off to the future tail) — drives the
+// now-marker + the solid/dashed baseline handoff.
+const TL_SPLIT_FRAC = timeFrac(SPLIT_YEAR);
 
 // a deterministic ±TL_JITTER hash per project index (no Math.random → stable across reloads/SSR)
 const tlJitter = (i: number) => {
@@ -244,6 +255,7 @@ const DIAL_SNAP_VEL = 0.06; // rad/s — below this (and not dragging) settle to
 const DIAL_SNAP_TAU = 0.18; // s — detent settle ease
 const PROJ_OPEN_TAU = 0.36; // s — projAmt 0→1
 const PROJ_CLOSE_TAU = 0.24; // s — projAmt 1→0
+const LENS_TAU = 0.15; // s — hover focus-lens spread ease in/out (gentle, never snaps)
 
 const smooth = (e0: number, e1: number, x: number) => {
   const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0)));
@@ -797,6 +809,11 @@ export default function RidgelineStage() {
       let tlHover = -1;      // the project a desktop mouse hover currently lights (req 2), or −1
       let nameHover = -1;    // a project whose NAME button the mouse is over (req 3) — overrides the
                              // geometric line pick so hovering a far-right name lights its own line
+      let lensAmt = 0;       // eased focus-lens strength 0..1 — the hover spread that parts overlapping
+                             // lines so the title reads + the timeline locally "extends" (desktop only)
+      let lensFocusX = -1;   // lens centre in canvas px; tracks the cursor, held while easing out
+      let tlLastSig = "";    // settle-gate: last frame's geometry signature, so the ~130-line rewrite is
+                             // skipped on an idle, settled, un-hovered timeline (cheap when nothing moves)
       // per-project SETTLED tip y, stashed by the geometry loop so the name-column pass can de-collide
       // names off a STABLE height (not the one still animating in during the draw-on).
       const tlTipY = new Float64Array(DIAL_N);
@@ -1610,7 +1627,17 @@ export default function RidgelineStage() {
         if (dom.root) dom.root.style.setProperty("--tl-base", `${baseY.toFixed(1)}px`);
 
         const { branches, labels, nubs, tips, axis } = dom;
-        if (branches.length === DIAL_N) {
+        // ---- settle-gate: a quantised signature of everything that can MOVE a line this frame. When it
+        // matches last frame (idle, settled, mouse still) the ~130-line geometry rewrite is skipped —
+        // the DOM already holds the right positions. Quantised so projAmt's asymptotic creep toward 1
+        // still settles to a stable key. (The selection-change tail below self-guards on its own.)
+        const qd = (v: number, p: number) => Math.round(v * p);
+        const sig =
+          `${qd(amt, 1e3)},${qd(pDraw, 1e3)},${qd(pLabel, 1e3)},${qd(panX, 2)},${qd(baseY, 2)},` +
+          `${W},${H},${sel},${qd(lensAmt, 1e3)},${qd(lensFocusX, 1)},${qd(hx, 1)},${qd(hy, 1)},${nameHover}`;
+        const dirty = sig !== tlLastSig;
+        tlLastSig = sig;
+        if (dirty && branches.length === DIAL_N) {
           // desktop mouse hover is a geometric pick off the loop's hx/hy (no pointer-events on the
           // thin paths, which would eat the scrub drag). Track the nearest line/name under the cursor
           // as we lay each branch out, then apply the is-hover emphasis once after the loop (req 2).
@@ -1628,23 +1655,65 @@ export default function RidgelineStage() {
           const pan = mobile ? panX : 0; // desktop never pans
           const baseYs = baseY.toFixed(1);
           // vertical room each direction (kept clear of the top edge / the year ruler). Up-lines floor
-          // their tip at max(0.2·H, TL_TOP_RESERVE_PX) from the top so the vertical NAME above the tip
-          // clears the header even on a short viewport; never below TL_FLOOR so the math stays valid.
+          // their tip at max(TL_TOP_MARGIN·H, TL_TOP_RESERVE_PX) from the top so the tallest tip clears
+          // the header even on a short viewport; never below TL_FLOOR so the math stays valid.
           const upRoom = Math.max(TL_FLOOR, baseY - Math.max(TL_TOP_MARGIN * H, TL_TOP_RESERVE_PX));
           const downRoom = (1 - TL_BOT_MARGIN) * H - baseY;
 
-          // the baseline is the FIXED horizon across the viewport (it never pans); it wipes in
-          // left→right as the fold lands. The fade gradient is userSpaceOnUse → its x-vector tracks
-          // the live canvas width, so the line bleeds to nothing at both screen edges.
+          // ---- the hover FOCUS-LENS warp (a push-lens). Identity at rest and at the focus centre, so
+          // the line under the cursor stays put while its neighbours are PUSHED apart and the right side
+          // eases into the future tail — the timeline "extends" locally so an overlapping title reads
+          // (req). Only the data lines + their names warp; the baseline, ruler and now-marker stay put as
+          // a calm reference.
+          const lensOn = lensAmt > 0.001 && lensFocusX >= 0 && !mobile;
+          const lensR = Math.max(TL_LENS_R, viewW * TL_LENS_R_FRAC);
+          const lensExtra = lensAmt * lensR * TL_LENS_PUSH;
+          const warpX = (x: number): number => {
+            if (!lensOn) return x;
+            const t = (x - lensFocusX) / lensR;
+            if (t <= -1) return x - lensExtra;
+            if (t >= 1) return x + lensExtra;
+            // odd smootherstep: s(±1)=±1, s'(±1)=0, s'(0)=1.5 → centre spacing ×(1 + 1.5·extra/R)
+            return x + lensExtra * (t * (1.5 - 0.5 * t * t));
+          };
+          // depth falloff: under the open lens, lines/names far from the cursor recede a touch so the
+          // focused cluster reads "forward" (req). Full at the centre; eased to (1 − lensAmt·DIM) past ~1.5R.
+          const focusDim = (x: number): number => {
+            if (!lensOn) return 1;
+            const t = Math.min(1, Math.abs(x - lensFocusX) / (lensR * 1.5));
+            return 1 - lensAmt * TL_LENS_DIM * (t * t * (3 - 2 * t));
+          };
+
+          // the baseline is the FIXED horizon (it never pans on desktop); it wipes in left→right as the
+          // fold lands. SOLID across the delivered past (→ the "now" SPLIT), then a faint DASHED future
+          // continuation runs on to the 2040 edge. The fade gradient is userSpaceOnUse → its x-vector
+          // tracks the live canvas width, so the solid line still bleeds to nothing at the left edge.
           const pAxis = smooth(0.3, 0.62, amt);
+          const wipeX = padPx + pAxis * viewW;                 // the left→right reveal front
+          const splitX = padPx + TL_SPLIT_FRAC * plotW + pan;  // the "now" handoff x (unwarped)
           if (axis) {
             axis.setAttribute("x1", padPx.toFixed(1));
             axis.setAttribute("y1", baseYs);
-            axis.setAttribute("x2", (padPx + pAxis * viewW).toFixed(1));
+            axis.setAttribute("x2", Math.min(splitX, wipeX).toFixed(1));
             axis.setAttribute("y2", baseYs);
             axis.style.opacity = smooth(0.3, 0.66, amt).toFixed(3);
           }
           if (dom.axisGrad) dom.axisGrad.setAttribute("x2", W.toFixed(0));
+          // the dashed future: from the split out to the revealed front (≤ the right edge), fainter and
+          // resolving a touch later, so the past reads first and the road ahead whispers in behind it.
+          if (dom.axisFuture) {
+            const f = dom.axisFuture;
+            f.setAttribute("x1", splitX.toFixed(1));
+            f.setAttribute("y1", baseYs);
+            f.setAttribute("x2", Math.max(splitX, wipeX).toFixed(1));
+            f.setAttribute("y2", baseYs);
+            f.style.opacity = (smooth(0.55, 0.9, amt) * 0.55).toFixed(3);
+          }
+          // the "now" marker rides the split (unwarped), fading in just after the baseline lands
+          if (dom.now) {
+            dom.now.style.transform = `translateX(${splitX.toFixed(1)}px)`;
+            dom.now.style.opacity = smooth(0.62, 0.92, amt).toFixed(3);
+          }
 
           // the year ruler — placed from the same date map (so it tracks the mobile zoom + pan),
           // fading in with the baseline.
@@ -1660,7 +1729,7 @@ export default function RidgelineStage() {
             const branch = branches[i], label = labels[i], nub = nubs[i], tip = tips[i];
             const isSel = i === sel;
             const major = PROJECTS[i].major;
-            const lineX = padPx + pl.xFrac * plotW + pan; // true-date x (jittered) + the mobile pan
+            const lineX = warpX(padPx + pl.xFrac * plotW + pan); // jittered date-x + pan, then hover lens
             const dirY = pl.down ? 1 : -1;
 
             // the year-peak (group-level, identical for every member): the elevation envelope,
@@ -1669,7 +1738,7 @@ export default function RidgelineStage() {
             // the stack must FIT within `room` (clear of the top edge / the year ruler): if a year is
             // too populous for the available height, COMPRESS the per-row step so the tallest line
             // stays inside room. In the common (tall-enough) case this is a no-op — fitStack ===
-            // TL_STACK. room is always > TL_FLOOR (baseY clamped to [0.4H,0.6H] ⇒ room ≥ 0.24H).
+            // TL_STACK. room is always > TL_FLOOR (baseY clamped to [0.46H,0.58H] ⇒ room stays positive).
             const fitStack =
               pl.groupCount > 1
                 ? Math.min(TL_STACK, (room - TL_FLOOR) / (pl.groupCount - 1))
@@ -1689,15 +1758,16 @@ export default function RidgelineStage() {
             const grow = smooth(delay, Math.min(1, delay + TL_DRAW_RISE), pDraw);
             const tipY = baseY + dirY * fullLen * grow;
             const lx = lineX.toFixed(1);
+            const fd = isSel ? 1 : focusDim(lineX); // the selected you-are-here line never recedes
             branch.setAttribute("d", `M${lx},${baseYs} L${lx},${tipY.toFixed(1)}`);
-            branch.style.opacity = (amt * grow).toFixed(3);
+            branch.style.opacity = (amt * grow * fd).toFixed(3);
 
             // a small SQUARE nub sits at the line's root on the baseline (req 4)…
             nub.style.transform = `translate(${lx}px, ${baseYs}px)`;
-            nub.style.opacity = (amt * grow).toFixed(3);
+            nub.style.opacity = (amt * grow * fd).toFixed(3);
             // …and an identical square nub caps the line's live TIP — it rides the growing end (req 4).
             tip.style.transform = `translate(${lx}px, ${tipY.toFixed(1)}px)`;
-            tip.style.opacity = (amt * grow).toFixed(3);
+            tip.style.opacity = (amt * grow * fd).toFixed(3);
 
             // the NAME itself (horizontal + left-aligned, grouped into a cluster column, req 2/3) is
             // positioned in a SECOND pass below — once every line's settled tip is stashed — so the
@@ -1732,7 +1802,9 @@ export default function RidgelineStage() {
           // the lines draw in. Resolves last (pLabel) with a tiny settle slide outward.
           const rowMin = mobile ? 16 : 12; // min px between stacked names (≥ the live name height)
           for (const cluster of TL_CLUSTERS) {
-            const colX = padPx + TL_CLUSTER_MAXX[cluster[0]] * plotW + pan + TL_LABEL_GAP;
+            // the column left-aligns just past the cluster's right-most line — warped with the lines so the
+            // names track their (spread) cluster, then the fixed GAP added in screen space.
+            const colX = warpX(padPx + TL_CLUSTER_MAXX[cluster[0]] * plotW + pan) + TL_LABEL_GAP;
             // order rows top→bottom (up-names above the baseline first, down-names below) then push down
             // to keep a min gap; the staircase already separates same-year names so this rarely fires.
             const rows = cluster.slice().sort((a, b) => tlTipY[a] - tlTipY[b]);
@@ -1745,7 +1817,7 @@ export default function RidgelineStage() {
               const slide = (1 - labelGrow) * 6; // a small outward settle as the name resolves
               labels[i].style.transform =
                 `translate(${(colX + slide).toFixed(1)}px, ${y.toFixed(1)}px) translate(0, -50%)`;
-              labels[i].style.opacity = (amt * labelGrow).toFixed(3);
+              labels[i].style.opacity = (amt * labelGrow * (i === sel ? 1 : focusDim(colX))).toFixed(3);
             }
           }
 
@@ -1843,7 +1915,7 @@ export default function RidgelineStage() {
         // the overlay unmounts on close (its is-hover-bearing nodes destroyed), and under reduced
         // motion the projAmt jump skips the settle frame that would otherwise clear it — so a reopen
         // could leave the line at the stale index un-lit when the cursor rests on it.
-        if (projAmt === 0) { panX = 0; tPanX = 0; panVel = 0; panFollowSel = -1; panLastSel = -1; tlHover = -1; nameHover = -1; }
+        if (projAmt === 0) { panX = 0; tPanX = 0; panVel = 0; panFollowSel = -1; panLastSel = -1; tlHover = -1; nameHover = -1; lensAmt = 0; lensFocusX = -1; }
         // ---- transition phase windows: sub-ranges of the SAME monotonic projAmt, so the close
         // reverses the open exactly. The globe FOLD leads (the threads collapse onto the baseline +
         // dissolve — shaped in the shader off F.mph.w = projAmt, fully gone by ~0.72); pDraw then
@@ -1854,6 +1926,14 @@ export default function RidgelineStage() {
         // read the narrow-screen breakpoint ONCE per frame (matchMedia allocates a MediaQueryList per
         // call) and thread it to the pan block + updateTimeline below.
         const mobile = dialMobile();
+        // ---- the hover FOCUS-LENS strength. Eases toward 1 only on a SETTLED desktop timeline with the
+        // mouse over the field and not dragging — so the spread fades in/out and never fights the scrub.
+        // lensFocusX tracks the live cursor (held at its last value while the lens eases back out).
+        const lensTarget =
+          !mobile && projectsOpenRef.current && projAmt > 0.9 && !dialDragging && hx >= 0 ? 1 : 0;
+        lensAmt += (lensTarget - lensAmt) * (reduceMotion ? 1 : 1 - Math.exp(-dt / LENS_TAU));
+        if (lensTarget === 0 && lensAmt < 1e-3) lensAmt = 0;
+        if (hx >= 0) lensFocusX = hx;
         if (projectsOpenRef.current) {
           // MOBILE: ease the zoomed-timeline pan toward its target with a release-flick (req 7),
           // clamped to [panMin, 0] for the live width. Desktop keeps panX === 0 (zoom 1 ⇒ no pan).
@@ -2039,8 +2119,10 @@ export default function RidgelineStage() {
             ridgeCamera(yaw, pitch, aspectNow, t, rscale, 0, 0).vp,
             GLOBE.cx, GLOBE.cy, GLOBE.cz, W, H,
           );
-          // clamp to a sensible band so an extreme tilt can never shove the line off-screen
-          if (cu.visible) projBaseY = Math.min(0.6 * H, Math.max(0.4 * H, cu.y));
+          // clamp to a sensible band so an extreme tilt can never shove the line off-screen. The band
+          // is centred-ish (≈0.46–0.58 H) so the now-dense BELOW-axis massif gets as much room as the
+          // delivered work above — the survey reads balanced top/bottom like the reference.
+          if (cu.visible) projBaseY = Math.min(0.58 * H, Math.max(0.46 * H, cu.y));
           const frost = dialDomRef.current?.frost;
           if (frost) {
             frost.style.setProperty("--fx", "50%");

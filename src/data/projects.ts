@@ -40,7 +40,7 @@ export type Project = {
   tags: readonly string[];
 };
 
-export const PROJECTS: readonly Project[] = [
+const CORE: readonly Project[] = [
   { id: "boomshahr-2014",      title: "Boomshahr Paydar — First BIM",         short: "Boomshahr",    date: "2014-09", elevation: 0.12,  major: false, descriptor: "First professional BIM modelling in ArchiCAD, alongside undergrad studies", place: "Tehran, Iran",       tags: ["ArchiCAD", "BIM", "Residential"] },
   { id: "office-fitout-2014",  title: "Office Fit-out Set",                   short: "Fit-out",      date: "2014-11", elevation: 0.10,  major: false, descriptor: "Tenant fit-out documentation, first taste of working drawings",         place: "Tehran, Iran",       tags: ["ArchiCAD", "Documentation", "Interiors"] },
   { id: "villa-darband-2014",  title: "Darband Villa Documentation",          short: "Darband",      date: "2014-12", elevation: 0.18,  major: false, descriptor: "Hillside villa construction set, hand-checked sections in ArchiCAD",     place: "Tehran, Iran",       tags: ["ArchiCAD", "Documentation", "Residential"] },
@@ -122,6 +122,83 @@ export const PROJECTS: readonly Project[] = [
   { id: "carbon-dash-2026",    title: "Embodied-Carbon Dashboard",            short: "Carbon",       date: "2026-06", elevation: 0.80,  major: true,  descriptor: "Power BI board joining quantities to an embodied-carbon dataset",        place: "Stockholm, Sweden",  tags: ["Power BI", "Carbon", "Sustainability"] },
 ];
 
+// ---- densification (req: as dense as the WiFi-survey reference, with the BELOW axis now as
+// populated as the above). A run of speculative R&D probes / sketches / experiments that hang
+// BELOW the baseline across the whole 2014→2026 span — the "unbuilt" counter-massif mirroring the
+// delivered work above — plus a couple of early above-axis fills for the thin first year. Same
+// voice + place-by-year as CORE; a few probes are flagged major so the below skyline has tall peaks.
+const EXTRA: readonly Project[] = [
+  // 2014 — Tehran (two above to thicken the very first year, two below)
+  { id: "hatch-lib-2014",      title: "ArchiCAD Hatch & Pen Library",         short: "Hatch Lib",    date: "2014-09", elevation: 0.14,  major: false, descriptor: "First reusable hatch + pen set standardising drawing output",             place: "Tehran, Iran",       tags: ["ArchiCAD", "Standards", "Documentation"] },
+  { id: "egress-calc-2014",    title: "Egress Stair Width Calculator",        short: "Egress Calc",  date: "2014-10", elevation: 0.16,  major: false, descriptor: "Spreadsheet sizing egress stair widths against occupancy loads",          place: "Tehran, Iran",       tags: ["Excel", "Code", "Documentation"] },
+  { id: "sunpath-2014",        title: "Sun-Path Shadow Sketch",               short: "Sun-Path",     date: "2014-10", elevation: -0.26, major: false, descriptor: "Below-axis sketch — manual sun-path shadow study for a courtyard block",     place: "Tehran, Iran",       tags: ["Daylight", "Sketch", "R&D"] },
+  { id: "brickbond-2014",      title: "Brick-Bond Pattern Probe",             short: "Brick Bond",   date: "2014-12", elevation: -0.20, major: false, descriptor: "Below-axis probe generating parametric brick-bond elevations",             place: "Tehran, Iran",       tags: ["Grasshopper", "Façade", "R&D"] },
+  // 2015 — Tehran
+  { id: "truss-form-2015",     title: "Long-Span Truss Form Probe",           short: "Truss Form",   date: "2015-03", elevation: -0.30, major: false, descriptor: "Below-axis form study for a long-span steel truss",                        place: "Tehran, Iran",       tags: ["Grasshopper", "Structure", "R&D"] },
+  { id: "acoustic-2015",       title: "Auditorium Acoustics Sketch",          short: "Acoustics",    date: "2015-07", elevation: -0.24, major: false, descriptor: "Below-axis ray-trace sketch of an auditorium ceiling",                     place: "Tehran, Iran",       tags: ["Acoustics", "Sketch", "R&D"] },
+  { id: "egress-sim-2015",     title: "Crowd Egress Simulation",              short: "Egress Sim",   date: "2015-11", elevation: -0.44, major: false, descriptor: "Below-axis pedestrian egress simulation for an assembly hall",            place: "Tehran, Iran",       tags: ["Simulation", "Crowds", "R&D"] },
+  { id: "cost-model-2015",     title: "Early Cost-Model Probe",               short: "Cost Model",   date: "2015-12", elevation: -0.20, major: false, descriptor: "Below-axis parametric cost model tied to the massing",                    place: "Tehran, Iran",       tags: ["Excel", "Cost", "R&D"] },
+  // 2016 — Tehran / Isfahan
+  { id: "shell-relax-2016",    title: "Concrete Shell Relaxation",            short: "Shell Mesh",   date: "2016-02", elevation: -0.50, major: false, descriptor: "Below-axis dynamic-relaxation study of a thin concrete shell",            place: "Tehran, Iran",       tags: ["Kangaroo", "Structure", "R&D"] },
+  { id: "windload-2016",       title: "Tower Wind-Load Probe",                short: "Wind Probe",   date: "2016-04", elevation: -0.34, major: false, descriptor: "Below-axis wind-load screening across tower massing options",             place: "Tehran, Iran",       tags: ["CFD", "Environmental", "R&D"] },
+  { id: "voronoi-2016",        title: "Voronoi Screen Sketch",                short: "Voronoi",      date: "2016-08", elevation: -0.22, major: false, descriptor: "Below-axis Voronoi façade-screen generator",                             place: "Isfahan, Iran",      tags: ["Grasshopper", "Façade", "Sketch"] },
+  { id: "atrium-day-2016",     title: "Atrium Daylight Probe",                short: "Atrium Day",   date: "2016-12", elevation: -0.60, major: false, descriptor: "Below-axis radiance probe tuning an atrium roof-light",                   place: "Tehran, Iran",       tags: ["Radiance", "Daylight", "R&D"] },
+  // 2017 — Tehran
+  { id: "cablenet-2017",       title: "Cable-Net Form-Finding",               short: "Cable-Net",    date: "2017-01", elevation: -0.66, major: false, descriptor: "Below-axis cable-net form-finding sketch for a canopy",                   place: "Tehran, Iran",       tags: ["Kangaroo", "Structure", "R&D"] },
+  { id: "pv-yield-2017",       title: "Roof PV Yield Study",                  short: "PV Yield",     date: "2017-05", elevation: -0.30, major: false, descriptor: "Below-axis solar-PV yield study across roof options",                     place: "Tehran, Iran",       tags: ["Ladybug", "Energy", "R&D"] },
+  { id: "wayfind-2017",        title: "Wayfinding Path Probe",                short: "Wayfind",      date: "2017-09", elevation: -0.24, major: false, descriptor: "Below-axis shortest-path wayfinding probe through a terminal",            place: "Tehran, Iran",       tags: ["Python", "Crowds", "R&D"] },
+  { id: "nesting-2017",        title: "Panel Nesting Optimiser",              short: "Nesting",      date: "2017-11", elevation: -0.46, major: false, descriptor: "Below-axis cutting-stock nesting study for cladding panels",              place: "Tehran, Iran",       tags: ["Galapagos", "Fabrication", "R&D"] },
+  // 2018 — Tehran (ML probe flagged major → a tall below peak)
+  { id: "terrain-2018",        title: "Terrain Mesh Drape Probe",             short: "Terrain",      date: "2018-02", elevation: -0.28, major: false, descriptor: "Below-axis terrain-mesh draping experiment for a sloped site",            place: "Tehran, Iran",       tags: ["Grasshopper", "Civil", "R&D"] },
+  { id: "thermal-2018",        title: "Thermal-Bridge Heat-Flow Sketch",      short: "Thermal",      date: "2018-06", elevation: -0.54, major: false, descriptor: "Below-axis 2-D thermal-bridge heat-flow sketch",                         place: "Tehran, Iran",       tags: ["THERM", "Energy", "R&D"] },
+  { id: "ml-massing-2018",     title: "ML Massing Ranking Experiment",        short: "ML Massing",   date: "2018-08", elevation: -0.72, major: true,  descriptor: "Below-axis early ML experiment ranking massing options by daylight",      place: "Tehran, Iran",       tags: ["Python", "ML", "R&D"] },
+  { id: "glare-2018",          title: "Annual Glare Probe",                   short: "Glare",        date: "2018-11", elevation: -0.30, major: false, descriptor: "Below-axis annual-glare probe for an open-plan floor",                    place: "Tehran, Iran",       tags: ["Radiance", "Daylight", "R&D"] },
+  // 2019 — Tehran
+  { id: "graphdb-2019",        title: "Model Graph-DB Sketch",                short: "Graph DB",     date: "2019-02", elevation: -0.40, major: false, descriptor: "Below-axis graph-database sketch indexing model elements",                place: "Tehran, Iran",       tags: ["Neo4j", "Data", "R&D"] },
+  { id: "reinforce-2019",      title: "Reinforcement Topology Study",         short: "Reinforce",    date: "2019-05", elevation: -0.58, major: false, descriptor: "Below-axis strut-and-tie reinforcement topology study",                  place: "Tehran, Iran",       tags: ["Karamba", "Structure", "R&D"] },
+  { id: "vr-walk-2019",        title: "VR Walkthrough Probe",                 short: "VR Walk",      date: "2019-08", elevation: -0.26, major: false, descriptor: "Below-axis VR walkthrough pipeline straight from the model",             place: "Tehran, Iran",       tags: ["Unity", "VR", "R&D"] },
+  { id: "carbon-sketch-2019",  title: "Embodied-Carbon Sketch",               short: "Carbon R&D",   date: "2019-11", elevation: -0.36, major: false, descriptor: "Below-axis first embodied-carbon estimator sketch",                       place: "Tehran, Iran",       tags: ["Python", "Carbon", "R&D"] },
+  // 2020 — Gothenburg (CORE already holds thesis / topo / wind here)
+  { id: "gan-plan-2020",       title: "Plan-Layout GAN Probe",                short: "GAN Plan",     date: "2020-06", elevation: -0.62, major: true,  descriptor: "Below-axis GAN experiment proposing apartment-plan layouts",              place: "Gothenburg, Sweden", tags: ["Python", "ML", "R&D"] },
+  { id: "reverb-2020",         title: "Reverberation-Time Probe",             short: "Reverb",       date: "2020-09", elevation: -0.30, major: false, descriptor: "Below-axis reverberation-time probe for a lecture hall",                  place: "Gothenburg, Sweden", tags: ["Acoustics", "Simulation", "R&D"] },
+  // 2021 — Gothenburg (CORE holds the valley-floor daylight probe here)
+  { id: "heatpump-2021",       title: "Heat-Pump Sizing Sketch",              short: "Heat Pump",    date: "2021-01", elevation: -0.24, major: false, descriptor: "Below-axis heat-pump sizing sketch against the demand profile",           place: "Gothenburg, Sweden", tags: ["Energy", "HVAC", "R&D"] },
+  { id: "layout-solve-2021",   title: "Back-of-House Layout Solver",          short: "Solver",       date: "2021-05", elevation: -0.48, major: false, descriptor: "Below-axis constraint-solver probe for back-of-house layouts",           place: "Gothenburg, Sweden", tags: ["Python", "Layout", "R&D"] },
+  { id: "lca-pipe-2021",       title: "LCA Pipeline Sketch",                  short: "LCA Pipe",     date: "2021-10", elevation: -0.66, major: false, descriptor: "Below-axis life-cycle-assessment pipeline sketch",                       place: "Gothenburg, Sweden", tags: ["Python", "Carbon", "R&D"] },
+  // 2022 — Gothenburg (surrogate flagged major → tall below peak)
+  { id: "autoroute-2022",      title: "MEP Auto-Routing Probe",               short: "Routing",      date: "2022-02", elevation: -0.34, major: false, descriptor: "Below-axis A* auto-routing probe for duct runs",                         place: "Gothenburg, Sweden", tags: ["Python", "MEP", "R&D"] },
+  { id: "surrogate-2022",      title: "Energy Surrogate Model",               short: "Surrogate",    date: "2022-05", elevation: -0.74, major: true,  descriptor: "Below-axis ML surrogate predicting energy demand from massing",           place: "Gothenburg, Sweden", tags: ["Python", "ML", "R&D"] },
+  { id: "day-sweep-2022",      title: "Façade Daylight Sweep",                short: "Day Sweep",    date: "2022-08", elevation: -0.40, major: false, descriptor: "Below-axis parametric daylight sweep across façade ratios",               place: "Gothenburg, Sweden", tags: ["Ladybug", "Daylight", "R&D"] },
+  { id: "clash-ml-2022",       title: "Clash-Triage Classifier",              short: "Clash ML",     date: "2022-11", elevation: -0.30, major: false, descriptor: "Below-axis classifier triaging clash significance",                      place: "Gothenburg, Sweden", tags: ["Python", "ML", "R&D"] },
+  // 2023 — Los Angeles → Skellefteå
+  { id: "zoning-2023",         title: "Zoning Envelope Probe",                short: "Zoning",       date: "2023-01", elevation: -0.36, major: false, descriptor: "Below-axis zoning-envelope generator for a downtown parcel",             place: "Los Angeles, USA",   tags: ["Grasshopper", "Zoning", "R&D"] },
+  { id: "pushover-2023",       title: "Seismic Pushover Sketch",              short: "Pushover",     date: "2023-05", elevation: -0.58, major: false, descriptor: "Below-axis nonlinear pushover sketch for a moment frame",                place: "Los Angeles, USA",   tags: ["OpenSees", "Seismic", "R&D"] },
+  { id: "shadesail-2023",      title: "Shade-Sail Form Study",                short: "Shade Sail",   date: "2023-07", elevation: -0.30, major: false, descriptor: "Below-axis tensile shade-sail form study for a courtyard",               place: "Los Angeles, USA",   tags: ["Kangaroo", "Structure", "R&D"] },
+  { id: "sensor-twin-2023",    title: "Sensor-Twin Stream Sketch",            short: "Twin Sketch",  date: "2023-10", elevation: -0.44, major: false, descriptor: "Below-axis sketch streaming IoT sensors onto the federated model",       place: "Skellefteå, Sweden", tags: ["IoT", "Digital Twin", "R&D"] },
+  // 2024 — Skellefteå (LLM probe flagged major → tall below peak)
+  { id: "weldpath-2024",       title: "Robotic Weld-Path Probe",              short: "Weld Path",    date: "2024-01", elevation: -0.62, major: false, descriptor: "Below-axis probe planning robotic weld paths from the model",            place: "Skellefteå, Sweden", tags: ["Robotics", "Fabrication", "R&D"] },
+  { id: "yardsim-2024",        title: "Laydown-Yard Logistics Sim",           short: "Yard Sim",     date: "2024-04", elevation: -0.40, major: false, descriptor: "Below-axis discrete-event simulation of the laydown yard",               place: "Skellefteå, Sweden", tags: ["Simulation", "Logistics", "R&D"] },
+  { id: "spec-llm-2024",       title: "Spec-to-Check LLM Probe",              short: "Spec LLM",     date: "2024-07", elevation: -0.80, major: true,  descriptor: "Below-axis LLM experiment turning written specs into model checks",       place: "Skellefteå, Sweden", tags: ["Python", "LLM", "R&D"] },
+  { id: "site-cv-2024",        title: "Site-Photo Progress CV",               short: "Progress CV",  date: "2024-10", elevation: -0.34, major: false, descriptor: "Below-axis computer-vision probe matching site photos to the 4D plan",   place: "Skellefteå, Sweden", tags: ["Python", "CV", "R&D"] },
+  // 2025 — Stockholm (graph-ML probe flagged major → tall below peak)
+  { id: "carbon-opt-2025",     title: "Carbon-Driven Frame Optimiser",        short: "Carbon Opt",   date: "2025-01", elevation: -0.56, major: false, descriptor: "Below-axis optimiser minimising the embodied carbon of a frame",         place: "Stockholm, Sweden",  tags: ["Galapagos", "Carbon", "R&D"] },
+  { id: "graph-ml-2025",       title: "Element Graph-ML Probe",               short: "Graph ML",     date: "2025-05", elevation: -0.72, major: true,  descriptor: "Below-axis graph-ML probe predicting missing model metadata",             place: "Stockholm, Sweden",  tags: ["Python", "ML", "R&D"] },
+  { id: "montecarlo-2025",     title: "Schedule-Risk Monte Carlo",            short: "Monte Carlo",  date: "2025-08", elevation: -0.40, major: false, descriptor: "Below-axis Monte-Carlo probe on the construction schedule",              place: "Stockholm, Sweden",  tags: ["Python", "4D", "R&D"] },
+  { id: "voice-query-2025",    title: "Voice Model-Query Sketch",             short: "Voice Query",  date: "2025-11", elevation: -0.30, major: false, descriptor: "Below-axis sketch querying the federated model by natural language",     place: "Stockholm, Sweden",  tags: ["LLM", "Data", "R&D"] },
+  // 2026 — Stockholm
+  { id: "autolod-2026",        title: "Auto-LOD Generator",                   short: "Auto-LOD",     date: "2026-02", elevation: -0.48, major: false, descriptor: "Below-axis generator coarsening models to a target level of detail",     place: "Stockholm, Sweden",  tags: ["Python", "Model QA", "R&D"] },
+  { id: "gen-site-2026",       title: "Generative Site-Layout Sketch",        short: "Gen Site",     date: "2026-05", elevation: -0.66, major: false, descriptor: "Below-axis generative site-layout sketch under planning constraints",     place: "Stockholm, Sweden",  tags: ["Python", "ML", "R&D"] },
+  { id: "occ-heat-2026",       title: "Occupancy Heat-Map Probe",             short: "Heat Map",     date: "2026-06", elevation: -0.34, major: false, descriptor: "Below-axis occupancy heat-map probe from live sensor logs",              place: "Stockholm, Sweden",  tags: ["Python", "Data", "R&D"] },
+];
+
+// the plotted survey, merged + stable-sorted oldest→newest (by year then month) so the scrub steps
+// chronologically and the entrance still draws strictly left→right.
+export const PROJECTS: readonly Project[] = [...CORE, ...EXTRA].sort(
+  (a, b) =>
+    (Number(a.date.slice(0, 4)) * 12 + Number(a.date.slice(5, 7))) -
+    (Number(b.date.slice(0, 4)) * 12 + Number(b.date.slice(5, 7))),
+);
+
 const MONTHS_LONG = [
   "January", "February", "March", "April", "May", "June",
   "July", "August", "September", "October", "November", "December",
@@ -139,6 +216,30 @@ export const formatMonthYearLong = (date: string): string => {
   return `${MONTHS_LONG[m - 1]} ${y}`;
 };
 
-/** the plotted time window — a hair of padding past the first/last project */
+/** the plotted time window. The axis now runs on to 2040 — the dense delivered work sits in the
+    past (2014 → the SPLIT "now"), then a calm, compressed FUTURE tail stretches to the horizon. */
 export const TIME_MIN = 2014.0;
-export const TIME_MAX = 2026.5;
+export const TIME_MAX = 2040.0;
+/** the "now" horizon: everything left of it is the dense delivered career; right of it is the
+    forward-looking tail. (≈ today, mid-2026 — just past the last real project.) */
+export const SPLIT_YEAR = 2026.5;
+/** share of the plot width given to the dense past (2014 → SPLIT); the remaining (1 − PAST_FRAC)
+    holds the whole 2026 → 2040 future, COMPRESSED — so the career still fills the frame (matching
+    the survey reference) while the axis honestly reads on to 2040. */
+export const PAST_FRAC = 0.82;
+
+/** a decimal year → its 0..1 fraction along the plotted axis. Piecewise: linear-dense across the
+    past, linear-compressed across the future tail, continuous at the SPLIT. Single source of truth
+    for both the project x-placement (RidgelineStage) and the year ruler (ProjectsOverlay). */
+export const timeFrac = (dy: number): number => {
+  if (dy <= SPLIT_YEAR)
+    return ((dy - TIME_MIN) / (SPLIT_YEAR - TIME_MIN)) * PAST_FRAC;
+  return PAST_FRAC + ((dy - SPLIT_YEAR) / (TIME_MAX - SPLIT_YEAR)) * (1 - PAST_FRAC);
+};
+
+/** the year ticks drawn on the ruler: every year across the dense past, then sparse milestones
+    through the compressed future tail (kept few so the future reads calm, not cluttered). */
+export const TIMELINE_TICKS: readonly number[] = [
+  2014, 2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025, 2026,
+  2030, 2035, 2040,
+];
