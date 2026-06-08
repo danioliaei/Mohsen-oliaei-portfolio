@@ -21,6 +21,7 @@ import RoleOverlay from "./RoleOverlay";
 import AssignmentOverlay from "./AssignmentOverlay";
 import BookOverlay from "./BookOverlay";
 import ProjectsOverlay, { type ProjectsDialDom, TL_PAD_FRAC } from "./ProjectsOverlay";
+import ProjectsMobile from "./ProjectsMobile";
 import type { PerfHandle } from "../perf/harness";
 import type { SceneInfo } from "../perf/types";
 import { STATIONS } from "../data/stations";
@@ -318,6 +319,12 @@ export default function RidgelineStage() {
   // close setter through (same indirection as closeAssignRef).
   const [projectsOpen, setProjectsOpen] = useState(false);
   const projectsOpenRef = useRef(false);
+  // narrow screens get a PHONE-NATIVE Projects view (ProjectsMobile — a spin-the-dial
+  // timeline) instead of the desktop skyline, which only reads on a wide canvas. Tracks
+  // the same 860px breakpoint the rAF loop's dialMobile() uses, so the two never disagree.
+  const [projectsNarrow, setProjectsNarrow] = useState(
+    () => typeof matchMedia === "function" && matchMedia("(max-width: 860px)").matches,
+  );
   const closeProjectsRef = useRef<() => void>(() => {});
   const projectsCloseBtnRef = useRef<HTMLButtonElement>(null);
   const projectsLastFocusRef = useRef<HTMLElement | null>(null);
@@ -563,6 +570,17 @@ export default function RidgelineStage() {
       (prev && prev !== document.body ? prev : headerFallbackTarget())?.focus?.();
     }
   }, [projectsOpen]);
+
+  // track the 860px breakpoint so the Projects view mounts the right experience
+  // (phone-native ProjectsMobile vs the desktop skyline) and swaps live on rotate/resize.
+  useEffect(() => {
+    if (typeof matchMedia !== "function") return;
+    const mq = matchMedia("(max-width: 860px)");
+    const onChange = () => setProjectsNarrow(mq.matches);
+    onChange();
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
 
   // the same focus dance for the "Book me" session menu: remember what held focus, move
   // focus to its close control on open, restore on close — falling back to a visible header
@@ -2407,16 +2425,26 @@ export default function RidgelineStage() {
           transparent layer over the live globe: the spokes + labels are welded each
           frame by the rAF loop via dialDomRef; selecting routes through onDialSelect. */}
       <AnimatePresence>
-        {projectsOpen && (
-          <ProjectsOverlay
-            key="projects-overlay"
-            ref={projectsCloseBtnRef}
-            onClose={closeProjects}
-            domRef={dialDomRef}
-            onSelect={onDialSelect}
-            onHover={onDialHover}
-          />
-        )}
+        {projectsOpen &&
+          (projectsNarrow ? (
+            // phones get the spin-the-dial timeline (the skyline doesn't read when
+            // squeezed onto a portrait screen). Self-contained — no rAF/globe bridge; the
+            // desktop loop's updateTimeline self-guards on the now-null dialDomRef.
+            <ProjectsMobile
+              key="projects-mobile"
+              ref={projectsCloseBtnRef}
+              onClose={closeProjects}
+            />
+          ) : (
+            <ProjectsOverlay
+              key="projects-overlay"
+              ref={projectsCloseBtnRef}
+              onClose={closeProjects}
+              domRef={dialDomRef}
+              onSelect={onDialSelect}
+              onHover={onDialHover}
+            />
+          ))}
       </AnimatePresence>
 
       {/* the "Book me" session menu — opened by the Book me nav link / #book route.
