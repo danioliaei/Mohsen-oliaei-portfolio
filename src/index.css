@@ -105,6 +105,36 @@ header {
 .wordmark:hover {
   opacity: 0.6;
 }
+/* the right cluster — holds the desktop inline nav and the phone hamburger; the bar's
+   space-between keeps the wordmark left and this group hard right */
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: clamp(20px, 2.6vw, 40px);
+}
+/* the inline DESKTOP nav (req 1): the three primary experiences, shown as plain links
+   in the bar. Hidden on phones (≤760px), where the hamburger takes over. */
+.header-nav {
+  display: flex;
+  align-items: center;
+  gap: clamp(18px, 2.4vw, 38px);
+}
+.header-nav a {
+  pointer-events: auto; /* the bar is click-through; its links are not */
+  font-family: var(--nav);
+  font-size: 17px;
+  font-weight: 400;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+  text-decoration: none;
+  white-space: nowrap;
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+  transition: opacity 0.25s ease;
+}
+.header-nav a:hover {
+  opacity: 0.6;
+}
 /* the "Menu" / "Close" control — a real <button>, no border / no background, white text;
    hover lowers the opacity (req 5) */
 .menu-btn {
@@ -125,6 +155,20 @@ header {
 }
 .menu-btn:hover {
   opacity: 0.6;
+}
+/* desktop: a normal header — show the inline nav, hide the bar's hamburger entirely.
+   (Scoped to `header` so the overlay's own "Close" button — which reuses .menu-btn —
+   is untouched; the overlay is a sibling of <header>, never a descendant.) */
+@media (min-width: 761px) {
+  header .menu-btn {
+    display: none;
+  }
+}
+/* phones: hide the inline nav — everything collapses into the hamburger overlay */
+@media (max-width: 760px) {
+  .header-nav {
+    display: none;
+  }
 }
 @media (prefers-reduced-motion: reduce) {
   header {
@@ -1687,32 +1731,34 @@ canvas#ridge:active {
   color: var(--ink);
   pointer-events: none; /* the empty field stays a drag surface for the moon-scrub */
   --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Fira Code", Menlo, Consolas, monospace;
+  /* the glowing line's colour — a warm white; amber (--c-education) stays the sparing accent */
+  --c-line: #f7f0e2;
 }
 .projects-tl-root .role-close {
   pointer-events: auto; /* the root is click-through; the close control is not */
 }
 
-/* the focus scrim — a whisper top/bottom wash so the masthead + year axis stay legible, plus a
+/* the focus scrim — a whisper top/bottom wash so the masthead + year ruler stay legible, plus a
    warm SPOTLIGHT pool the rAF loop slides under the transiting moon (vars --fx/--fy, in %): the
-   DOM companion to the GPU depth-of-field, selling "the moon is in focus" as it flies the range. */
+   DOM companion to the GPU depth-of-field, selling "the moon is in focus" as it rides the line. */
 .projects-tl-frost {
   position: absolute;
   inset: 0;
   z-index: 0;
   pointer-events: none;
-  /* default focal point matches the moon's resting sky altitude (TL_MOON_SKY ≈ 0.37) so the
-     spotlight doesn't jump on the first open frame before the loop starts writing --fx/--fy. */
+  /* default focal point sits where the moon rests on the line (TL_BASE_Y − TL_MOON_LIFT ≈ 0.51)
+     so the spotlight doesn't jump on the first open frame before the loop writes --fx/--fy. */
   --fx: 50%;
-  --fy: 37%;
+  --fy: 51%;
   background:
-    radial-gradient(46% 46% at var(--fx) var(--fy), rgba(255, 196, 92, 0.07) 0%, rgba(255, 196, 92, 0) 70%),
-    radial-gradient(135% 120% at var(--fx) var(--fy), rgba(6, 7, 10, 0) 28%, rgba(6, 7, 10, 0.52) 100%),
+    radial-gradient(44% 44% at var(--fx) var(--fy), rgba(255, 196, 92, 0.08) 0%, rgba(255, 196, 92, 0) 70%),
+    radial-gradient(150% 130% at var(--fx) var(--fy), rgba(6, 7, 10, 0) 34%, rgba(6, 7, 10, 0.5) 100%),
     linear-gradient(
       180deg,
-      rgba(6, 7, 10, 0.55) 0%,
-      rgba(6, 7, 10, 0) 22%,
-      rgba(6, 7, 10, 0) 62%,
-      rgba(6, 7, 10, 0.6) 100%
+      rgba(6, 7, 10, 0.5) 0%,
+      rgba(6, 7, 10, 0) 20%,
+      rgba(6, 7, 10, 0) 78%,
+      rgba(6, 7, 10, 0.5) 100%
     );
   opacity: 0;
   animation: tl-frost-in 0.55s cubic-bezier(0.22, 1, 0.36, 1) 0.1s forwards;
@@ -1773,7 +1819,7 @@ canvas#ridge:active {
   color: var(--c-education);
 }
 
-/* the trace layer — geometry written each frame; pointer-events off so the canvas
+/* the filament layer — geometry written each frame; pointer-events off so the canvas
    stays a drag surface (the label buttons below catch the clicks) */
 .projects-tl-svg {
   position: absolute;
@@ -1782,40 +1828,76 @@ canvas#ridge:active {
   overflow: visible;
   pointer-events: none;
 }
-/* the ember baseline — the "red line" of the reference, faded at both ends by the gradient stroke */
+/* the glowing LINE — the crisp warm core, faded at both ends by the gradient stroke, with a
+   soft warm halo. NO transitions on any of these (geometry is rewritten every frame). */
 .tl-axis {
   fill: none;
   stroke: url(#tl-axis-fade);
-  stroke-width: 1.2;
+  stroke-width: 1.7;
   stroke-linecap: round;
+  filter: drop-shadow(0 0 5px rgba(255, 224, 178, 0.55));
 }
-/* the dense vertical stems — NO transitions (≈80 nodes rewritten every frame would thrash a
-   stroke/fill transition). Faint by default; major projects read a touch brighter, the selected
-   one is the solid amber you-are-here accent. */
-.tl-stem {
+/* the wide blurred bloom beneath the crisp core — the body of the glow */
+.tl-axis-glow {
   fill: none;
-  stroke: rgba(244, 241, 234, 0.3);
+  stroke: url(#tl-axis-fade);
+  stroke-width: 7;
+  stroke-linecap: round;
+  filter: blur(5px);
+}
+/* the organic branches straying out of the line. Faint by default; flagship (major) work reads a
+   touch brighter + heavier, the selected one is the solid amber you-are-here accent with a glow. */
+.tl-branch {
+  fill: none;
+  stroke: rgba(244, 241, 234, 0.24);
   stroke-width: 1;
   stroke-linecap: round;
 }
-.tl-stem.is-major {
-  stroke: rgba(244, 241, 234, 0.52);
+.tl-branch.is-major {
+  stroke: rgba(244, 241, 234, 0.42);
+  stroke-width: 1.1;
 }
-.tl-stem.is-selected {
+.tl-branch.is-selected {
   stroke: var(--c-education);
-  stroke-width: 1.8;
+  stroke-width: 1.7;
+  filter: drop-shadow(0 0 5px rgba(255, 196, 92, 0.5));
 }
-.tl-node {
-  fill: rgba(244, 241, 234, 0.5);
-  r: 1.4;
+/* the BOLD origin node where a branch leaves the line (req: bolder points). Minor nodes read bold
+   via size + brightness alone (NO filter — there are ~54 of them, repainting every frame); the
+   glow is reserved for flagship work + the selected one (~26 elements). CSS owns the radius. */
+.tl-origin {
+  fill: rgba(248, 243, 232, 0.82);
+  r: 2.1;
 }
-.tl-node.is-selected {
-  fill: var(--c-education);
+.tl-origin.is-major {
+  fill: #fff7ec;
   r: 3;
-  filter: drop-shadow(0 0 7px rgba(255, 196, 92, 0.6));
+  filter: drop-shadow(0 0 6px rgba(255, 224, 178, 0.7));
+}
+.tl-origin.is-selected {
+  fill: var(--c-education);
+  r: 3.6;
+  filter: drop-shadow(0 0 10px rgba(255, 196, 92, 0.85));
+}
+/* the faint node at the branch tip */
+.tl-tip {
+  fill: rgba(244, 241, 234, 0.4);
+  r: 1.5;
+}
+.tl-tip.is-selected {
+  fill: var(--c-education);
+  r: 2.2;
+  filter: drop-shadow(0 0 6px rgba(255, 196, 92, 0.6));
+}
+/* the light pulses travelling along the line */
+.tl-pulse {
+  fill: #fff4e2;
+  r: 2.2;
+  filter: drop-shadow(0 0 6px rgba(255, 214, 150, 0.9));
 }
 
-/* the year axis — static, placed by the same fractional x-map as the stems */
+/* the year ruler — a faint date legend along the foot, placed by the same fractional x-map as
+   the branch roots (kept clear of the line + branches above it) */
 .tl-years {
   position: absolute;
   inset: 0;
@@ -1824,12 +1906,12 @@ canvas#ridge:active {
 }
 .tl-year {
   position: absolute;
-  top: calc(70% + 16px);
+  top: 92%;
   transform: translateX(-50%);
   font-family: var(--mono);
   font-size: 10px;
   letter-spacing: 0.14em;
-  color: rgba(244, 241, 234, 0.36);
+  color: rgba(244, 241, 234, 0.32);
   text-shadow: 0 1px 10px rgba(0, 0, 0, 0.6);
 }
 
@@ -1839,10 +1921,9 @@ canvas#ridge:active {
   inset: 0;
   z-index: 2;
 }
-/* a single NAME standing at the stem tip, rotated ∓90° by the rAF loop to read up the column
-   (down for the below-axis studies) like the reference's SSID labels. transform-origin is the box
-   top-left; the loop's small x offset re-centres the rotated column on the stem. No bloom-to-record
-   — the selected one just brightens to the amber you-are-here accent. */
+/* a single NAME floating horizontally just beyond the branch tip — the rAF loop centres it on the
+   tip with a trailing translate(-50%, -50%) (so the box stays centred whatever its size). No
+   bloom-to-record — the selected one just brightens to the amber you-are-here accent. */
 .tl-label {
   position: absolute;
   top: 0;
@@ -1856,8 +1937,7 @@ canvas#ridge:active {
   pointer-events: auto;
   opacity: 0; /* the rAF loop owns transform + opacity */
   -webkit-tap-highlight-color: transparent;
-  white-space: nowrap; /* the column never wraps */
-  transform-origin: 0 0;
+  white-space: nowrap; /* the name never wraps */
   will-change: transform, opacity;
 }
 .tl-label:focus-visible {
@@ -2001,9 +2081,14 @@ canvas#ridge:active {
     animation: none;
     opacity: 1;
   }
+  /* the geometry layers are loop-written (no CSS transitions to suppress); the loop itself
+     stills the organic branch float, the moon bob and the line pulses under reduced motion. */
   .tl-axis,
-  .tl-stem,
-  .tl-node {
+  .tl-axis-glow,
+  .tl-branch,
+  .tl-origin,
+  .tl-tip,
+  .tl-pulse {
     transition: none;
   }
 }
