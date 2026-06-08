@@ -238,6 +238,12 @@ const ProjectsOverlay = forwardRef<HTMLButtonElement, Props>(
           <span className="tl-now-cap">now</span>
         </div>
 
+        {/* the MOBILE reading head (req): a small fixed amber playhead at screen-centre on the baseline.
+            The timeline scrubs UNDER it — whichever project's line sits on it is selected (and parts its
+            neighbours via the lens). Pure CSS, anchored to the live baseline (--tl-base); mobile-only
+            (desktop selects by hovering a line, so it has no fixed centre). */}
+        <div className="tl-readhead" aria-hidden="true" />
+
         {/* the foot nubs — a small SQUARE node at each line's root on the baseline, the same as the
             tip nubs (no glow, no screen-blend). Loop-positioned (req 4). */}
         <div className="tl-nubs" ref={nubsRef} aria-hidden="true">

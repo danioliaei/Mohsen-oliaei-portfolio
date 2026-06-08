@@ -127,8 +127,13 @@ const TL_LABEL_GAP = 12; // px from a cluster's right-most line to its left-alig
 const TL_CLUSTER_GAP = 0.016; // xFrac gap (~2.4 months) that starts a NEW cluster
 const TL_CLUSTER_MAX = 4; // cap members so a long even run breaks into local groups ("a few lines")
 const TL_JITTER = 0.006; // max |x jitter| as a fraction of the plot width (req 5 — organic spacing)
-const TL_MOBILE_ZOOM = 3.2; // narrow: widen the plot MORE so the names read large; drag pans it (req 3)
+const TL_MOBILE_ZOOM = 5.0; // narrow: widen the plot MORE so the names read large; drag pans it (req 3)
 const TL_PAN_MAX_VEL = 4200; // px/s — release-flick cap for the mobile pan
+// MOBILE center-lock (req): the middle of the screen is the "reading head" — the project nearest it
+// is selected, and on release its line SNAPS to exact centre (a detent), so a scrub feels like
+// ratcheting projects through a fixed selection point rather than free-scrolling a wall of names.
+const TL_PAN_SNAP_TAU = 0.16; // s — ease that locks the selected line to screen-centre at rest
+const TL_PAN_GLIDE_MIN = 60;  // px/s — below this release-glide speed, stop ratcheting and snap to centre
 // desktop mouse-hover pick (req 2): a line + its name lights when the cursor is within TL_HOVER_X px of
 // the line's x AND inside the line's vertical span (a small margin past the tip). Geometric (off the
 // loop's hx/hy), so the thin paths need no pointer-events that would swallow the scrub drag. Mouse-only:
@@ -144,6 +149,14 @@ const TL_LENS_R = 160;        // px — lens radius (a local "cluster"); or TL_L
 const TL_LENS_R_FRAC = 0.12;  // fraction-of-plot-width floor for the radius on wide screens
 const TL_LENS_PUSH = 0.6;     // peak one-side push as a fraction of R (centre line-spacing ≈ ×1.9)
 const TL_LENS_DIM = 0.5;      // far lines/names recede to (1 − this) under the lens → the focus reads "forward"
+// the MOBILE lens is the load-bearing fix for the dense-plot overlap: it's ALWAYS on (centred on the
+// screen-centre reading head, never the cursor), parts the selected cluster wider than desktop, and
+// recedes the periphery harder so only the centred project + its few neighbours read (req: the others
+// are pushed away so it's legible). Tuned stronger than the desktop hover lens.
+const TL_LENS_R_MOBILE = 104;       // px — a tight focus neighbourhood (just the selected + a couple)…
+const TL_LENS_R_FRAC_MOBILE = 0.27; // …or this × the baseline width, whichever is larger
+const TL_LENS_PUSH_MOBILE = 1.05;   // a strong part so the focused few clear each other (centre ≈ ×2.6)
+const TL_LENS_DIM_MOBILE = 0.9;     // the periphery recedes HARD so only the centred few read, rest fade out
 
 // the names sit to the RIGHT of the lines again (req 2/3), so the date axis can't run to the right
 // edge or the latest cluster's column would clip off-screen. Reserve a right gutter sized to the
@@ -171,6 +184,11 @@ const tlJitter = (i: number) => {
 };
 // the jittered TRUE-date x for every project (0..1 along the axis)
 const TL_XFRAC_J = PROJECTS.map((_, i) => TL_XFRAC[i] + tlJitter(i));
+// the leftmost / rightmost project fraction — the mobile pan clamps to centring exactly these on the
+// reading head, so EVERY project (first..last) can reach the screen-centre selection slot. (min/max,
+// not [0]/[N-1], because the jitter can reorder the extreme couple.)
+const TL_XFRAC_MIN = Math.min(...TL_XFRAC_J);
+const TL_XFRAC_MAX = Math.max(...TL_XFRAC_J);
 
 // per-project plot inputs, precomputed once (W/H-independent fractions). For each project: its jittered
 // true-date x and which side of the axis its tip points — set by the SIGN of the smooth skyline curve
@@ -785,8 +803,14 @@ export default function RidgelineStage() {
       const tlTipY = new Float64Array(DIAL_N);
       const dialMobile = () =>    // narrow → the timeline zooms + pans (req 7) instead of scrubbing
         typeof matchMedia === "function" && matchMedia("(max-width: 860px)").matches;
-      // the most-negative pan offset for the current width (panMin..0); 0 on desktop (zoom 1 ⇒ no pan)
-      const tlPanMin = (W: number) => tlAxisSpan(W) * (1 - TL_MOBILE_ZOOM);
+      // the CENTRE-LOCK pan bounds: the offsets that park the LEFTMOST (tlPanMax, most positive) and
+      // RIGHTMOST (tlPanMin, most negative) project on the screen-centre reading head. Clamping the pan
+      // to [tlPanMin, tlPanMax] means every project can reach centre AND the scrub maps exactly onto the
+      // work — no dead empty future tail to scroll through. (Desktop never pans; zoom 1 ⇒ both ≈ a hair.)
+      const tlPanCentre = (W: number, xFrac: number) =>
+        W * 0.5 - (TL_PAD * W + xFrac * tlAxisSpan(W) * TL_MOBILE_ZOOM);
+      const tlPanMin = (W: number) => tlPanCentre(W, TL_XFRAC_MAX);
+      const tlPanMax = (W: number) => tlPanCentre(W, TL_XFRAC_MIN);
       // glide the moon to project i — LINEAR (clamped to the range; a timeline never wraps)
       const dialGoto = (i: number) => {
         tDialAngle = Math.min(DIAL_MAX_ANGLE, Math.max(0, i * DIAL_SLOT));
@@ -935,9 +959,11 @@ export default function RidgelineStage() {
           const ddt = Math.min(Math.max((e.timeStamp - lastT) / 1000, 1 / 240), 1 / 30);
           lastT = e.timeStamp;
           const panMin = tlPanMin(cvs.clientWidth);
+          const panMax = tlPanMax(cvs.clientWidth);
           const prev = tPanX;
-          // drag right → reveal EARLIER work (offset toward 0); clamped to [panMin, 0]
-          tPanX = Math.min(0, Math.max(panMin, panStartOff + (e.clientX - panStartX)));
+          // drag right → reveal EARLIER work; clamped to the centre-lock range [panMin, panMax] so the
+          // first/last project can sit dead-centre (no over-scroll past the ends)
+          tPanX = Math.min(panMax, Math.max(panMin, panStartOff + (e.clientX - panStartX)));
           panVel = Math.max(
             -TL_PAN_MAX_VEL,
             Math.min(TL_PAN_MAX_VEL, panVel * 0.5 + ((tPanX - prev) / ddt) * 0.5),
@@ -1626,14 +1652,19 @@ export default function RidgelineStage() {
           const upRoom = Math.max(TL_FLOOR, baseY - Math.max(TL_TOP_MARGIN * H, TL_TOP_RESERVE_PX));
           const downRoom = (1 - TL_BOT_MARGIN) * H - baseY;
 
-          // ---- the hover FOCUS-LENS warp (a push-lens). Identity at rest and at the focus centre, so
-          // the line under the cursor stays put while its neighbours are PUSHED apart and the right side
-          // eases into the future tail — the timeline "extends" locally so an overlapping title reads
-          // (req). Only the data lines + their names warp; the baseline, ruler and now-marker stay put as
-          // a calm reference.
-          const lensOn = lensAmt > 0.001 && lensFocusX >= 0 && !mobile;
-          const lensR = Math.max(TL_LENS_R, viewW * TL_LENS_R_FRAC);
-          const lensExtra = lensAmt * lensR * TL_LENS_PUSH;
+          // ---- the FOCUS-LENS warp (a push-lens). Identity at rest and at the focus centre, so the
+          // focused line — under the cursor on desktop, locked at the screen-centre reading head on
+          // mobile — stays put while its neighbours are PUSHED apart and the right side eases into the
+          // future tail: the timeline "extends" locally so an overlapping title reads (req). Only the
+          // data lines + their names warp; the baseline, ruler and now-marker stay put as a calm
+          // reference. On mobile it's ALWAYS on and tuned stronger (parts wider, dims the periphery
+          // harder) so the dense 127-line plot reads — the centred project pushes the rest away (req).
+          const lensOn = lensAmt > 0.001 && lensFocusX >= 0;
+          const lensR = mobile
+            ? Math.max(TL_LENS_R_MOBILE, viewW * TL_LENS_R_FRAC_MOBILE)
+            : Math.max(TL_LENS_R, viewW * TL_LENS_R_FRAC);
+          const lensExtra = lensAmt * lensR * (mobile ? TL_LENS_PUSH_MOBILE : TL_LENS_PUSH);
+          const lensDim = mobile ? TL_LENS_DIM_MOBILE : TL_LENS_DIM;
           const warpX = (x: number): number => {
             if (!lensOn) return x;
             const t = (x - lensFocusX) / lensR;
@@ -1642,12 +1673,15 @@ export default function RidgelineStage() {
             // odd smootherstep: s(±1)=±1, s'(±1)=0, s'(0)=1.5 → centre spacing ×(1 + 1.5·extra/R)
             return x + lensExtra * (t * (1.5 - 0.5 * t * t));
           };
-          // depth falloff: under the open lens, lines/names far from the cursor recede a touch so the
-          // focused cluster reads "forward" (req). Full at the centre; eased to (1 − lensAmt·DIM) past ~1.5R.
+          // depth falloff: under the open lens, lines/names far from the focus recede so the focused
+          // cluster reads "forward" (req). Full at the centre; eased to (1 − lensAmt·DIM) past dimSpan.
+          // Mobile fades the periphery FASTER (tighter span) so only the centred few names stay bright
+          // and the dense rest drop to faint ghosts — the load-bearing declutter on a narrow screen.
+          const dimSpan = lensR * (mobile ? 1.0 : 1.5);
           const focusDim = (x: number): number => {
             if (!lensOn) return 1;
-            const t = Math.min(1, Math.abs(x - lensFocusX) / (lensR * 1.5));
-            return 1 - lensAmt * TL_LENS_DIM * (t * t * (3 - 2 * t));
+            const t = Math.min(1, Math.abs(x - lensFocusX) / dimSpan);
+            return 1 - lensAmt * lensDim * (t * t * (3 - 2 * t));
           };
 
           // the baseline is the FIXED horizon (it never pans on desktop); it wipes in left→right as the
@@ -1755,7 +1789,7 @@ export default function RidgelineStage() {
           // tip height (its smooth-curve height) and is nudged DOWN only if two would overlap (dense, but
           // legible) — keyed off the stashed tip so it never jitters as the lines draw in. Resolves last
           // (pLabel) with a tiny settle slide outward.
-          const rowMin = mobile ? 16 : 12; // min px between stacked names (≥ the live name height)
+          const rowMin = mobile ? 20 : 12; // min px between stacked names (≥ the live name height)
           for (const cluster of TL_CLUSTERS) {
             // the column left-aligns just past the cluster's right-most line — warped with the lines so the
             // names track their (spread) cluster, then the fixed GAP added in screen space.
@@ -1882,46 +1916,68 @@ export default function RidgelineStage() {
         // read the narrow-screen breakpoint ONCE per frame (matchMedia allocates a MediaQueryList per
         // call) and thread it to the pan block + updateTimeline below.
         const mobile = dialMobile();
-        // ---- the hover FOCUS-LENS strength. Eases toward 1 only on a SETTLED desktop timeline with the
-        // mouse over the field and not dragging — so the spread fades in/out and never fights the scrub.
-        // lensFocusX tracks the live cursor (held at its last value while the lens eases back out).
+        // ---- the FOCUS-LENS strength, eased toward 1 on a SETTLED timeline. MOBILE: always on (the
+        // centred reading head is always the focus), pinned to screen-centre. DESKTOP: only while the
+        // mouse is over the field and not scrubbing, tracking the live cursor (held at its last value
+        // while the lens eases back out). So the spread fades in/out and never fights the scrub.
         const lensTarget =
-          !mobile && projectsOpenRef.current && projAmt > 0.9 && !dialDragging && hx >= 0 ? 1 : 0;
+          projectsOpenRef.current && projAmt > 0.9 && (mobile || (!dialDragging && hx >= 0)) ? 1 : 0;
         lensAmt += (lensTarget - lensAmt) * (reduceMotion ? 1 : 1 - Math.exp(-dt / LENS_TAU));
         if (lensTarget === 0 && lensAmt < 1e-3) lensAmt = 0;
-        if (hx >= 0) lensFocusX = hx;
+        if (mobile) lensFocusX = cvs.clientWidth * 0.5;
+        else if (hx >= 0) lensFocusX = hx;
         if (projectsOpenRef.current) {
           // MOBILE: ease the zoomed-timeline pan toward its target with a release-flick (req 7),
-          // clamped to [panMin, 0] for the live width. Desktop keeps panX === 0 (zoom 1 ⇒ no pan).
+          // clamped to the centre-lock range [panMin, panMax]. Desktop keeps panX === 0 (zoom 1).
           if (mobile) {
+            // MOBILE = a CENTRE-LOCKED scrubber (req): the project nearest the screen-centre reading
+            // head IS the selection; a drag pans freely while ratcheting it (a haptic per change fires
+            // from onMove, inside the gesture). On release the plot glides, keeps ratcheting, then
+            // SNAPS the selected line to exact centre — a detent. A tap / keyboard pick likewise eases
+            // its line to centre. So the middle of the screen is always "the selection place" and the
+            // chosen project locks there, where the always-on lens has parted it clear of its neighbours.
             const W = cvs.clientWidth;
             const panMin = tlPanMin(W);
-            // FOLLOW THE SELECTION (req 7): the zoomed plot shows only a slice, so a selection made by
-            // tap / keyboard (which moves the scrub, not the pan) must scroll its line into view —
-            // otherwise the highlighted "you-are-here" line opens off-screen. Drive off the TARGET
-            // selection (round of tDialAngle); never fight an in-progress free drag.
-            const tSel = Math.min(DIAL_N - 1, Math.max(0, Math.round(tDialAngle / DIAL_SLOT)));
-            if (!panDragging && tSel !== panFollowSel) {
-              const opening = panFollowSel === -1; // first frame after open/reset
-              panFollowSel = tSel;
-              const padPx = TL_PAD * W;
-              const plotW = tlAxisSpan(W) * TL_MOBILE_ZOOM;
-              const selX = padPx + TL_XFRAC_J[tSel] * plotW; // the selected line's UN-panned x
-              const centered = Math.min(0, Math.max(panMin, W * 0.5 - selX)); // pan that centres it
-              if (opening) {
-                panX = tPanX = centered; // jump, so the timeline draws on already showing the selection
-              } else {
-                const curX = selX + tPanX; // where it sits at the current target pan
-                if (curX < W * 0.16 || curX > W * 0.84) tPanX = centered; // only re-pan near/off an edge
-              }
-            }
-            if (!panDragging) {
+            const panMax = tlPanMax(W);
+            const padPx = TL_PAD * W;
+            const plotW = tlAxisSpan(W) * TL_MOBILE_ZOOM;
+            velDial = 0; // mobile drives the selection through the pan, not the scrub knob
+            // the pan offset that parks project i's line on the screen-centre reading head — clamped to
+            // the range, so the first/last project still locks dead-centre rather than at an edge.
+            const centreX = (i: number) =>
+              Math.min(panMax, Math.max(panMin, W * 0.5 - (padPx + TL_XFRAC_J[i] * plotW)));
+            if (panFollowSel === -1) {
+              // first frame after open/reset → jump pre-centred on the live selection, so the timeline
+              // draws on already showing the you-are-here project at the reading head.
+              const s = Math.min(DIAL_N - 1, Math.max(0, Math.round(tDialAngle / DIAL_SLOT)));
+              panX = tPanX = centreX(s);
+              panVel = 0; panFollowSel = s; panLastSel = s;
+            } else if (panDragging) {
+              tPanX = Math.min(panMax, Math.max(panMin, tPanX)); // onMove drives it; clamp for a mid-drag resize
+            } else {
+              // released → inertia glide, clamped, killing the flick at the ends
               panVel *= Math.exp(-dt / DIAL_INERTIA_TAU);
               tPanX += panVel * dt;
-              if (tPanX > 0) { tPanX = 0; if (panVel > 0) panVel = 0; }
+              if (tPanX > panMax) { tPanX = panMax; if (panVel > 0) panVel = 0; }
               else if (tPanX < panMin) { tPanX = panMin; if (panVel < 0) panVel = 0; }
-            } else {
-              tPanX = Math.min(0, Math.max(panMin, tPanX)); // a rotate/resize can shrink the range
+              if (Math.abs(panVel) > TL_PAN_GLIDE_MIN) {
+                // still gliding fast → the selection ratchets to whatever sits under the centre. The
+                // haptic here is for Android (vibrate fires off-gesture); iOS plays its in-gesture ticks
+                // from onMove and stays quiet through the free glide, which is fine.
+                const centreFrac = (W * 0.5 - tPanX - padPx) / plotW;
+                let best = 0, bestD = Infinity;
+                for (let i = 0; i < DIAL_N; i++) {
+                  const d = Math.abs(TL_XFRAC_J[i] - centreFrac);
+                  if (d < bestD) { bestD = d; best = i; }
+                }
+                if (best !== panLastSel) { panLastSel = best; haptic(7, now); }
+                tDialAngle = best * DIAL_SLOT; panFollowSel = best;
+              } else {
+                // settled (or a tap / keyboard pick) → LOCK the selected line onto the centre detent
+                const s = Math.min(DIAL_N - 1, Math.max(0, Math.round(tDialAngle / DIAL_SLOT)));
+                tPanX += (centreX(s) - tPanX) * (reduceMotion ? 1 : 1 - Math.exp(-dt / TL_PAN_SNAP_TAU));
+                panLastSel = s; panFollowSel = s;
+              }
             }
             panX += (tPanX - panX) * (reduceMotion ? 1 : 1 - Math.exp(-dt / DIAL_SMOOTH_TAU));
           }
