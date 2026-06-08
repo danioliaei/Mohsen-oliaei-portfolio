@@ -1737,7 +1737,7 @@ canvas#ridge:active {
   --c-line: var(--ink);
   /* the live baseline height in px (the rAF loop welds it to the folded globe); the year ruler
      hangs just below it. Fallback ≈ TL_BASE_Y for the first frame before the loop writes it. */
-  --tl-base: 60vh;
+  --tl-base: 55vh;
 }
 .projects-tl-root .role-close {
   pointer-events: auto; /* the root is click-through; the close control is not */
@@ -1792,6 +1792,60 @@ canvas#ridge:active {
   stroke-width: 1; /* hairline, like the branches (req 4) */
   stroke-linecap: butt;
   opacity: 0.62; /* a soft horizon, not a hard white rule */
+}
+/* the DASHED future continuation of the baseline (the "now" SPLIT → the 2040 edge) — the calm road
+   ahead. A faint hairline dash so the delivered past reads solid and the future reads "yet to be
+   drawn". The rAF loop owns its x-extent + opacity. */
+.tl-axis-future {
+  fill: none;
+  stroke: rgba(244, 241, 234, 0.42);
+  stroke-width: 1;
+  stroke-linecap: butt;
+  stroke-dasharray: 2 7;
+  opacity: 0; /* loop fades it in behind the solid past */
+}
+/* the "now" horizon marker — a faint vertical tick straddling the baseline at the SPLIT, capped by a
+   tiny "now" label. Quiet + neutral (amber is reserved for the selected project). The loop owns
+   translateX + opacity; the vertical placement tracks the live baseline via --tl-base. */
+.tl-now {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 0;
+  height: 100%;
+  z-index: 1;
+  pointer-events: none;
+  opacity: 0;
+  will-change: transform, opacity;
+}
+.tl-now::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: calc(var(--tl-base, 55vh) - 48px);
+  width: 1px;
+  height: 96px;
+  margin-left: -0.5px;
+  background: linear-gradient(
+    180deg,
+    rgba(244, 241, 234, 0) 0%,
+    rgba(244, 241, 234, 0.3) 50%,
+    rgba(244, 241, 234, 0) 100%
+  );
+}
+.tl-now-cap {
+  position: absolute;
+  left: 0;
+  top: calc(var(--tl-base, 55vh) - 64px);
+  transform: translateX(-50%);
+  font-family: var(--mono);
+  font-size: 9px;
+  font-weight: 400;
+  letter-spacing: 0.2em;
+  text-transform: lowercase;
+  color: rgba(244, 241, 234, 0.4);
+  text-shadow: 0 0 8px rgba(6, 7, 10, 0.9);
+  white-space: nowrap;
 }
 /* the straight vertical branches rising (and the valley studies dropping) out of the baseline.
    ALL hairline, the same mono off-white as the filaments (req 2/4): faint by default; flagship
@@ -1896,7 +1950,7 @@ canvas#ridge:active {
 }
 .tl-year {
   position: absolute;
-  top: calc(var(--tl-base, 60vh) + 12px);
+  top: calc(var(--tl-base, 55vh) + 12px);
   left: 0; /* the loop owns the x via transform: translateX(px) translateX(-50%) */
   font-size: 11px;
   font-weight: 400;
@@ -1904,6 +1958,12 @@ canvas#ridge:active {
   color: rgba(244, 241, 234, 0.34);
   text-shadow: 0 1px 10px rgba(0, 0, 0, 0.6);
   will-change: transform;
+}
+/* the future milestones (2030 / 2035 / 2040) read fainter than the dense past ticks — present, but a
+   quiet horizon rather than a hard date. */
+.tl-year.is-future {
+  color: rgba(244, 241, 234, 0.18);
+  letter-spacing: 0.1em;
 }
 
 /* the label layer — each project is a positioned button (its own hit target) */

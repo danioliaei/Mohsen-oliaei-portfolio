@@ -1,6 +1,6 @@
 import { forwardRef, useLayoutEffect, useRef } from "react";
 import { motion } from "motion/react";
-import { PROJECTS, formatMonthYearLong, TIME_MIN, TIME_MAX } from "../data/projects";
+import { PROJECTS, formatMonthYearLong, TIMELINE_TICKS } from "../data/projects";
 
 /* =========================================================================
    ProjectsOverlay — "The Survey Line" (WiFi-SSID data-art reference).
@@ -38,6 +38,10 @@ export type ProjectsDialDom = {
   root: HTMLDivElement | null;
   /** the minimal baseline (loop sets its x-extent + y as it wipes in) */
   axis: SVGLineElement | null;
+  /** the DASHED future continuation of the baseline (SPLIT "now" → right edge) */
+  axisFuture: SVGLineElement | null;
+  /** the "now" horizon marker (a faint vertical tick + caption, loop-placed at the SPLIT) */
+  now: HTMLElement | null;
   /** one straight vertical branch line per project, in PROJECTS order */
   branches: SVGPathElement[];
   /** a small square foot nub per project, in PROJECTS order (req 4) */
@@ -71,18 +75,19 @@ type Props = {
 
 const yy = (date: string) => `'${date.slice(2, 4)}`; // "2025-04" → "'25"
 
-// the integer year ticks spanning the plotted window. The rAF loop POSITIONS them each frame
-// (so they track the mobile zoom + pan); we only render the labels here. TL_PAD_FRAC is the shared
-// left/right padding (single source of truth with RidgelineStage's stem placement).
+// the year ticks (TIMELINE_TICKS — every year across the dense past, then sparse future milestones)
+// are POSITIONED by the rAF loop each frame (so they track the mobile zoom + pan); we only render the
+// labels here. TL_PAD_FRAC is the shared left/right padding (single source of truth with
+// RidgelineStage's stem placement).
 const TL_PAD_FRAC = 0.06;
-const YEARS: number[] = [];
-for (let y = Math.ceil(TIME_MIN); y <= Math.floor(TIME_MAX); y++) YEARS.push(y);
 
 const ProjectsOverlay = forwardRef<HTMLButtonElement, Props>(
   function ProjectsOverlay({ onClose, domRef, onSelect, onHover }, closeButtonRef) {
     const rootRef = useRef<HTMLDivElement>(null);
     const svgRef = useRef<SVGSVGElement>(null);
     const axisRef = useRef<SVGLineElement>(null);
+    const axisFutureRef = useRef<SVGLineElement>(null);
+    const nowRef = useRef<HTMLDivElement>(null);
     const nubsRef = useRef<HTMLDivElement>(null);
     const tipsRef = useRef<HTMLDivElement>(null);
     const labelsRef = useRef<HTMLDivElement>(null);
@@ -101,6 +106,8 @@ const ProjectsOverlay = forwardRef<HTMLButtonElement, Props>(
       domRef.current = {
         root: rootRef.current,
         axis: axisRef.current,
+        axisFuture: axisFutureRef.current,
+        now: nowRef.current,
         branches: Array.from(svg.querySelectorAll<SVGPathElement>(".tl-branch")),
         nubs: nubsRef.current
           ? Array.from(nubsRef.current.querySelectorAll<HTMLElement>(".tl-nub"))
@@ -163,7 +170,7 @@ const ProjectsOverlay = forwardRef<HTMLButtonElement, Props>(
         {/* the dialog name — kept for assistive tech only; the visible top-left masthead
             (eyebrow + plate + live readout) is intentionally gone (req 1). */}
         <h2 id="projects-tl-title" className="sr-only">
-          Selected work, 2014 to 2026
+          Selected work, 2014 to 2040
         </h2>
 
         {/* the focus scrim — a soft top/bottom legibility wash plus a spotlight pool the
@@ -212,8 +219,11 @@ const ProjectsOverlay = forwardRef<HTMLButtonElement, Props>(
               <stop offset="1" stopColor="var(--c-line)" stopOpacity="0" />
             </linearGradient>
           </defs>
-          {/* the minimal baseline (the fixed horizon) */}
+          {/* the minimal baseline (the fixed horizon) — solid across the delivered past */}
           <line className="tl-axis" ref={axisRef} x1="0" y1="0" x2="0" y2="0" />
+          {/* the DASHED future continuation — the calm road ahead (SPLIT "now" → 2040). Dashed +
+              faint so the delivered past reads solid and the future reads "yet to be drawn". */}
+          <line className="tl-axis-future" ref={axisFutureRef} x1="0" y1="0" x2="0" y2="0" />
           {/* one straight vertical branch per project */}
           <g>
             {PROJECTS.map((p) => (
@@ -221,6 +231,12 @@ const ProjectsOverlay = forwardRef<HTMLButtonElement, Props>(
             ))}
           </g>
         </svg>
+
+        {/* the "now" horizon — a faint vertical tick + caption the loop places at the SPLIT, marking
+            where the dense delivered past hands off to the forward-looking 2040 tail. */}
+        <div className="tl-now" ref={nowRef} aria-hidden="true">
+          <span className="tl-now-cap">now</span>
+        </div>
 
         {/* the foot nubs — a small SQUARE node at each line's root on the baseline, the same as the
             tip nubs (no glow, no screen-blend). Loop-positioned (req 4). */}
@@ -241,8 +257,8 @@ const ProjectsOverlay = forwardRef<HTMLButtonElement, Props>(
         {/* the year ruler — a faint date legend, positioned by the loop each frame (so it tracks
             the mobile zoom + pan), sitting just below the baseline. */}
         <div className="tl-years" ref={yearsRef} aria-hidden="true">
-          {YEARS.map((y) => (
-            <span className="tl-year" key={`year-${y}`}>
+          {TIMELINE_TICKS.map((y) => (
+            <span className={y > 2026 ? "tl-year is-future" : "tl-year"} key={`year-${y}`}>
               {y}
             </span>
           ))}
@@ -277,7 +293,7 @@ const ProjectsOverlay = forwardRef<HTMLButtonElement, Props>(
         {/* a compact vertical list — kept in the DOM as a non-visual fallback, but hidden now
             that the timeline itself runs on mobile (req 7). Tapping a row still routes a selection
             through the same path. */}
-        <div className="dial-list" ref={listRef} role="list" aria-label="Projects, 2014 to 2026">
+        <div className="dial-list" ref={listRef} role="list" aria-label="Projects, 2014 to 2040">
           {PROJECTS.map((p, i) => (
             <button
               type="button"
