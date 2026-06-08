@@ -1731,9 +1731,9 @@ canvas#ridge:active {
   font-family: var(--nav); /* match the site header type (req 1) */
   pointer-events: none; /* the empty field stays a drag surface for the scrub */
   --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Fira Code", Menlo, Consolas, monospace;
-  /* every line is the SAME mono off-white as the globe filaments (req 2) — the baseline, the
-     branches, their mirror and the foot nubs. Amber (--c-education) survives only on the selected
-     NAME, the one sparing you-are-here accent. */
+  /* every line is a hairline, the SAME mono off-white as the globe filaments (req 2/4) — the
+     baseline and the branches. Amber (--c-education) survives only on the selected NAME, the one
+     sparing you-are-here accent. */
   --c-line: var(--ink);
   /* the live baseline height in px (the rAF loop welds it to the folded globe); the year ruler
      hangs just below it. Fallback ≈ TL_BASE_Y for the first frame before the loop writes it. */
@@ -1789,92 +1789,73 @@ canvas#ridge:active {
 .tl-axis {
   fill: none;
   stroke: url(#tl-axis-fade);
-  stroke-width: 1.2;
+  stroke-width: 1; /* hairline, like the branches (req 4) */
   stroke-linecap: butt;
   opacity: 0.62; /* a soft horizon, not a hard white rule */
 }
 /* the straight vertical branches rising (and the valley studies dropping) out of the baseline.
-   ALL the same mono off-white as the filaments (req 2): faint hairlines by default; flagship
-   (major) work reads a touch brighter + heavier; the selected one brightens to near-white with a
-   soft white glow (the you-are-here cue — no amber on the lines). */
+   ALL hairline, the same mono off-white as the filaments (req 2/4): faint by default; flagship
+   (major) work reads a touch brighter (same hairline weight); the selected one brightens to near-
+   white with a soft glow — the you-are-here cue carried by COLOUR, not weight, so every line stays
+   a hairline (no amber on the lines). */
 .tl-branch {
   fill: none;
   stroke: rgba(244, 241, 234, 0.3);
   stroke-width: 1;
   stroke-linecap: butt;
-  /* stroke / width / glow are CSS-class-driven (the loop only writes the geometry `d` + opacity),
-     so they can ease — the hover lights a line in with a soft animated bloom (req 2). */
+  /* stroke + glow are CSS-class-driven (the loop only writes the geometry `d` + opacity), so they
+     can ease — the hover lights a line in with a soft animated bloom (req 2). Width stays fixed. */
   transition:
     stroke 0.28s cubic-bezier(0.22, 1, 0.36, 1),
-    stroke-width 0.28s cubic-bezier(0.22, 1, 0.36, 1),
     filter 0.28s cubic-bezier(0.22, 1, 0.36, 1);
 }
 .tl-branch.is-major {
   stroke: rgba(244, 241, 234, 0.5);
-  stroke-width: 1.1;
 }
 /* a mouse hover blooms the line to a warm near-white with an amber halo (req 2) — distinct from the
    selected (cool white) state, so hovering reads as "previewing" rather than "selected". */
 .tl-branch.is-hover {
   stroke: rgba(255, 240, 214, 0.92);
-  stroke-width: 1.5;
-  filter: drop-shadow(0 0 6px rgba(255, 198, 110, 0.55));
+  filter: drop-shadow(0 0 5px rgba(255, 198, 110, 0.5));
 }
 .tl-branch.is-selected {
   stroke: rgba(248, 246, 240, 0.95);
-  stroke-width: 1.6;
   filter: drop-shadow(0 0 4px rgba(244, 241, 234, 0.5));
 }
-/* the MIRROR — a live <use> clone of the whole branch group, reflected about the baseline by the
-   loop, so every line casts a reflection and the sinus skyline continues below (req 6). Faint, like
-   a reflection on water; it clones the branches' per-line opacities so it appears/wipes with them. */
-.tl-mirror {
-  opacity: 0.3;
-}
 
-/* the FOOT NUBS — a glowing dot at each line's root on the baseline (req 3). The layer is its own
-   isolated stacking context and each nub screen-blends, so when lines are close (a busy year) their
-   halos overlap into a single bigger glow — exactly the globe's bright convergence nodes. */
+/* the FOOT NUBS — a small SQUARE node at each line's root on the baseline (req 4): the SAME as the
+   tip nubs, no glow and no screen-blend, so the baseline reads as quiet hairlines pinned by nodes. */
 .tl-nubs {
   position: absolute;
   inset: 0;
   z-index: 1;
   pointer-events: none;
-  isolation: isolate; /* confine the screen-blend to the nub layer (don't wash out the globe) */
 }
 .tl-nub {
   position: absolute;
   top: 0;
   left: 0;
-  width: 14px; /* a smaller, softer glow — reduced from 22 so the baseline reads quieter (req 1/3) */
-  height: 14px;
-  margin: -7px 0 0 -7px; /* centre the dot on the (x, baseY) the loop translates it to */
-  border-radius: 50%;
-  background: radial-gradient(
-    circle closest-side,
-    rgba(244, 241, 234, 0.55) 0%,
-    rgba(244, 241, 234, 0.2) 40%,
-    rgba(244, 241, 234, 0) 74%
-  );
-  mix-blend-mode: screen; /* overlapping nubs add toward white → a bigger merged glow */
+  width: 4px;
+  height: 4px;
+  margin: -2px 0 0 -2px; /* centre the square on the (x, baseY) the loop translates it to */
+  background: rgba(244, 241, 234, 0.5);
   opacity: 0; /* the rAF loop owns transform + opacity */
   will-change: transform, opacity;
+  transition: background 0.28s cubic-bezier(0.22, 1, 0.36, 1);
 }
 .tl-nub.is-selected {
-  background: radial-gradient(
-    circle closest-side,
-    rgba(255, 255, 255, 0.92) 0%,
-    rgba(244, 241, 234, 0.4) 44%,
-    rgba(244, 241, 234, 0) 78%
-  );
+  width: 6px;
+  height: 6px;
+  margin: -3px 0 0 -3px;
+  background: rgba(255, 250, 240, 0.95);
 }
 .tl-nub.is-hover {
-  filter: brightness(1.5); /* CSS-driven (transform/opacity are loop-owned) — lift the foot glow */
+  background: rgba(255, 240, 214, 0.98);
 }
 
-/* the TIP nubs — a tiny crisp dot at each line's far end (req 1). Their own layer (no screen-blend),
-   so they read as discrete line terminators rather than merging like the baseline feet. The loop owns
-   transform + opacity; appearance + the hover/selected lift are CSS. */
+/* the TIP nubs — a tiny crisp SQUARE at each line's far end, IDENTICAL to the foot nubs (req 4), so
+   each hairline reads as terminated by a discrete node. The loop owns transform + opacity; appearance
+   + the hover/selected lift are CSS (colour only, no glow). */
 .tl-tips {
   position: absolute;
   inset: 0;
@@ -1887,22 +1868,20 @@ canvas#ridge:active {
   left: 0;
   width: 4px;
   height: 4px;
-  margin: -2px 0 0 -2px; /* centre on the (x, tipY) the loop translates it to */
-  border-radius: 50%;
-  background: rgba(244, 241, 234, 0.55);
+  margin: -2px 0 0 -2px; /* centre the square on the (x, tipY) the loop translates it to */
+  background: rgba(244, 241, 234, 0.5);
   opacity: 0; /* the rAF loop owns transform + opacity */
   will-change: transform, opacity;
-  transition:
-    background 0.28s cubic-bezier(0.22, 1, 0.36, 1),
-    box-shadow 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+  transition: background 0.28s cubic-bezier(0.22, 1, 0.36, 1);
 }
 .tl-tip.is-selected {
+  width: 6px;
+  height: 6px;
+  margin: -3px 0 0 -3px;
   background: rgba(255, 250, 240, 0.95);
-  box-shadow: 0 0 5px rgba(244, 241, 234, 0.6);
 }
 .tl-tip.is-hover {
   background: rgba(255, 240, 214, 0.98);
-  box-shadow: 0 0 6px rgba(255, 198, 110, 0.7);
 }
 
 /* the year ruler — a faint date legend sitting just BELOW the baseline, POSITIONED by the rAF loop
@@ -1933,10 +1912,10 @@ canvas#ridge:active {
   inset: 0;
   z-index: 2;
 }
-/* a single NAME run VERTICAL and aligned with its OWN line (req 1) — the rAF loop anchors the box
-   at the line's tip and rotates it ±90°, reading away from the baseline. transform-origin is the
-   box's top-left so the loop's `translate → rotate → translate(0,-50%)` centres the strip on the
-   line's x. The selected one brightens to the amber you-are-here accent; a mouse hover blooms it. */
+/* a single NAME run HORIZONTAL + LEFT-ALIGNED (req 2) — the rAF loop anchors the box at its cluster's
+   left edge (just right of the cluster's lines, req 3) at the line's tip height. transform-origin is
+   the box's top-left so the loop's `translate(colX, y) translate(0,-50%)` drops the name's vertical
+   centre onto y. The selected one brightens to the amber you-are-here accent; a mouse hover blooms it. */
 .tl-label {
   position: absolute;
   top: 0;
@@ -1947,13 +1926,12 @@ canvas#ridge:active {
   background: none;
   color: inherit;
   text-align: left;
-  /* the loop centres the strip with translate(0,-50%), which resolves against the BUTTON's line-box.
+  /* the loop centres the box with translate(0,-50%), which resolves against the BUTTON's line-box.
      Pin the button's font-size + line-height to the name's so its box equals the glyph band — else the
-     UA default button strut (~15.5px) is taller than the 11px name and the vertical name drifts ~1px
-     off its line (and the up/down rotation mirrors that drift). */
+     UA default button strut (~15.5px) is taller than the 11px name and the name drifts off its row. */
   font-size: 11px;
   line-height: 1;
-  transform-origin: 0 0; /* the rotation pivot the loop's vertical-label math assumes */
+  transform-origin: 0 0; /* the top-left pivot the loop's translate math assumes */
   cursor: pointer;
   pointer-events: auto;
   opacity: 0; /* the rAF loop owns transform + opacity */
@@ -1966,9 +1944,9 @@ canvas#ridge:active {
   outline-offset: 3px;
   border-radius: 3px;
 }
-/* a project NAME in the site-header type (req 1) — mixed-case, light, tight; small so a year's
-   names stack cleanly on top of each other (one row per TL_STACK px). font-family is set explicitly
-   because the parent .tl-label is a <button>, which does NOT inherit the root's --nav by default. */
+/* a project NAME in the site-header type (req 2) — mixed-case, light, tight; small so a cluster's
+   names stack densely on top of each other (one row each). font-family is set explicitly because the
+   parent .tl-label is a <button>, which does NOT inherit the root's --nav by default. */
 .tl-label-name {
   display: inline-block; /* so the hover scale has a box to grow */
   font-family: var(--nav);
@@ -1977,7 +1955,7 @@ canvas#ridge:active {
   line-height: 1;
   letter-spacing: -0.005em;
   color: rgba(244, 241, 234, 0.56);
-  /* a stronger halo keeps a vertical name legible where it crosses a neighbouring line (req 1) */
+  /* a stronger halo keeps a name legible where a column overruns a far line (req 3) */
   text-shadow:
     0 0 8px rgba(6, 7, 10, 0.95),
     0 0 3px rgba(6, 7, 10, 0.95),
@@ -2048,37 +2026,42 @@ canvas#ridge:active {
 
 /* MOBILE (req 3): the SAME timeline runs, zoomed wider than the viewport (the loop sets the zoom)
    so the names read large; a drag scrolls it left/right and ratchets the selection. The lines must
-   read SHARP on a phone: crispEdges snaps the vertical hairlines to the device-pixel grid (no AA
-   fuzz), and the selected line drops its blurred glow for a clean heavier stroke. The nub glows are
-   kept small + soft. */
+   read SHARP on a phone: crispEdges snaps the hairlines to the device-pixel grid (no AA fuzz), and
+   the selected line drops its blurred glow for a clean crisp stroke. The nubs stay small squares. */
 @media (max-width: 860px) {
   .tl-label-name {
     font-size: 13px;
   }
-  /* keep the button strut equal to the larger mobile name so the vertical centring stays exact */
+  /* keep the button strut equal to the larger mobile name so the row centring stays exact */
   .tl-label {
     font-size: 13px;
   }
   .tl-year {
     font-size: 12px;
   }
-  /* the vertical hairlines → snap to the pixel grid so they're crisp at rest, not blurred across two
-     device px. Scoped to .tl-branch ONLY: the gradient-stroked baseline + its mirror keep their AA so
-     they don't shimmer as the baseline welds in (crispEdges would jitter a moving sub-pixel stroke). */
+  /* the hairlines → snap to the pixel grid so they're crisp at rest, not blurred across two device
+     px. Scoped to .tl-branch ONLY: the gradient-stroked baseline keeps its AA so it doesn't shimmer
+     as the line welds in (crispEdges would jitter a moving sub-pixel stroke). */
   .tl-branch {
-    stroke-width: 1.1;
     shape-rendering: crispEdges;
   }
-  /* the soft drop-shadow blur is the main source of phone-fuzz on the lit line — swap it for a clean
-     heavier stroke so the selection still reads, sharply. */
+  /* drop the soft drop-shadow blur (the main source of phone-fuzz on the lit line) — the brighter
+     near-white stroke + the amber name still carry the selection, crisply and still hairline. */
   .tl-branch.is-selected {
-    stroke-width: 1.8;
     filter: none;
   }
-  .tl-nub {
-    width: 16px;
-    height: 16px;
-    margin: -8px 0 0 -8px;
+  /* a touch larger so the square nodes stay tappable-looking on a phone */
+  .tl-nub,
+  .tl-tip {
+    width: 5px;
+    height: 5px;
+    margin: -2.5px 0 0 -2.5px;
+  }
+  .tl-nub.is-selected,
+  .tl-tip.is-selected {
+    width: 7px;
+    height: 7px;
+    margin: -3.5px 0 0 -3.5px;
   }
 }
 
