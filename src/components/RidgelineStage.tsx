@@ -122,22 +122,32 @@ const TL_TOP_RESERVE_PX = 176;
 const TL_BOT_MARGIN = 0.1; // down-lines never drop past (1 − this) × H — clear of the year ruler
 const TL_DRAW_SPAN = 0.45; // draw clock span between the leftmost line rising and the rightmost
 const TL_DRAW_RISE = 0.5; // how long each individual line takes to grow out (in the draw clock)
-const TL_LABEL_OFF = 9; // px the name sits beyond its line's tip
+// the names are HORIZONTAL + LEFT-ALIGNED again: grouped into date CLUSTERS, each cluster's names
+// share one left edge just to the RIGHT of the cluster's right-most line, so a horizontal name (far
+// wider than the ~15px line spacing) never crosses a line in its own cluster (req 3). The line + tip
+// nub + selection/hover highlight carry which name maps to which line.
+const TL_LABEL_GAP = 12; // px from a cluster's right-most line to its left-aligned name column
+const TL_CLUSTER_GAP = 0.016; // xFrac gap (~2.4 months) that starts a NEW cluster
+const TL_CLUSTER_MAX = 4; // cap members so a long even run breaks into local groups ("a few lines")
 const TL_JITTER = 0.006; // max |x jitter| as a fraction of the plot width (req 5 — organic spacing)
 const TL_MOBILE_ZOOM = 3.2; // narrow: widen the plot MORE so the names read large; drag pans it (req 3)
 const TL_PAN_MAX_VEL = 4200; // px/s — release-flick cap for the mobile pan
-// desktop mouse-hover pick (req 2): a line/name lights when the cursor is within TL_HOVER_X px of the
-// line's x AND inside its vertical span — extended TL_HOVER_EXT px past the tip to cover the vertical
-// name. Geometric (off the loop's hx/hy), so the thin paths need no pointer-events that would swallow
-// the scrub drag. Mouse-only: hx/hy stay −1 on touch, so the highlight never sticks on a phone.
+// desktop mouse-hover pick (req 2): a line + its name lights when the cursor is within TL_HOVER_X px of
+// the line's x AND inside the line's vertical span (a small margin past the tip). Geometric (off the
+// loop's hx/hy), so the thin paths need no pointer-events that would swallow the scrub drag. Mouse-only:
+// hx/hy stay −1 on touch, so the highlight never sticks on a phone.
 const TL_HOVER_X = 15;
-const TL_HOVER_EXT = 70;
 
-// the names now run VERTICAL, centred on their OWN line (req 1), so each occupies only ~half a glyph
-// either side of its line and can't clip at the right edge — the old right-gutter reserve (which
-// existed only for the removed horizontal name column) is gone. The date axis maps across the full
-// padded horizon, so the trace uses the whole width instead of bunching toward the left.
-const tlAxisSpan = (W: number) => W * (1 - 2 * TL_PAD);
+// the names sit to the RIGHT of the lines again (req 2/3), so the date axis can't run to the right
+// edge or the latest cluster's column would clip off-screen. Reserve a right gutter sized to the
+// widest name (+ the column gap), and map the lines / ruler across the remaining span. The reserve
+// is also capped to a fraction of W and the span floored at 1px so the math stays POSITIVE on a
+// pathologically narrow viewport (the baseline horizon — the .tl-axis — is drawn across the full
+// padded width, independent of this gutter).
+const tlLabelReserve = (W: number) =>
+  Math.min(180, W * 0.4, Math.max(100, W * (1 - 2 * TL_PAD) * 0.14));
+const tlAxisSpan = (W: number) =>
+  Math.max(1, W * (1 - TL_PAD) - tlLabelReserve(W) - TL_LABEL_GAP);
 
 // the integer year ticks (MUST mirror ProjectsOverlay's YEARS), as 0..1 fractions along the date
 // axis — the rAF loop positions the ruler from these each frame so it tracks the mobile zoom + pan.
@@ -197,6 +207,35 @@ const TL_PLOT: TlPlot[] = (() => {
   }
   return out;
 })();
+
+// DATE CLUSTERS for the name columns (req 3). Walk the projects in date order and break a new cluster
+// on a big enough x-gap OR once a cluster is full — so near-in-time lines group together and a long,
+// evenly-spaced run still splits into local groups of "a few lines". Every cluster's names then share
+// one left edge just past the cluster's right-most line, so no name crosses a clustered line.
+const TL_CLUSTERS: number[][] = (() => {
+  const order = PROJECTS.map((_, i) => i).sort((a, b) => TL_XFRAC_J[a] - TL_XFRAC_J[b]);
+  const clusters: number[][] = [];
+  let cur: number[] = [];
+  let prevX = -Infinity;
+  for (const i of order) {
+    const x = TL_XFRAC_J[i];
+    if (cur.length && (x - prevX > TL_CLUSTER_GAP || cur.length >= TL_CLUSTER_MAX)) {
+      clusters.push(cur);
+      cur = [];
+    }
+    cur.push(i);
+    prevX = x;
+  }
+  if (cur.length) clusters.push(cur);
+  return clusters;
+})();
+// per-project: the right-most jittered date-x in its cluster — the line the name column left-aligns past
+const TL_CLUSTER_MAXX = new Array<number>(PROJECTS.length);
+for (const c of TL_CLUSTERS) {
+  const maxX = c.reduce((m, i) => Math.max(m, TL_XFRAC_J[i]), 0);
+  for (const i of c) TL_CLUSTER_MAXX[i] = maxX;
+}
+
 const DIAL_SENS = 1.7; // rad of scrub per canvas-height of horizontal drag
 const DIAL_SMOOTH_TAU = 0.16; // s — ease displayed scrub → target (a weighty glide)
 const DIAL_INERTIA_TAU = 0.6; // s — release-flick decay
@@ -294,6 +333,11 @@ export default function RidgelineStage() {
   const dialDomRef = useRef<ProjectsDialDom | null>(null);
   const dialGotoRef = useRef<(i: number) => void>(() => {});
   const onDialSelect = useCallback((i: number) => dialGotoRef.current(i), []);
+  // hovering a NAME (in its far-right column) lights its line + nub + name (req 3): the overlay's
+  // label buttons route the mouse-enter/leave through dialHoverRef into the loop's hover state, so the
+  // relation between a far-right name and its line is discoverable, not just on selection.
+  const dialHoverRef = useRef<(i: number) => void>(() => {});
+  const onDialHover = useCallback((i: number) => dialHoverRef.current(i), []);
 
   // ---- "Book me" session menu overlay --------------------------------------
   // A fourth focused surface, a flat sibling of the assignment brief: the "Book me"
@@ -751,6 +795,11 @@ export default function RidgelineStage() {
       let panMoved = false;  // a pan drag travelled past the click slop → swallow the trailing click
       let panLastSel = -1;   // the project a mobile drag last highlighted (haptic ticks on change, req 3)
       let tlHover = -1;      // the project a desktop mouse hover currently lights (req 2), or −1
+      let nameHover = -1;    // a project whose NAME button the mouse is over (req 3) — overrides the
+                             // geometric line pick so hovering a far-right name lights its own line
+      // per-project SETTLED tip y, stashed by the geometry loop so the name-column pass can de-collide
+      // names off a STABLE height (not the one still animating in during the draw-on).
+      const tlTipY = new Float64Array(DIAL_N);
       const dialMobile = () =>    // narrow → the timeline zooms + pans (req 7) instead of scrubbing
         typeof matchMedia === "function" && matchMedia("(max-width: 860px)").matches;
       // the most-negative pan offset for the current width (panMin..0); 0 on desktop (zoom 1 ⇒ no pan)
@@ -762,6 +811,9 @@ export default function RidgelineStage() {
         stopInviting();
       };
       dialGotoRef.current = dialGoto;
+      // the overlay's label buttons set which NAME the mouse is over (or −1 on leave); the loop reads
+      // it as a hover override so a far-right name lights its own line + nub (req 3).
+      dialHoverRef.current = (i: number) => { nameHover = i; };
 
       // letter-cloud geometry: the protagonists' Fibonacci dirs + the DECOMPOSED character cloud
       // (even dirs, per-char radial depth, and the ring each char rains toward — all built once in
@@ -1569,8 +1621,9 @@ export default function RidgelineStage() {
           const padPx = TL_PAD * W;
           const viewW = W - 2 * padPx; // the baseline horizon width (full minus both pads)
           const zoom = mobile ? TL_MOBILE_ZOOM : 1; // mobile widens the plot so names aren't tiny
-          // the date axis maps across axisSpan == the full padded horizon (vertical names can't clip
-          // at the right edge, so no right gutter is reserved). On mobile it's widened by the zoom.
+          // the date axis maps across axisSpan (≤ viewW): it stops short of the right edge so the
+          // latest cluster's name column (which sits to the RIGHT of its lines, req 3) stays on-screen.
+          // On mobile it's widened by the zoom.
           const plotW = tlAxisSpan(W) * zoom; // the virtual (possibly off-screen) date axis width
           const pan = mobile ? panX : 0; // desktop never pans
           const baseYs = baseY.toFixed(1);
@@ -1592,10 +1645,6 @@ export default function RidgelineStage() {
             axis.style.opacity = smooth(0.3, 0.66, amt).toFixed(3);
           }
           if (dom.axisGrad) dom.axisGrad.setAttribute("x2", W.toFixed(0));
-          // the mirror reflects the whole branch group about the live baseline (y → 2·baseY − y),
-          // so every line casts a reflection and the sinus continues below (req 6).
-          if (dom.mirror)
-            dom.mirror.setAttribute("transform", `matrix(1 0 0 -1 0 ${(2 * baseY).toFixed(1)})`);
 
           // the year ruler — placed from the same date map (so it tracks the mobile zoom + pan),
           // fading in with the baseline.
@@ -1632,6 +1681,8 @@ export default function RidgelineStage() {
             // the latest in the group reaches `peak` (≤ room); each earlier one steps down one
             // (fitted) row, so the shortest is ≥ TL_FLOOR and the names stay clear of the chrome.
             const fullLen = peak - (pl.groupCount - 1 - pl.stackRank) * fitStack;
+            const fullTipY = baseY + dirY * fullLen; // SETTLED tip — drives the name column + hover pick
+            tlTipY[i] = fullTipY;
 
             // staggered straight draw-on: the leftmost line rises first, the rightmost trails
             const delay = pl.xFrac * TL_DRAW_SPAN;
@@ -1641,26 +1692,16 @@ export default function RidgelineStage() {
             branch.setAttribute("d", `M${lx},${baseYs} L${lx},${tipY.toFixed(1)}`);
             branch.style.opacity = (amt * grow).toFixed(3);
 
-            // the glowing foot nub sits on the baseline at the line's root; the nub layer
-            // screen-blends, so a busy year's nubs overlap into one bigger glow (req 3).
+            // a small SQUARE nub sits at the line's root on the baseline (req 4)…
             nub.style.transform = `translate(${lx}px, ${baseYs}px)`;
             nub.style.opacity = (amt * grow).toFixed(3);
-            // a small nub caps the line's live TIP (req 1) — it rides the growing end.
+            // …and an identical square nub caps the line's live TIP — it rides the growing end (req 4).
             tip.style.transform = `translate(${lx}px, ${tipY.toFixed(1)}px)`;
             tip.style.opacity = (amt * grow).toFixed(3);
 
-            // the name runs VERTICAL, aligned with its OWN line (req 1): anchored just beyond the tip
-            // and reading AWAY from the baseline (up-lines read upward, down-lines downward), centred
-            // on the line's x. Because each name owns its line's narrow vertical strip rather than a
-            // shared horizontal column, year-mates no longer collide — the survey-skyline look, now
-            // legible. Resolves last (pLabel) with a tiny settle slide outward.
-            const labelGrow = smooth(delay, Math.min(1, delay + 0.5), pLabel);
-            const fullTipY = baseY + dirY * fullLen;
-            const anchorY = fullTipY + dirY * (TL_LABEL_OFF + (1 - labelGrow) * 6);
-            const rot = pl.down ? 90 : -90; // read downward for valley studies, upward for the skyline
-            label.style.transform =
-              `translate(${lx}px, ${anchorY.toFixed(1)}px) rotate(${rot}deg) translate(0, -50%)`;
-            label.style.opacity = (amt * labelGrow).toFixed(3);
+            // the NAME itself (horizontal + left-aligned, grouped into a cluster column, req 2/3) is
+            // positioned in a SECOND pass below — once every line's settled tip is stashed — so the
+            // column can de-collide off stable heights. Here we only keep the selected label tabbable.
             label.tabIndex = isSel ? 0 : -1;
 
             branch.classList.toggle("is-selected", isSel);
@@ -1670,18 +1711,48 @@ export default function RidgelineStage() {
             label.classList.toggle("is-selected", isSel);
             label.classList.toggle("is-major", major);
 
-            // hover pick: nearest line within TL_HOVER_X px of x, inside its vertical span extended
-            // TL_HOVER_EXT px past the tip to cover the vertical name. Prefer the closest x.
+            // hover pick: nearest line within TL_HOVER_X px of x, inside the line's own vertical span
+            // (a small margin past the tip). The name now lives far to the right, so the pick tracks the
+            // LINE — lighting its line + far name together is what shows the relation. Closest x wins.
             if (hoverOn) {
               const dx = Math.abs(hx - lineX);
               if (dx <= hoverBestD) {
-                const ext = fullTipY + dirY * TL_HOVER_EXT;
-                const yLo = Math.min(baseY, fullTipY, ext) - 6;
-                const yHi = Math.max(baseY, fullTipY, ext) + 6;
+                const yLo = Math.min(baseY, fullTipY) - 8;
+                const yHi = Math.max(baseY, fullTipY) + 8;
                 if (hy >= yLo && hy <= yHi) { hoverBestD = dx; hoverBest = i; }
               }
             }
           }
+
+          // ---- the NAME columns (req 2/3). Each date cluster's names share ONE left edge just to the
+          // RIGHT of the cluster's right-most line (TL_CLUSTER_MAXX → px), so a horizontal name never
+          // crosses a line in its own cluster. Within the column each name sits at its line's settled
+          // tip height (the staircase the per-year step-down already traces) and is nudged DOWN only if
+          // two would overlap (dense, but legible) — keyed off the stashed tip so it never jitters as
+          // the lines draw in. Resolves last (pLabel) with a tiny settle slide outward.
+          const rowMin = mobile ? 16 : 12; // min px between stacked names (≥ the live name height)
+          for (const cluster of TL_CLUSTERS) {
+            const colX = padPx + TL_CLUSTER_MAXX[cluster[0]] * plotW + pan + TL_LABEL_GAP;
+            // order rows top→bottom (up-names above the baseline first, down-names below) then push down
+            // to keep a min gap; the staircase already separates same-year names so this rarely fires.
+            const rows = cluster.slice().sort((a, b) => tlTipY[a] - tlTipY[b]);
+            let prevY = -Infinity;
+            for (const i of rows) {
+              const y = Math.max(tlTipY[i], prevY + rowMin);
+              prevY = y;
+              const delay = TL_PLOT[i].xFrac * TL_DRAW_SPAN;
+              const labelGrow = smooth(delay, Math.min(1, delay + 0.5), pLabel);
+              const slide = (1 - labelGrow) * 6; // a small outward settle as the name resolves
+              labels[i].style.transform =
+                `translate(${(colX + slide).toFixed(1)}px, ${y.toFixed(1)}px) translate(0, -50%)`;
+              labels[i].style.opacity = (amt * labelGrow).toFixed(3);
+            }
+          }
+
+          // hovering a NAME button (req 3) takes precedence over the geometric line pick, so a far-
+          // right name lights its OWN line + nub — the relation made discoverable on a desktop mouse.
+          // (Gated like the geometric pick: settled timeline, desktop only — nameHover stays −1 on touch.)
+          if (!mobile && amt > 0.9 && nameHover >= 0) hoverBest = nameHover;
 
           // apply the hover emphasis only on a CHANGE (not 75 classList writes/frame): clear the old
           // line/name/nubs, light the new (req 2). is-hover is the loop's own class — the per-frame
@@ -1772,7 +1843,7 @@ export default function RidgelineStage() {
         // the overlay unmounts on close (its is-hover-bearing nodes destroyed), and under reduced
         // motion the projAmt jump skips the settle frame that would otherwise clear it — so a reopen
         // could leave the line at the stale index un-lit when the cursor rests on it.
-        if (projAmt === 0) { panX = 0; tPanX = 0; panVel = 0; panFollowSel = -1; panLastSel = -1; tlHover = -1; }
+        if (projAmt === 0) { panX = 0; tPanX = 0; panVel = 0; panFollowSel = -1; panLastSel = -1; tlHover = -1; nameHover = -1; }
         // ---- transition phase windows: sub-ranges of the SAME monotonic projAmt, so the close
         // reverses the open exactly. The globe FOLD leads (the threads collapse onto the baseline +
         // dissolve — shaped in the shader off F.mph.w = projAmt, fully gone by ~0.72); pDraw then
@@ -2249,6 +2320,7 @@ export default function RidgelineStage() {
             onClose={closeProjects}
             domRef={dialDomRef}
             onSelect={onDialSelect}
+            onHover={onDialHover}
           />
         )}
       </AnimatePresence>

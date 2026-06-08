@@ -11,16 +11,18 @@ import { PROJECTS, formatMonthYearLong, TIME_MIN, TIME_MAX } from "../data/proje
    leaving a MINIMAL line low on the screen. From that line the whole career rises as
    STRAIGHT vertical hairlines — one per project, rooted at its TRUE date (x), with a
    small organic jitter so the spacing reads like events at different times (req 5).
-   Every line is the SAME mono off-white as the globe filaments (req 2); a glowing NUB
-   sits at each line's foot and neighbouring nubs blend into a bigger glow (req 3). The
-   names sit in a LEFT-ALIGNED column to the RIGHT of each year's lines (req 4). Every
-   line also casts a faint MIRRORED reflection below the baseline, so the sinus skyline
-   continues underneath (req 6). On mobile the same timeline runs, zoomed, dragged
-   left/right to pan (req 7). The selected name lights to the amber you-are-here accent.
+   Every line is a hairline, the SAME mono off-white as the globe filaments (req 2); a small
+   SQUARE nub sits at each line's foot and an identical one at its tip (req 4). The names run
+   HORIZONTAL + LEFT-ALIGNED, grouped into date CLUSTERS: each cluster's names share one left
+   edge just to the RIGHT of the cluster's right-most line, so a name never crosses a clustered
+   line — the line + tip nub + highlight carry which name maps to which line (req 3). A few
+   projects genuinely hang BELOW the baseline (the central valley), so the skyline still reads
+   as a sinus. On mobile the same timeline runs, zoomed, dragged left/right to pan. The selected
+   name lights to the amber you-are-here accent.
 
    This component renders only a STATIC skeleton (the close control, the baseline, the
-   ~80 straight branch lines + their mirror clone, the foot nubs, the name labels, the
-   year ruler, an aria-live region). All per-frame geometry — the line wipe, every
+   ~80 straight branch lines, the foot + tip nubs, the name labels, the year ruler, an
+   aria-live region). All per-frame geometry — the line wipe, every
    branch's straight draw-on, the nubs, the stacked labels, the year ruler placement,
    the mobile zoom + pan, the selection emphasis — is written imperatively by the rAF
    loop in RidgelineStage (`updateTimeline`), so nothing re-renders React during
@@ -38,11 +40,9 @@ export type ProjectsDialDom = {
   axis: SVGLineElement | null;
   /** one straight vertical branch line per project, in PROJECTS order */
   branches: SVGPathElement[];
-  /** the mirror clone of the branch group — reflected about the live baseline (req 6) */
-  mirror: SVGUseElement | null;
-  /** the glowing foot nub per project, in PROJECTS order (req 3) */
+  /** a small square foot nub per project, in PROJECTS order (req 4) */
   nubs: HTMLElement[];
-  /** a small nub at each line's TIP (the far end of the branch), in PROJECTS order */
+  /** an identical square nub at each line's TIP (the far end of the branch), in PROJECTS order */
   tips: HTMLElement[];
   /** the name label per project (a button / hit target) */
   labels: HTMLElement[];
@@ -65,6 +65,8 @@ type Props = {
   domRef: React.MutableRefObject<ProjectsDialDom | null>;
   /** select a project (click a label / tap a list row) — routed into the loop */
   onSelect: (i: number) => void;
+  /** a desktop mouse over a name (or −1 on leave) — lets the loop light that name's line (req 3) */
+  onHover: (i: number) => void;
 };
 
 const yy = (date: string) => `'${date.slice(2, 4)}`; // "2025-04" → "'25"
@@ -77,11 +79,10 @@ const YEARS: number[] = [];
 for (let y = Math.ceil(TIME_MIN); y <= Math.floor(TIME_MAX); y++) YEARS.push(y);
 
 const ProjectsOverlay = forwardRef<HTMLButtonElement, Props>(
-  function ProjectsOverlay({ onClose, domRef, onSelect }, closeButtonRef) {
+  function ProjectsOverlay({ onClose, domRef, onSelect, onHover }, closeButtonRef) {
     const rootRef = useRef<HTMLDivElement>(null);
     const svgRef = useRef<SVGSVGElement>(null);
     const axisRef = useRef<SVGLineElement>(null);
-    const mirrorRef = useRef<SVGUseElement>(null);
     const nubsRef = useRef<HTMLDivElement>(null);
     const tipsRef = useRef<HTMLDivElement>(null);
     const labelsRef = useRef<HTMLDivElement>(null);
@@ -101,7 +102,6 @@ const ProjectsOverlay = forwardRef<HTMLButtonElement, Props>(
         root: rootRef.current,
         axis: axisRef.current,
         branches: Array.from(svg.querySelectorAll<SVGPathElement>(".tl-branch")),
-        mirror: mirrorRef.current,
         nubs: nubsRef.current
           ? Array.from(nubsRef.current.querySelectorAll<HTMLElement>(".tl-nub"))
           : [],
@@ -188,10 +188,9 @@ const ProjectsOverlay = forwardRef<HTMLButtonElement, Props>(
           </svg>
         </button>
 
-        {/* the plot layer — the minimal baseline, a faint MIRROR clone of the branch group
-            (reflected about the baseline → the sinus continues below, req 6), then one straight
-            vertical branch per project, welded each frame by the loop. All mono off-white, like
-            the globe filaments (req 2). pointer-events off so the canvas stays a drag surface. */}
+        {/* the plot layer — the minimal baseline, then one straight vertical branch per project,
+            welded each frame by the loop. All hairline mono off-white, like the globe filaments
+            (req 2/4). pointer-events off so the canvas stays a drag surface. */}
         <svg className="projects-tl-svg" ref={svgRef} aria-hidden="true">
           <defs>
             {/* the line fades to nothing at both ends so the baseline bleeds into the dark
@@ -215,29 +214,24 @@ const ProjectsOverlay = forwardRef<HTMLButtonElement, Props>(
           </defs>
           {/* the minimal baseline (the fixed horizon) */}
           <line className="tl-axis" ref={axisRef} x1="0" y1="0" x2="0" y2="0" />
-          {/* the mirror reflection — a live clone of the branch group flipped about the baseline
-              (the loop sets its transform each frame); faint, so it reads as a reflection. */}
-          <use className="tl-mirror" ref={mirrorRef} href="#tl-branches" />
           {/* one straight vertical branch per project */}
-          <g id="tl-branches">
+          <g>
             {PROJECTS.map((p) => (
               <path className="tl-branch" key={`branch-${p.id}`} d="" />
             ))}
           </g>
         </svg>
 
-        {/* the foot nubs — a glowing dot at each line's root on the baseline. The layer is an
-            isolated stacking context and each nub screen-blends, so when lines are close (a busy
-            year) their nubs overlap into a single bigger glow (req 3). Loop-positioned. */}
+        {/* the foot nubs — a small SQUARE node at each line's root on the baseline, the same as the
+            tip nubs (no glow, no screen-blend). Loop-positioned (req 4). */}
         <div className="tl-nubs" ref={nubsRef} aria-hidden="true">
           {PROJECTS.map((p) => (
             <span className="tl-nub" key={`nub-${p.id}`} />
           ))}
         </div>
 
-        {/* the TIP nubs — a small dot at the far END of each branch (req 1), loop-positioned at the
-            line's live tip. Separate, fainter and un-merged (no screen-blend), so each line reads as
-            a hairline terminated by a tiny node rather than the merged baseline glow. */}
+        {/* the TIP nubs — an identical small square at the far END of each branch (req 4), loop-
+            positioned at the line's live tip, so each hairline is terminated by a tiny node. */}
         <div className="tl-tips" ref={tipsRef} aria-hidden="true">
           {PROJECTS.map((p) => (
             <span className="tl-tip" key={`tip-${p.id}`} />
@@ -255,10 +249,11 @@ const ProjectsOverlay = forwardRef<HTMLButtonElement, Props>(
         </div>
 
         {/* the label layer — each project is a positioned button (its own hit target). NAME ONLY:
-            the short label the rAF loop sets VERTICAL and aligned with its OWN line (req 1), running
-            just beyond the tip and reading away from the baseline — so the names no longer collide in
-            a shared column. The selected one brightens to the amber accent; a mouse hover lights the
-            line + name together (req 2). The full record (date, place) stays in the aria-label. */}
+            the short label the rAF loop lays out HORIZONTAL + LEFT-ALIGNED, in a per-cluster column to
+            the RIGHT of that cluster's lines, stacked at the line tip heights (req 2/3). The selected
+            one brightens to the amber accent; a mouse over EITHER the line or its name lights both
+            together (req 3), so the far-right name's line is discoverable. The full record (date,
+            place) stays in the aria-label. */}
         <div className="projects-tl-labels" ref={labelsRef}>
           {PROJECTS.map((p, i) => (
             <button
@@ -270,6 +265,9 @@ const ProjectsOverlay = forwardRef<HTMLButtonElement, Props>(
               tabIndex={-1}
               aria-label={`Project ${i + 1} of ${TOTAL}: ${p.title}, ${formatMonthYearLong(p.date)}, ${p.place}`}
               onClick={() => onSelect(i)}
+              // mouse-only: lighting the line follows the cursor over the name (touch uses selection)
+              onPointerEnter={(e) => e.pointerType === "mouse" && onHover(i)}
+              onPointerLeave={(e) => e.pointerType === "mouse" && onHover(-1)}
             >
               <span className="tl-label-name">{p.short}</span>
             </button>
