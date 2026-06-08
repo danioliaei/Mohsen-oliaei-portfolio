@@ -42,6 +42,8 @@ export type ProjectsDialDom = {
   mirror: SVGUseElement | null;
   /** the glowing foot nub per project, in PROJECTS order (req 3) */
   nubs: HTMLElement[];
+  /** a small nub at each line's TIP (the far end of the branch), in PROJECTS order */
+  tips: HTMLElement[];
   /** the name label per project (a button / hit target) */
   labels: HTMLElement[];
   /** the year ruler ticks (loop-positioned so they track the mobile zoom + pan) */
@@ -81,6 +83,7 @@ const ProjectsOverlay = forwardRef<HTMLButtonElement, Props>(
     const axisRef = useRef<SVGLineElement>(null);
     const mirrorRef = useRef<SVGUseElement>(null);
     const nubsRef = useRef<HTMLDivElement>(null);
+    const tipsRef = useRef<HTMLDivElement>(null);
     const labelsRef = useRef<HTMLDivElement>(null);
     const yearsRef = useRef<HTMLDivElement>(null);
     const listRef = useRef<HTMLDivElement>(null);
@@ -101,6 +104,9 @@ const ProjectsOverlay = forwardRef<HTMLButtonElement, Props>(
         mirror: mirrorRef.current,
         nubs: nubsRef.current
           ? Array.from(nubsRef.current.querySelectorAll<HTMLElement>(".tl-nub"))
+          : [],
+        tips: tipsRef.current
+          ? Array.from(tipsRef.current.querySelectorAll<HTMLElement>(".tl-tip"))
           : [],
         labels: Array.from(labelsWrap.querySelectorAll<HTMLElement>(".tl-label")),
         years: yearsRef.current
@@ -202,8 +208,8 @@ const ProjectsOverlay = forwardRef<HTMLButtonElement, Props>(
               y2="0"
             >
               <stop offset="0" stopColor="var(--c-line)" stopOpacity="0" />
-              <stop offset="0.08" stopColor="var(--c-line)" stopOpacity="1" />
-              <stop offset="0.92" stopColor="var(--c-line)" stopOpacity="1" />
+              <stop offset="0.18" stopColor="var(--c-line)" stopOpacity="1" />
+              <stop offset="0.82" stopColor="var(--c-line)" stopOpacity="1" />
               <stop offset="1" stopColor="var(--c-line)" stopOpacity="0" />
             </linearGradient>
           </defs>
@@ -229,6 +235,15 @@ const ProjectsOverlay = forwardRef<HTMLButtonElement, Props>(
           ))}
         </div>
 
+        {/* the TIP nubs — a small dot at the far END of each branch (req 1), loop-positioned at the
+            line's live tip. Separate, fainter and un-merged (no screen-blend), so each line reads as
+            a hairline terminated by a tiny node rather than the merged baseline glow. */}
+        <div className="tl-tips" ref={tipsRef} aria-hidden="true">
+          {PROJECTS.map((p) => (
+            <span className="tl-tip" key={`tip-${p.id}`} />
+          ))}
+        </div>
+
         {/* the year ruler — a faint date legend, positioned by the loop each frame (so it tracks
             the mobile zoom + pan), sitting just below the baseline. */}
         <div className="tl-years" ref={yearsRef} aria-hidden="true">
@@ -240,9 +255,10 @@ const ProjectsOverlay = forwardRef<HTMLButtonElement, Props>(
         </div>
 
         {/* the label layer — each project is a positioned button (its own hit target). NAME ONLY:
-            the short label the rAF loop stacks in a LEFT-ALIGNED column to the right of its year's
-            lines (req 4), so a year's names sit cleanly on top of each other; the selected one
-            brightens to the amber accent. The full record (date, place) stays in the aria-label. */}
+            the short label the rAF loop sets VERTICAL and aligned with its OWN line (req 1), running
+            just beyond the tip and reading away from the baseline — so the names no longer collide in
+            a shared column. The selected one brightens to the amber accent; a mouse hover lights the
+            line + name together (req 2). The full record (date, place) stays in the aria-label. */}
         <div className="projects-tl-labels" ref={labelsRef}>
           {PROJECTS.map((p, i) => (
             <button
