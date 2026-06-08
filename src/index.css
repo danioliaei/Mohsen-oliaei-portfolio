@@ -1713,45 +1713,46 @@ canvas#ridge:active {
 }
 
 /* ===========================================================================
-   Projects — "The Dial".
-   Not a frosted modal: a transparent layer welded over the LIVE globe. The globe
-   parks LEFT and calms (its chaotic filaments settle); ~20 organized project lines
-   fan out to the RIGHT from its rim, the selected project resting at 3 o'clock.
-   Dragging the globe (a rotary knob) scrolls projects through the selected slot.
-   The SVG spokes + labels are written imperatively from the rAF loop in
-   RidgelineStage (like the survey + letter cloud), so they stay welded to the
-   projected globe. Same Inter / --mono / tracked-caps grammar as the site headers.
+   Projects — "The Survey Line" (WiFi-SSID data-art reference).
+   Not a frosted modal: a transparent layer welded over the LIVE globe. As it opens
+   the globe FOLDS into a single horizontal line and disappears, leaving a MINIMAL
+   RED baseline low on the screen; from it the career rises as STRAIGHT vertical
+   hairlines, clustered tight by year, the latest project's line tallest so the
+   year's names stack. The SVG + labels are written imperatively from the rAF loop in
+   RidgelineStage (like the survey + letter cloud), in the site header's own type.
    pointer-events:none on the root so a drag on empty space falls through to the
-   canvas (the knob); only the controls catch clicks.
+   canvas (the scrub knob); only the controls catch clicks.
    =========================================================================== */
 .projects-tl-root {
   position: fixed;
   inset: 0;
   z-index: 30;
   color: var(--ink);
-  pointer-events: none; /* the empty field stays a drag surface for the moon-scrub */
+  font-family: var(--nav); /* match the site header type (req 1) */
+  pointer-events: none; /* the empty field stays a drag surface for the scrub */
   --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Fira Code", Menlo, Consolas, monospace;
-  /* the glowing line's colour — a warm white; amber (--c-education) stays the sparing accent */
-  --c-line: #f7f0e2;
+  /* the baseline colour — red, like the reference (req 5); amber (--c-education) stays the accent */
+  --c-line: #e0222e;
+  /* the live baseline height in px (the rAF loop welds it to the folded globe); the year ruler
+     hangs just below it. Fallback ≈ TL_BASE_Y for the first frame before the loop writes it. */
+  --tl-base: 60vh;
 }
 .projects-tl-root .role-close {
   pointer-events: auto; /* the root is click-through; the close control is not */
 }
 
 /* the focus scrim — a whisper top/bottom wash so the masthead + year ruler stay legible, plus a
-   warm SPOTLIGHT pool the rAF loop slides under the transiting moon (vars --fx/--fy, in %): the
-   DOM companion to the GPU depth-of-field, selling "the moon is in focus" as it rides the line. */
+   soft centre vignette pooling the edges to black. (No moon to track now; the loop holds the
+   --fx/--fy spotlight static at centre.) */
 .projects-tl-frost {
   position: absolute;
   inset: 0;
   z-index: 0;
   pointer-events: none;
-  /* default focal point sits where the moon rests on the line (TL_BASE_Y − TL_MOON_LIFT ≈ 0.51)
-     so the spotlight doesn't jump on the first open frame before the loop writes --fx/--fy. */
   --fx: 50%;
-  --fy: 51%;
+  --fy: 50%;
   background:
-    radial-gradient(44% 44% at var(--fx) var(--fy), rgba(255, 196, 92, 0.08) 0%, rgba(255, 196, 92, 0) 70%),
+    radial-gradient(44% 44% at var(--fx) var(--fy), rgba(255, 196, 92, 0.05) 0%, rgba(255, 196, 92, 0) 70%),
     radial-gradient(150% 130% at var(--fx) var(--fy), rgba(6, 7, 10, 0) 34%, rgba(6, 7, 10, 0.5) 100%),
     linear-gradient(
       180deg,
@@ -1781,31 +1782,22 @@ canvas#ridge:active {
   gap: clamp(8px, 1.4vh, 16px);
   pointer-events: none;
 }
+/* the eyebrow is now the ONLY heading (the big "Projects" title is gone — req 4); a quiet
+   tracked-caps label in the header type. */
 .projects-tl-eyebrow {
   margin: 0;
-  font-size: 11px;
-  font-weight: 500;
-  letter-spacing: 0.22em;
+  font-size: 12px;
+  font-weight: 400;
+  letter-spacing: 0.2em;
   text-transform: uppercase;
-  color: rgba(244, 241, 234, 0.62);
+  color: rgba(244, 241, 234, 0.66);
   text-shadow: 0 1px 16px rgba(0, 0, 0, 0.5);
-}
-.projects-tl-title {
-  margin: 0;
-  font-size: clamp(38px, 6.2vw, 80px);
-  font-weight: 600;
-  line-height: 1;
-  letter-spacing: -0.025em;
-  color: var(--ink);
-  text-shadow:
-    0 2px 28px rgba(0, 0, 0, 0.55),
-    0 1px 2px rgba(0, 0, 0, 0.5);
 }
 .projects-tl-coords {
   margin: 2px 0 0;
-  font-family: var(--mono);
-  font-size: 11px;
-  letter-spacing: 0.16em;
+  font-size: 12px;
+  font-weight: 400;
+  letter-spacing: 0.04em;
   color: rgba(244, 241, 234, 0.5);
   text-shadow: 0 1px 16px rgba(0, 0, 0, 0.5);
   white-space: nowrap;
@@ -1828,76 +1820,36 @@ canvas#ridge:active {
   overflow: visible;
   pointer-events: none;
 }
-/* the glowing LINE — the crisp warm core, faded at both ends by the gradient stroke, with a
-   soft warm halo. NO transitions on any of these (geometry is rewritten every frame). */
+/* the BASELINE — minimal + red, NOT glowing (req 3, req 5). Thin, faded at both ends by the
+   gradient stroke. NO filter / NO transitions (geometry is rewritten every frame). */
 .tl-axis {
   fill: none;
   stroke: url(#tl-axis-fade);
-  stroke-width: 1.7;
-  stroke-linecap: round;
-  filter: drop-shadow(0 0 5px rgba(255, 224, 178, 0.55));
+  stroke-width: 1.2;
+  stroke-linecap: butt;
 }
-/* the wide blurred bloom beneath the crisp core — the body of the glow */
-.tl-axis-glow {
-  fill: none;
-  stroke: url(#tl-axis-fade);
-  stroke-width: 7;
-  stroke-linecap: round;
-  filter: blur(5px);
-}
-/* the organic branches straying out of the line. Faint by default; flagship (major) work reads a
-   touch brighter + heavier, the selected one is the solid amber you-are-here accent with a glow. */
+/* the straight vertical branches rising (and the valley studies dropping) out of the baseline.
+   Faint hairlines by default; flagship (major) work reads a touch brighter + heavier, the selected
+   one is the solid amber you-are-here accent. No glow — the reference is just clean lines. */
 .tl-branch {
   fill: none;
-  stroke: rgba(244, 241, 234, 0.24);
+  stroke: rgba(244, 241, 234, 0.28);
   stroke-width: 1;
-  stroke-linecap: round;
+  stroke-linecap: butt;
 }
 .tl-branch.is-major {
-  stroke: rgba(244, 241, 234, 0.42);
+  stroke: rgba(244, 241, 234, 0.5);
   stroke-width: 1.1;
 }
 .tl-branch.is-selected {
   stroke: var(--c-education);
-  stroke-width: 1.7;
-  filter: drop-shadow(0 0 5px rgba(255, 196, 92, 0.5));
-}
-/* the BOLD origin node where a branch leaves the line (req: bolder points). Minor nodes read bold
-   via size + brightness alone (NO filter — there are ~54 of them, repainting every frame); the
-   glow is reserved for flagship work + the selected one (~26 elements). CSS owns the radius. */
-.tl-origin {
-  fill: rgba(248, 243, 232, 0.82);
-  r: 2.1;
-}
-.tl-origin.is-major {
-  fill: #fff7ec;
-  r: 3;
-  filter: drop-shadow(0 0 6px rgba(255, 224, 178, 0.7));
-}
-.tl-origin.is-selected {
-  fill: var(--c-education);
-  r: 3.6;
-  filter: drop-shadow(0 0 10px rgba(255, 196, 92, 0.85));
-}
-/* the faint node at the branch tip */
-.tl-tip {
-  fill: rgba(244, 241, 234, 0.4);
-  r: 1.5;
-}
-.tl-tip.is-selected {
-  fill: var(--c-education);
-  r: 2.2;
-  filter: drop-shadow(0 0 6px rgba(255, 196, 92, 0.6));
-}
-/* the light pulses travelling along the line */
-.tl-pulse {
-  fill: #fff4e2;
-  r: 2.2;
-  filter: drop-shadow(0 0 6px rgba(255, 214, 150, 0.9));
+  stroke-width: 1.6;
+  filter: drop-shadow(0 0 4px rgba(255, 196, 92, 0.45));
 }
 
-/* the year ruler — a faint date legend along the foot, placed by the same fractional x-map as
-   the branch roots (kept clear of the line + branches above it) */
+/* the year ruler — a faint date legend sitting just BELOW the baseline (req 2: close to the line),
+   placed by the same fractional x-map as the branch clusters. --tl-base is the live baseline the
+   rAF loop writes each frame, so the ruler tracks the welded line. */
 .tl-years {
   position: absolute;
   inset: 0;
@@ -1906,12 +1858,12 @@ canvas#ridge:active {
 }
 .tl-year {
   position: absolute;
-  top: 92%;
+  top: calc(var(--tl-base, 60vh) + 12px);
   transform: translateX(-50%);
-  font-family: var(--mono);
-  font-size: 10px;
-  letter-spacing: 0.14em;
-  color: rgba(244, 241, 234, 0.32);
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.06em;
+  color: rgba(244, 241, 234, 0.34);
   text-shadow: 0 1px 10px rgba(0, 0, 0, 0.6);
 }
 
@@ -1945,26 +1897,26 @@ canvas#ridge:active {
   outline-offset: 3px;
   border-radius: 3px;
 }
+/* a project NAME in the site-header type (req 1) — mixed-case, light, tight; small so a year's
+   names stack cleanly on top of each other (one row per TL_STACK px). font-family is set explicitly
+   because the parent .tl-label is a <button>, which does NOT inherit the root's --nav by default. */
 .tl-label-name {
-  font-family: var(--mono);
-  font-size: 9.5px;
-  font-weight: 500;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: rgba(244, 241, 234, 0.5);
+  font-family: var(--nav);
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1;
+  letter-spacing: -0.005em;
+  color: rgba(244, 241, 234, 0.56);
   text-shadow:
     0 0 8px rgba(0, 0, 0, 0.85),
     0 1px 2px rgba(0, 0, 0, 0.6);
 }
-/* major projects read a touch heavier / brighter — they carry more weight in the trace */
+/* major projects read a touch brighter — they carry more weight in the trace */
 .tl-label.is-major .tl-label-name {
-  font-weight: 600;
-  color: rgba(244, 241, 234, 0.8);
+  color: rgba(244, 241, 234, 0.86);
 }
 /* the selected name is the sparing amber accent */
 .tl-label.is-selected .tl-label-name {
-  font-size: 12px;
-  letter-spacing: 0.16em;
   color: var(--c-education);
   text-shadow:
     0 0 12px rgba(255, 196, 92, 0.5),
@@ -2013,9 +1965,6 @@ canvas#ridge:active {
     top: clamp(70px, 10vh, 96px);
     left: 16px;
     right: 16px;
-  }
-  .projects-tl-title {
-    font-size: clamp(30px, 8.5vw, 46px);
   }
   .dial-list {
     position: absolute;
@@ -2081,14 +2030,9 @@ canvas#ridge:active {
     animation: none;
     opacity: 1;
   }
-  /* the geometry layers are loop-written (no CSS transitions to suppress); the loop itself
-     stills the organic branch float, the moon bob and the line pulses under reduced motion. */
+  /* the geometry layers are loop-written (no CSS transitions to suppress). */
   .tl-axis,
-  .tl-axis-glow,
-  .tl-branch,
-  .tl-origin,
-  .tl-tip,
-  .tl-pulse {
+  .tl-branch {
     transition: none;
   }
 }

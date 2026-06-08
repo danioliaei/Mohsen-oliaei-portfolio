@@ -574,17 +574,9 @@ struct FOut {
   let cs = cos(spinAng); let sn = sin(spinAng);
   var sd = vec3<f32>(d.x * cs + d.z * sn, d.y, -d.x * sn + d.z * cs);
 
-  // PROJECTS SETTLE: as the timeline opens the globe calms to a MOON — a stable ~40% of lines
-  // GENTLY organize toward their radial direction (a faint structuring of the chaos), but do NOT
-  // sprout spokes: the reach below is near-zero so the silhouette stays a clean round ball (the
-  // career now plots as the DOM ridgeline, not GPU rays). 'dial' gates it ⇒ identity on the mountain.
-  // dR is the un-flowed radial ray out of the centre; co-rotate it by the same spin so the organized
-  // lines ride the (now slow) ball. straightSel is reused below for the settle glow.
-  let straightSel = step(0.60, fract(sseed * 13.0));
-  let straightW   = smoothstep(0.0, 1.0, dial) * straightSel * 0.5;
-  let dR  = normalize(mdir);
-  let sdR = vec3<f32>(dR.x * cs + dR.z * sn, dR.y, -dR.x * sn + dR.z * cs);
-  sd = normalize(mix(sd, sdR, straightW));
+  // (The old "settle to a MOON" organization is gone: the globe no longer parks as a moon riding the
+  // line — it FOLDS into the baseline and disappears (see PROJECTS FOLD below). The gimbal-ring /
+  // halo precession that follows stays, as part of the home ball at dial = 0.)
 
   // GIMBAL RINGS precess on their own axis, and the nucleus HALO sweeps slowly about Y — both keyed
   // off the sub-class flags, so they are identity (zero angle) for every other vertex. Frozen on
@@ -596,17 +588,21 @@ struct FOut {
   let hc = cos(ho); let hs = sin(ho);
   sd = vec3<f32>(sd.x * hc + sd.z * hs, sd.y, -sd.x * hs + sd.z * hc);
 
-  // a WHISPER of tip reach / inner pull keeps the organized lines from looking dead-flat, but stays
-  // tiny so the moon's silhouette stays round (the old 0.55 reach sprouted the radial dial spokes —
-  // gone now that the career plots as the DOM ridgeline). Gate by (1 - drainPre) so this stretch and
-  // the morph-collapse below never fight. at.x is t along the thread (0 inner → 1 tip). Clamp the radial
-  // scale to a small positive so a deep inner end never crosses the centre (NaN-safe direction).
-  let drainPre = clamp(smoothstep(0.06, 0.34, morph) * (1.4 - depth01 * 0.8), 0.0, 1.0);
-  let reach = mix(0.0, 0.05, dial) * straightSel * (1.0 - drainPre);
-  let pull  = mix(0.0, 0.04, dial) * straightSel * (1.0 - at.x) * (1.0 - drainPre);
-  let rDial = max(pumpR + reach * at.x - pull, 0.01); // floor below the min pumpR (~0.0198) so it is a
-  // no-op at dial=0 (home globe stays byte-identical), yet still keeps rDial positive once pull applies
+  // the home-globe radius is just the breathing pump now (the dial reach/pull moon stretch is gone).
+  // Floor at a small positive so a deep inner end never crosses the centre (NaN-safe direction).
+  let rDial = max(pumpR, 0.01);
   var world = F_GLOBE_C + F_GLOBE_R * rDial * sd;
+
+  // PROJECTS FOLD (req 1): as the dial opens, every thread COLLAPSES onto a single horizontal line
+  // through the globe centre — world y,z pinned to the centre, x spread by the thread's MATERIAL x
+  // (pre-spin) so the streak is stable regardless of the ball's rotation. The screen Y is additionally
+  // pinned to the projected centre in clip space below, so the line is EXACTLY horizontal at the
+  // baseline the DOM welds to, for any yaw. The folded streak then fades (dialFade) → the globe folds
+  // into one glowing line and DISAPPEARS, handing off to the DOM red baseline. 'fold' gates it ⇒
+  // identity on the home globe (dial = 0) and the mountain (dial inert at morph ≥ 0.20).
+  let fold  = smoothstep(0.0, 0.72, dial);
+  let lineX = F_GLOBE_C.x + F_GLOBE_R * 1.25 * mdir.x;
+  world = mix(world, vec3<f32>(lineX, F_GLOBE_C.y, F_GLOBE_C.z), fold);
 
   // ===== MORPH — the globe is not crossfaded out; it FUNNELS down the summit axis and is consumed
   // as the mountain rises through the converging streams. The axis x=0, z=8200 is BOTH the globe
@@ -703,17 +699,22 @@ struct FOut {
   let fr = (at.w - clamp(morph * 2.4, 0.0, 1.4)) * 7.0;
   glow = glow * (1.0 + 0.9 * exp(-fr * fr));           // was 1.6 → calms the over-bright core at home (this term peaks at the centre when morph=0)
 
-  // PROJECTS-DIAL FORMATION (req 6): as the dial opens the straightening armature IGNITES inner→outer
-  // (a bead of light travels each ray) while the non-straightened silk RECEDES — the chaos resolves
-  // into the organized rays. 'dial' gates it ⇒ identity on the mountain; (x*x) not pow (NaN-safe).
-  let fw = (at.x - fract(tt * 0.5)) * 5.0;
-  let formWave = exp(-fw * fw);
-  glow = glow * mix(1.0, 0.45, dial * (1.0 - straightSel));
-  glow = glow + straightSel * dial * (0.4 + 1.3 * formWave) * motion;
+  // PROJECTS FOLD GLOW (req 1): as the threads collapse onto the baseline the converged line should
+  // read as a HOT glowing streak. The additive overlap already brightens it where the threads stack;
+  // lift it a touch further as the fold runs. 'fold' gates it ⇒ identity off the dial.
+  glow = glow * mix(1.0, 1.5, fold);
 
   var o : FOut;
-  o.pos  = F.vp * vec4<f32>(world, 1.0);
-  o.glow = glow * globeFade;
+  // pin the folded verts to the projected globe-centre's NDC-y → an EXACTLY horizontal screen line at
+  // the baseline the DOM welds to, for any yaw. At fold = 0 this is byte-identical (clip unchanged).
+  let clip  = F.vp * vec4<f32>(world, 1.0);
+  let cClip = F.vp * vec4<f32>(F_GLOBE_C, 1.0);
+  let pinnedY = (cClip.y / cClip.w) * clip.w;
+  o.pos = vec4<f32>(clip.x, mix(clip.y, pinnedY, fold), clip.z, clip.w);
+  // the folded glowing line dissolves as the fold completes → the globe disappears. dialFade = 1 at
+  // dial = 0 (home globe byte-identical) and 0 by dial = 1.
+  let dialFade = 1.0 - smoothstep(0.80, 1.0, dial);
+  o.glow = glow * globeFade * dialFade;
   return o;
 }
 

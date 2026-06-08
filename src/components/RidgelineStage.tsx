@@ -90,70 +90,83 @@ const BEACON_TAU = 0.3; // s — how the beacon eases in / out (overlay open, of
 const DIAL_N = PROJECTS.length; // the project count (>= 1; DIAL_SLOT divides by it)
 const DIAL_SLOT = TWO_PI / DIAL_N; // scrub step — `dialAngle` is reused as the (eased) scrub knob
 const DIAL_MAX_ANGLE = (DIAL_N - 1) * DIAL_SLOT; // LINEAR clamp — a timeline doesn't wrap like the old dial
-// a deterministic 0..1 jitter per stem (FNV-1a over the id) so the dense trace's heights/labels read
-// hand-plotted rather than mechanical — stable across frames, no Math.random in the loop.
-const DIAL_JIT = PROJECTS.map((p) => {
-  let h = 2166136261;
-  for (let j = 0; j < p.id.length; j++) {
-    h ^= p.id.charCodeAt(j);
-    h = Math.imul(h, 16777619);
-  }
-  return ((h >>> 0) % 1000) / 1000;
-});
-// per-project plot inputs, precomputed once: xFrac (0..1 along the date axis) + the authored tip
-// elevation (−0.4..1.0). The envelope traces two massifs + a central valley (see projects.ts).
+// per-project plot inputs, precomputed once: xFrac (0..1 along the date axis). The authored
+// elevation (−0.4..1.0) drives the per-year peak height below; its envelope traces two massifs +
+// a central valley (see projects.ts), so the year peaks read as a sinus skyline.
 const TL_XFRAC = PROJECTS.map(
   (p) => (decimalYear(p.date) - TIME_MIN) / (TIME_MAX - TIME_MIN),
 );
 
 const TL_PAD = TL_PAD_FRAC; // left/right padding as a fraction of width (matches the year ruler)
-const TL_BASE_Y = 0.57; // the glowing LINE's height (fraction of H) — roughly centred, so branches splay both ways
-// branch length (fraction of H): a floor, + a bit per |elevation|, + a big bonus for flagship
-// (major) work so the important projects reach FURTHER (req), + organic jitter.
-const TL_BRANCH_BASE = 0.07;
-const TL_BRANCH_ELEV = 0.06;
-const TL_BRANCH_MAJOR = 0.12;
-const TL_BRANCH_JIT = 0.045;
-const TL_BRANCH_UP_MULT = 0.85; // up-branches kept a touch shorter so they clear the masthead
-const TL_DRAW_SPAN = 0.4; // projAmt span between the leftmost branch straying out and the rightmost (left→right plot-on)
-const TL_DRAW_RISE = 0.42; // how long each individual branch takes to grow out (in projAmt)
-const TL_FLOAT_AMP = 0.06; // base organic-float sway amplitude (radians about the rooted base)
-const TL_FLOAT_SPD = 0.5; // base organic-float sway speed (rad/s)
+const TL_BASE_Y = 0.6; // FALLBACK baseline height (fraction of H); the loop WELDS it to where the
+// folding globe collapses (the projected globe centre), so the red line lands on the glowing line.
 
-// the MOON — the calmed, shrunk globe that rides the line ------------------------
-const TL_SHRINK = 4.0; // globe camera-radius mult at full transit (bigger = further = a smaller moon)
-const TL_MOON_LIFT = 0.06; // the moon floats this fraction of H ABOVE the line (a sun over the horizon)
-const TL_MOON_BOB = 0.008; // gentle vertical bob amplitude (fraction of H) as it rides the line
-const TL_MOON_MARGIN_X = 0.13; // keep the moon's centre this far (× W) from the screen sides so it never clips off
-const TL_MOON_MIN_Y = 0.18; // never let the moon ride above this (× H) — clear of the header / close control
-const TL_ENTRY_LEFT_POS = 0.0; // the continuous scrub position the moon sweeps IN from on open (0 = the first project, 2014)
+// ---- straight-line plot geometry (px unless noted). The WiFi-survey look: tight per-year
+// clusters of vertical hairlines; within a year the LATEST project's line is tallest and the
+// earlier ones step DOWN by one label-row, so the year's NAMES stack cleanly on top of each
+// other. Each year-peak traces the elevation envelope → a sinus skyline; the below-axis studies
+// hang DOWN as their own stacks. ----------------------------------------------------------------
+const TL_GAP = 7; // px between adjacent lines inside a year cluster (very close — req 2)
+const TL_STACK = 15; // px a line steps down per earlier project == one stacked label row
+const TL_FLOOR = 18; // px shortest line in a cluster (keeps even the earliest readable)
+const TL_PEAK_MIN = 0.05; // a year-peak's floor (fraction of H)
+const TL_PEAK_RANGE = 0.3; // …+ this × the group's max |elevation| → the sinus envelope height
+const TL_MAJOR_BONUS = 0.045; // a flagship-bearing year reaches a touch further (fraction of H)
+const TL_TOP_MARGIN = 0.16; // up-lines never rise above this (× H) — clear of the masthead
+const TL_BOT_MARGIN = 0.08; // down-lines never drop past (1 − this) × H — clear of the year ruler
+const TL_DRAW_SPAN = 0.45; // draw clock span between the leftmost cluster rising and the rightmost
+const TL_DRAW_RISE = 0.5; // how long each individual line takes to grow out (in the draw clock)
+const TL_LABEL_OFF = 9; // px the name sits beyond its line's tip
 
-// per-branch organic params — deterministic (the id-hash jitter + the curated flags), so the
-// spray reads hand-grown yet is stable across frames + remounts (no Math.random in the hot loop).
-const TL_BRANCH = PROJECTS.map((p, i) => {
-  const j = DIAL_JIT[i]; // stable 0..1 hash
-  const j2 = DIAL_JIT[(i * 7 + 3) % DIAL_N]; // a decorrelated second draw
-  // below-axis studies hang DOWN; everything else splits ~50/50 by hash for a balanced spray
-  const down = p.elevation < 0 ? true : j2 < 0.5;
-  let lenFrac =
-    TL_BRANCH_BASE +
-    TL_BRANCH_ELEV * Math.abs(p.elevation) +
-    (p.major ? TL_BRANCH_MAJOR : 0) +
-    TL_BRANCH_JIT * j;
-  if (!down) lenFrac *= TL_BRANCH_UP_MULT;
-  // lean: fan OUTWARD from centre (left half leans left, right half leans right) + jitter
-  const lean = (TL_XFRAC[i] - 0.5) * 0.8 + (j - 0.5) * 0.85;
-  const angle = Math.max(-1.05, Math.min(1.05, lean)); // rad off vertical
-  return {
-    down,
-    lenFrac,
-    angle,
-    bow: (j2 - 0.5) * 1.3, // signed curl of the bezier bow
-    phase: j * TWO_PI, // float phase
-    floatAmp: TL_FLOAT_AMP * (0.6 + 0.8 * j2),
-    floatSpd: TL_FLOAT_SPD * (0.7 + 0.6 * j),
-  };
-});
+// per-project plot inputs, precomputed once (W/H-independent fractions + integer px slots). For
+// each project: the year-cluster centre (mean date xFrac), the line's slot offset within the
+// cluster, up/down direction (below-axis studies go DOWN) and — within its (year, direction)
+// sub-group ordered by date — its stack rank, the group size, whether the group carries flagship
+// work, and the group's max |elevation| (the envelope driver).
+type TlPlot = {
+  clusterXFrac: number;
+  xSlot: number;
+  down: boolean;
+  stackRank: number;
+  groupCount: number;
+  groupMajor: boolean;
+  groupMaxAbs: number;
+};
+const TL_PLOT: TlPlot[] = (() => {
+  const out: TlPlot[] = new Array(PROJECTS.length);
+  // PROJECTS is pre-sorted oldest→newest, so each year's index list (and each sub-group) is in
+  // date order — the last entry in a (year, direction) group is that year's latest.
+  const byYear = new Map<number, number[]>();
+  PROJECTS.forEach((p, i) => {
+    const y = Number(p.date.slice(0, 4));
+    const arr = byYear.get(y);
+    if (arr) arr.push(i);
+    else byYear.set(y, [i]);
+  });
+  for (const idxs of byYear.values()) {
+    const n = idxs.length;
+    const clusterXFrac = idxs.reduce((s, i) => s + TL_XFRAC[i], 0) / n;
+    const sub: Record<"up" | "down", number[]> = { up: [], down: [] };
+    for (const i of idxs) sub[PROJECTS[i].elevation < 0 ? "down" : "up"].push(i);
+    for (const dir of ["up", "down"] as const) {
+      const g = sub[dir];
+      const groupMaxAbs = g.reduce((m, i) => Math.max(m, Math.abs(PROJECTS[i].elevation)), 0.18);
+      const groupMajor = g.some((i) => PROJECTS[i].major);
+      g.forEach((i, rank) => {
+        out[i] = {
+          clusterXFrac,
+          xSlot: idxs.indexOf(i) - (n - 1) / 2,
+          down: dir === "down",
+          stackRank: rank,
+          groupCount: g.length,
+          groupMajor,
+          groupMaxAbs,
+        };
+      });
+    }
+  }
+  return out;
+})();
 const DIAL_SENS = 1.7; // rad of scrub per canvas-height of horizontal drag
 const DIAL_SMOOTH_TAU = 0.16; // s — ease displayed scrub → target (a weighty glide)
 const DIAL_INERTIA_TAU = 0.6; // s — release-flick decay
@@ -1361,30 +1374,32 @@ export default function RidgelineStage() {
         }
       };
 
-      // ---- Projects FILAMENT welder: lay the career out in pure screen space — a horizontal
-      // glowing LINE with travelling pulses, and one organic curving BRANCH per project rooted on
-      // the line at its date (x), splaying up/down with the flagship work reaching FURTHER, the
-      // BOLD origin node where it leaves the line, a name floating at its tip. The line wipes in,
-      // then the branches stray out left→right as the view opens (pDraw), then the labels resolve
-      // (pLabel); the selected branch lights amber. Each branch gently FLOATS (a small sway about
-      // its rooted base, so the base stays welded to the line). The moon (the GPU globe) rides the
-      // line over the selected branch separately in the frame loop. Imperative DOM writes only —
-      // nothing re-renders React, so scrubbing stays buttery. Desktop-only; narrow uses the list.
+      // ---- Projects SURVEY-LINE welder: lay the career out in pure screen space — a minimal red
+      // baseline and one STRAIGHT vertical line per project, clustered tight by year. Within a year
+      // the latest project's line is tallest and the earlier ones step DOWN by one label-row so the
+      // names stack; year peaks trace the elevation envelope (a sinus skyline) and the below-axis
+      // studies hang DOWN. The line wipes in as the folded globe lands, the branches rise left→right
+      // (pDraw), then the names resolve (pLabel); the selected line + name light amber. `baseY` is
+      // welded by the frame loop to the projected globe centre, so the plot lands exactly where the
+      // globe folds. Imperative DOM writes only — nothing re-renders React. Desktop-only; narrow uses
+      // the list.
       const updateTimeline = (
         W: number,
         H: number,
-        t: number,
         amt: number,
         sel: number,
         pDraw: number,
         pLabel: number,
+        baseY: number,
       ) => {
         const dom = dialDomRef.current;
         if (!dom) return;
         const mobile = dialMobile();
         // masthead readout + mobile-list selection track every frame (cheap text/class writes)
         if (dom.plate) dom.plate.textContent = `PLATE ${String(sel + 1).padStart(2, "0")} / ${DIAL_N}`;
-        if (dom.live) dom.live.textContent = PROJECTS[sel].title.toUpperCase();
+        if (dom.live) dom.live.textContent = PROJECTS[sel].title;
+        // share the live baseline with CSS (the year ruler sits just below it via --tl-base)
+        if (dom.root) dom.root.style.setProperty("--tl-base", `${baseY.toFixed(1)}px`);
         // mobile list: selection class + roving tabindex (only the selected row is tabbable, so the
         // ~80-row list isn't a tab trap — mirrors the desktop label roving tabindex below).
         if (dom.listItems.length === DIAL_N)
@@ -1394,115 +1409,77 @@ export default function RidgelineStage() {
             it.tabIndex = i === sel ? 0 : -1;
           }
 
-        const { branches, origins, tips, labels, axis, axisGlow } = dom;
+        const { branches, labels, axis } = dom;
         if (branches.length === DIAL_N && !mobile) {
           const padPx = TL_PAD * W;
           const plotW = W - 2 * padPx;
-          const baseY = TL_BASE_Y * H;
-
-          // the glowing line wipes in left→right with the open — the crisp core + the soft bloom
-          // share the geometry. The fade gradient is userSpaceOnUse, so its x-vector is pinned to
-          // the live canvas width (the 10%/90% stops then track the viewport regardless of the wipe).
-          const pAxis = smooth(0.04, 0.5, amt);
-          const axisX2 = (W * pAxis).toFixed(1);
           const baseYs = baseY.toFixed(1);
+          // vertical room each direction (kept clear of the masthead / the year ruler)
+          const upRoom = baseY - TL_TOP_MARGIN * H;
+          const downRoom = (1 - TL_BOT_MARGIN) * H - baseY;
+
+          // the minimal red baseline wipes in left→right across the plotted span as the fold lands.
+          // The fade gradient is userSpaceOnUse, so its x-vector is pinned to the live canvas width.
+          const pAxis = smooth(0.3, 0.62, amt);
           if (axis) {
-            axis.setAttribute("x1", "0"); axis.setAttribute("y1", baseYs);
-            axis.setAttribute("x2", axisX2); axis.setAttribute("y2", baseYs);
-            axis.style.opacity = amt.toFixed(3);
-          }
-          if (axisGlow) {
-            axisGlow.setAttribute("x1", "0"); axisGlow.setAttribute("y1", baseYs);
-            axisGlow.setAttribute("x2", axisX2); axisGlow.setAttribute("y2", baseYs);
-            axisGlow.style.opacity = (amt * 0.8).toFixed(3);
+            axis.setAttribute("x1", padPx.toFixed(1));
+            axis.setAttribute("y1", baseYs);
+            axis.setAttribute("x2", (padPx + pAxis * plotW).toFixed(1));
+            axis.setAttribute("y2", baseYs);
+            axis.style.opacity = smooth(0.3, 0.66, amt).toFixed(3);
           }
           if (dom.axisGrad) dom.axisGrad.setAttribute("x2", W.toFixed(0));
 
-          // the travelling pulses — small glints sliding along the line, fading at the soft ends.
-          // reduced motion stills them (parked, evenly spread) rather than streaming.
-          const pulses = dom.pulses;
-          for (let k = 0; k < pulses.length; k++) {
-            const base = (k + 0.5) / pulses.length;
-            const fr = reduceMotion
-              ? base
-              : (((t * (0.05 + 0.018 * k) + k / pulses.length) % 1) + 1) % 1;
-            const edge = Math.min(fr, 1 - fr);
-            const pulse = pulses[k];
-            pulse.setAttribute("cx", (padPx + fr * plotW).toFixed(1));
-            pulse.setAttribute("cy", baseYs);
-            pulse.style.opacity = (amt * pAxis * smooth(0.0, 0.05, edge)).toFixed(3);
-          }
-
           for (let i = 0; i < DIAL_N; i++) {
-            const b = TL_BRANCH[i];
-            const branch = branches[i], origin = origins[i], tip = tips[i], label = labels[i];
+            const pl = TL_PLOT[i];
+            const branch = branches[i], label = labels[i];
             const isSel = i === sel;
             const major = PROJECTS[i].major;
-            const sx = padPx + TL_XFRAC[i] * plotW;
-            const len = b.lenFrac * H;
-            const dirY = b.down ? 1 : -1;
+            const clusterX = padPx + pl.clusterXFrac * plotW;
+            const lineX = clusterX + pl.xSlot * TL_GAP;
+            const dirY = pl.down ? 1 : -1;
 
-            // staggered plot-on: the leftmost branch strays out first, the rightmost trails
-            const delay = TL_XFRAC[i] * TL_DRAW_SPAN;
+            // the year-peak (group-level, identical for every member): the elevation envelope,
+            // floored so the whole stack fits and capped to the available room so nothing clips.
+            const room = pl.down ? downRoom : upRoom;
+            // the stack must FIT within `room` (clear of the masthead / the year ruler): if a year is
+            // too populous for the available height, COMPRESS the per-row step so the tallest line
+            // stays inside room rather than overflowing it into the masthead. In the common
+            // (tall-enough) case this is a no-op — fitStack === TL_STACK — so the spacing is unchanged.
+            // room is always > TL_FLOOR here (baseY clamped to [0.4H,0.6H] ⇒ room ≥ 0.24H), so fitStack > 0.
+            const fitStack =
+              pl.groupCount > 1
+                ? Math.min(TL_STACK, (room - TL_FLOOR) / (pl.groupCount - 1))
+                : TL_STACK;
+            const stackReq = (pl.groupCount - 1) * fitStack + TL_FLOOR; // ≤ room by construction
+            const envel =
+              (TL_PEAK_MIN + pl.groupMaxAbs * TL_PEAK_RANGE + (pl.groupMajor ? TL_MAJOR_BONUS : 0)) * H;
+            const peak = Math.min(Math.max(envel, stackReq), room);
+            // the latest in the group reaches `peak` (≤ room); each earlier one steps down one
+            // (fitted) row, so the shortest is ≥ TL_FLOOR and the names stay clear of the chrome.
+            const fullLen = peak - (pl.groupCount - 1 - pl.stackRank) * fitStack;
+
+            // staggered straight draw-on: the leftmost cluster rises first, the rightmost trails
+            const delay = pl.clusterXFrac * TL_DRAW_SPAN;
             const grow = smooth(delay, Math.min(1, delay + TL_DRAW_RISE), pDraw);
-
-            // the branch's main vector (tip relative to the rooted base), leaned off vertical
-            const mainX = Math.sin(b.angle) * len;
-            const mainY = dirY * Math.cos(b.angle) * len;
-            const ml = Math.hypot(mainX, mainY) || 1;
-            // perpendicular unit (main rotated +90°) → the bezier bow offset that bows the curve
-            const perpX = -mainY / ml, perpY = mainX / ml;
-            const bow = b.bow * len * 0.42;
-
-            // control points + tip relative to the base, scaled out by the draw-on `grow`
-            const c1x = (mainX * 0.30 + perpX * bow) * grow;
-            const c1y = (mainY * 0.30 + perpY * bow) * grow;
-            const c2x = (mainX * 0.66 + perpX * bow) * grow;
-            const c2y = (mainY * 0.66 + perpY * bow) * grow;
-            const tpx = mainX * grow, tpy = mainY * grow;
-
-            // organic float — sway the whole branch about its ROOTED base by a small angle, so the
-            // base stays welded to the line and only the limb drifts (no sway until it's grown in)
-            const th = reduceMotion ? 0 : b.floatAmp * Math.sin(t * b.floatSpd + b.phase) * grow;
-            const cs = Math.cos(th), sn = Math.sin(th);
-            const r1x = c1x * cs - c1y * sn, r1y = c1x * sn + c1y * cs;
-            const r2x = c2x * cs - c2y * sn, r2y = c2x * sn + c2y * cs;
-            const rtx = tpx * cs - tpy * sn, rty = tpx * sn + tpy * cs;
-            const atx = sx + rtx, aty = baseY + rty;
-
-            branch.setAttribute(
-              "d",
-              `M${sx.toFixed(1)},${baseYs} C${(sx + r1x).toFixed(1)},${(baseY + r1y).toFixed(1)} ` +
-                `${(sx + r2x).toFixed(1)},${(baseY + r2y).toFixed(1)} ${atx.toFixed(1)},${aty.toFixed(1)}`,
-            );
+            const tipY = baseY + dirY * fullLen * grow;
+            const lx = lineX.toFixed(1);
+            branch.setAttribute("d", `M${lx},${baseYs} L${lx},${tipY.toFixed(1)}`);
             branch.style.opacity = (amt * grow).toFixed(3);
 
-            // the BOLD origin node, rooted on the line (pops in just before its branch strays out)
-            origin.setAttribute("cx", sx.toFixed(1));
-            origin.setAttribute("cy", baseYs);
-            origin.style.opacity = (amt * smooth(delay, Math.min(1, delay + 0.18), pDraw)).toFixed(3);
-
-            // the faint tip node, riding the swaying branch head
-            tip.setAttribute("cx", atx.toFixed(1));
-            tip.setAttribute("cy", aty.toFixed(1));
-            tip.style.opacity = (amt * grow).toFixed(3);
-
-            // the name floats just BEYOND the tip, along the (swayed) branch direction, centred on
-            // that point; it resolves last (pLabel) with a tiny settle-out slide.
+            // the name stacks at the CLUSTER centre, just beyond its line's full tip (above for up,
+            // below for down), resolving last (pLabel) with a tiny settle-out slide. Every name in a
+            // (year, direction) group shares clusterX and steps by TL_STACK → a clean vertical column.
             const labelGrow = smooth(delay, Math.min(1, delay + 0.5), pLabel);
-            const umx = mainX / ml, umy = mainY / ml; // unit along the limb, pre-rotation
-            const ux = umx * cs - umy * sn, uy = umx * sn + umy * cs; // …rotated by the sway
-            const off = 13 + (1 - labelGrow) * 8;
+            const fullTipY = baseY + dirY * fullLen;
+            const labelY = fullTipY + dirY * (TL_LABEL_OFF + (1 - labelGrow) * 6);
             label.style.transform =
-              `translate(${(atx + ux * off).toFixed(1)}px, ${(aty + uy * off).toFixed(1)}px) translate(-50%, -50%)`;
+              `translate(${clusterX.toFixed(1)}px, ${labelY.toFixed(1)}px) translate(-50%, ${pl.down ? "0%" : "-100%"})`;
             label.style.opacity = (amt * labelGrow).toFixed(3);
             label.tabIndex = isSel ? 0 : -1;
 
             branch.classList.toggle("is-selected", isSel);
             branch.classList.toggle("is-major", major);
-            origin.classList.toggle("is-selected", isSel);
-            origin.classList.toggle("is-major", major);
-            tip.classList.toggle("is-selected", isSel);
             label.classList.toggle("is-selected", isSel);
             label.classList.toggle("is-major", major);
           }
@@ -1565,14 +1542,13 @@ export default function RidgelineStage() {
         const projTau = projTarget > projAmt ? PROJ_OPEN_TAU : PROJ_CLOSE_TAU;
         projAmt += (projTarget - projAmt) * (reduceMotion ? 1 : 1 - Math.exp(-dt / projTau));
         if (projTarget === 0 && projAmt < 1e-3) projAmt = 0;
-        // ---- mesmerizing transition phase windows: sub-ranges of the SAME monotonic projAmt, so the
-        // close reverses the open exactly. pCam LEADS (the globe calms, shrinks to a moon + lifts to
-        // the sky, then flies in from the left); pDraw plots the stems up out of the baseline left→
-        // right; pLabel resolves the labels last. (The filament calm + DoF ride F.mph.w = projAmt in
-        // the shaders, shaped there.)
-        const pCam = smooth(0.0, 0.55, projAmt);
-        const pDraw = smooth(0.3, 1.0, projAmt);
-        const pLabel = smooth(0.58, 1.0, projAmt);
+        // ---- transition phase windows: sub-ranges of the SAME monotonic projAmt, so the close
+        // reverses the open exactly. The globe FOLD leads (the threads collapse onto the baseline +
+        // dissolve — shaped in the shader off F.mph.w = projAmt, fully gone by ~0.72); pDraw then
+        // rises the straight lines left→right out of the landed baseline; pLabel resolves the names
+        // last. (The shader fold + the line wipe overlap so the line is there as the globe vanishes.)
+        const pDraw = smooth(0.42, 1.0, projAmt);
+        const pLabel = smooth(0.68, 1.0, projAmt);
         if (projectsOpenRef.current) {
           if (!dialDragging) {
             velDial *= Math.exp(-dt / DIAL_INERTIA_TAU);
@@ -1703,62 +1679,33 @@ export default function RidgelineStage() {
         // screen SIDES (aspect-aware, see globeFitRadiusScale) — then the camera settles to the
         // authored mountain framing exactly at mc = 1. globeRadius eases globeStart → 1.0 by
         // mc ≈ 0.70, and mix01(globeStart, 1.0, 1) === 1.0 for ANY start, so the finished-mountain
-        // dolly is byte-identical no matter how big the globe is framed. While Projects is open the
-        // globe SHRINKS to a moon (× TL_SHRINK further away), eased by pCam; mix01(1, TL_SHRINK, 0)
-        // === 1 so the Home/CV framing is byte-identical at projAmt 0.
-        // the timeline trace is desktop-only (the narrow layout uses the vertical list), so the
-        // moon shrink + transit run there too; on a phone the globe stays the full calm ball behind
-        // the list. tlActive gates both, and is 0 at projAmt 0 ⇒ Home/CV framing byte-identical.
+        // dolly is byte-identical no matter how big the globe is framed. While Projects opens the
+        // globe holds its full framing and FOLDS in place into the baseline (no moon, no shrink).
         const tlActive = projAmt > 0.001 && !dialMobile();
         const globeStart = globeFitRadiusScale(aspectNow);
-        const globeRadius =
-          mix01(globeStart, 1.0, smooth(0.0, 0.70, mc)) * mix01(1.0, TL_SHRINK, tlActive ? pCam : 0);
+        const globeRadius = mix01(globeStart, 1.0, smooth(0.0, 0.70, mc));
         const rscale = radiusScale * globeRadius;
 
-        // pan: the dossier focus (mountain) slides the massif RIGHT into the clear flank; the
-        // Projects timeline FLIES the moon over the selected stem. The transit solves the pure lens
-        // shift that lands the projected globe centre on the moon's screen target (moonX, moonY) and
-        // moves the depth-of-field focal point + the CSS spotlight with it, so the moon stays crisp
-        // wherever it travels. Both are wide-screen aware; the dossier term is zero while Projects is up.
+        // pan: the dossier focus (mountain) slides the massif RIGHT into the clear flank; zero while
+        // Projects is up. The Projects baseline is instead WELDED to where the globe folds — the
+        // projected globe centre — so the red line lands exactly on the glowing line the threads
+        // collapse onto, and the straight branches rise from it. focusShiftY stays 0 so the globe
+        // folds in place (no vertical lens shift). The DoF focal + frost spotlight stay centred.
         let focusShift = focusAmt * 0.42 * wide;
-        let transitShiftY = 0;
-        let focalX = 0.5, focalY = 0.5;
+        let projBaseY = TL_BASE_Y * cvs.clientHeight;
+        const focalX = 0.5, focalY = 0.5;
         if (tlActive) {
           const W = cvs.clientWidth, H = cvs.clientHeight;
-          // the continuous scrub position (eased), then the open-sweep: the moon flies IN from the
-          // left of the range to the selected project as the view opens (entryT), and back on close.
-          const scrubPos = Math.min(DIAL_MAX_ANGLE, Math.max(0, dialAngle)) / DIAL_SLOT;
-          const entryT = smooth(0.18, 0.94, projAmt);
-          const moonPos = TL_ENTRY_LEFT_POS + (scrubPos - TL_ENTRY_LEFT_POS) * entryT;
-          // sample the plot envelope at the (continuous) moon position
-          const i0 = Math.max(0, Math.min(DIAL_N - 1, Math.floor(moonPos)));
-          const i1 = Math.min(DIAL_N - 1, i0 + 1);
-          const f = Math.max(0, Math.min(1, moonPos - i0));
-          const xFrac = TL_XFRAC[i0] + (TL_XFRAC[i1] - TL_XFRAC[i0]) * f;
-          // the moon rides the glowing LINE: it TRANSITS horizontally by date and floats a hair
-          // ABOVE the flat line (a sun over the horizon) with a gentle bob — no skyline to follow
-          // now. X clamped so it never clips off the sides, Y clamped clear of the header.
-          const moonX = Math.min(
-            (1 - TL_MOON_MARGIN_X) * W,
-            Math.max(TL_MOON_MARGIN_X * W, (TL_PAD + xFrac * (1 - 2 * TL_PAD)) * W),
-          );
-          const bob = reduceMotion ? 0 : Math.sin(t * 0.6) * TL_MOON_BOB * H;
-          const moonY = Math.max(TL_MOON_MIN_Y * H, (TL_BASE_Y - TL_MOON_LIFT) * H + bob);
-          // project the globe centre with NO lens shift, then solve the translation that lands it on
-          // (moonX, moonY). Eased in by pCam ⇒ no shift at projAmt 0 (byte-identical Home/CV).
           const cu = projectToScreen(
             ridgeCamera(yaw, pitch, aspectNow, t, rscale, 0, 0).vp,
             GLOBE.cx, GLOBE.cy, GLOBE.cz, W, H,
           );
-          focusShift = ((moonX - cu.x) / (W / 2)) * pCam;
-          transitShiftY = ((cu.y - moonY) / (H / 2)) * pCam; // +up
-          focalX = Math.min(1, Math.max(0, moonX / W));
-          focalY = Math.min(1, Math.max(0, moonY / H));
-          // slide the CSS focus spotlight under the moon (the DOM companion to the GPU DoF)
+          // clamp to a sensible band so an extreme tilt can never shove the line off-screen
+          if (cu.visible) projBaseY = Math.min(0.6 * H, Math.max(0.4 * H, cu.y));
           const frost = dialDomRef.current?.frost;
           if (frost) {
-            frost.style.setProperty("--fx", `${(focalX * 100).toFixed(1)}%`);
-            frost.style.setProperty("--fy", `${(focalY * 100).toFixed(1)}%`);
+            frost.style.setProperty("--fx", "50%");
+            frost.style.setProperty("--fy", "50%");
           }
         }
 
@@ -1789,9 +1736,9 @@ export default function RidgelineStage() {
         }
         focusShiftY += (shiftYTarget - focusShiftY) * fk;
 
-        // the vertical shift the moon/mountain renders with: the transit while the desktop timeline
-        // is open, otherwise the eased mountain ring-lift.
-        const fShiftY = tlActive ? transitShiftY : focusShiftY;
+        // the vertical shift the globe/mountain renders with: 0 while the desktop timeline is open
+        // (the globe folds in place), otherwise the eased mountain ring-lift.
+        const fShiftY = tlActive ? 0 : focusShiftY;
 
         // feed this frame's delta to the DRS controller (dt is seconds, already clamped to 0.05 above,
         // so a resume/GC spike can't pollute the EWMA) — it adjusts the render-scale BEFORE we render.
@@ -1839,9 +1786,9 @@ export default function RidgelineStage() {
           updateCloud(cam.vp, cam.eye, spinOut, mc, cvs.clientWidth, cvs.clientHeight);
           // the chaotic letter-cloud is part of "the mess" — fade it out as the trace organises
           if (cloudRef.current) cloudRef.current.style.opacity = (1 - projAmt).toFixed(3);
-          // plot the Projects timeline — pure screen space, independent of the (transiting) globe
+          // plot the Projects survey line — pure screen space, its baseline welded to the folding globe
           if (projAmt > 0.002)
-            updateTimeline(cvs.clientWidth, cvs.clientHeight, t, projAmt, dialSelected, pDraw, pLabel);
+            updateTimeline(cvs.clientWidth, cvs.clientHeight, projAmt, dialSelected, pDraw, pLabel, projBaseY);
         } else if (cloudRef.current && cloudRef.current.style.visibility !== "hidden") {
           cloudRef.current.style.visibility = "hidden"; // mountain is whole — drop the cloud
         }
