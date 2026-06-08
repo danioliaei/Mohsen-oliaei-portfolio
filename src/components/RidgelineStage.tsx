@@ -99,33 +99,56 @@ const TL_XFRAC = PROJECTS.map(
 
 const TL_PAD = TL_PAD_FRAC; // left/right padding as a fraction of width (matches the year ruler)
 const TL_BASE_Y = 0.6; // FALLBACK baseline height (fraction of H); the loop WELDS it to where the
-// folding globe collapses (the projected globe centre), so the red line lands on the glowing line.
+// folding globe collapses (the projected globe centre), so the line lands on the glowing fold.
 
-// ---- straight-line plot geometry (px unless noted). The WiFi-survey look: tight per-year
-// clusters of vertical hairlines; within a year the LATEST project's line is tallest and the
-// earlier ones step DOWN by one label-row, so the year's NAMES stack cleanly on top of each
-// other. Each year-peak traces the elevation envelope → a sinus skyline; the below-axis studies
-// hang DOWN as their own stacks. ----------------------------------------------------------------
-const TL_GAP = 7; // px between adjacent lines inside a year cluster (very close — req 2)
+// ---- straight-line plot geometry (px unless noted). The WiFi-survey look: one vertical hairline
+// per project, rooted at its TRUE date x (a small organic jitter added so the spacing reads like
+// events at genuinely different times — req 5). Within a (year, direction) group the LATEST
+// project's line is tallest and the earlier ones step DOWN by one label-row, so the year's NAMES
+// stack cleanly into a left-aligned column to the RIGHT of the lines (req 4). Each year-peak
+// traces the elevation envelope → a sinus skyline; the below-axis studies hang DOWN, and a faint
+// MIRROR clone reflects everything below the baseline so the skyline continues underneath (req 6).
 const TL_STACK = 15; // px a line steps down per earlier project == one stacked label row
-const TL_FLOOR = 18; // px shortest line in a cluster (keeps even the earliest readable)
+const TL_FLOOR = 18; // px shortest line in a group (keeps even the earliest readable)
 const TL_PEAK_MIN = 0.05; // a year-peak's floor (fraction of H)
 const TL_PEAK_RANGE = 0.3; // …+ this × the group's max |elevation| → the sinus envelope height
 const TL_MAJOR_BONUS = 0.045; // a flagship-bearing year reaches a touch further (fraction of H)
-const TL_TOP_MARGIN = 0.16; // up-lines never rise above this (× H) — clear of the masthead
-const TL_BOT_MARGIN = 0.08; // down-lines never drop past (1 − this) × H — clear of the year ruler
-const TL_DRAW_SPAN = 0.45; // draw clock span between the leftmost cluster rising and the rightmost
+const TL_TOP_MARGIN = 0.16; // up-lines never rise above this (× H) — clear of the top edge
+const TL_BOT_MARGIN = 0.1; // down-lines never drop past (1 − this) × H — clear of the year ruler
+const TL_DRAW_SPAN = 0.45; // draw clock span between the leftmost line rising and the rightmost
 const TL_DRAW_RISE = 0.5; // how long each individual line takes to grow out (in the draw clock)
 const TL_LABEL_OFF = 9; // px the name sits beyond its line's tip
+const TL_LABEL_GAP = 12; // px from a year's right-most line to its left-aligned name column (req 4)
+const TL_JITTER = 0.006; // max |x jitter| as a fraction of the plot width (req 5 — organic spacing)
+const TL_MOBILE_ZOOM = 2.3; // narrow: widen the plot so the names aren't tiny; drag pans it (req 7)
+const TL_PAN_MAX_VEL = 4200; // px/s — release-flick cap for the mobile pan
 
-// per-project plot inputs, precomputed once (W/H-independent fractions + integer px slots). For
-// each project: the year-cluster centre (mean date xFrac), the line's slot offset within the
-// cluster, up/down direction (below-axis studies go DOWN) and — within its (year, direction)
-// sub-group ordered by date — its stack rank, the group size, whether the group carries flagship
-// work, and the group's max |elevation| (the envelope driver).
+// the names sit to the RIGHT of the lines (req 4), so the date axis can't run to the right edge or
+// the latest year's column would clip off-screen. Reserve a right gutter sized to the widest name,
+// and map the lines / ruler across the remaining span (the baseline horizon still spans full width).
+const tlLabelReserve = (W: number) => Math.min(180, Math.max(100, W * (1 - 2 * TL_PAD) * 0.14));
+const tlAxisSpan = (W: number) => W * (1 - TL_PAD) - tlLabelReserve(W);
+
+// the integer year ticks (MUST mirror ProjectsOverlay's YEARS), as 0..1 fractions along the date
+// axis — the rAF loop positions the ruler from these each frame so it tracks the mobile zoom + pan.
+const TL_YEARS: number[] = [];
+for (let y = Math.ceil(TIME_MIN); y <= Math.floor(TIME_MAX); y++) TL_YEARS.push(y);
+const TL_YEAR_FRAC = TL_YEARS.map((y) => (y - TIME_MIN) / (TIME_MAX - TIME_MIN));
+
+// a deterministic ±TL_JITTER hash per project index (no Math.random → stable across reloads/SSR)
+const tlJitter = (i: number) => {
+  const s = Math.sin(i * 127.1 + 311.7) * 43758.5453;
+  return ((s - Math.floor(s)) * 2 - 1) * TL_JITTER;
+};
+// the jittered TRUE-date x for every project (0..1 along the axis)
+const TL_XFRAC_J = PROJECTS.map((_, i) => TL_XFRAC[i] + tlJitter(i));
+
+// per-project plot inputs, precomputed once (W/H-independent fractions). For each project: its
+// jittered true-date x, up/down direction (below-axis studies go DOWN), and — within its (year,
+// direction) sub-group ordered by date — its stack rank, the group size, whether the group carries
+// flagship work, and the group's max |elevation| (the envelope driver).
 type TlPlot = {
-  clusterXFrac: number;
-  xSlot: number;
+  xFrac: number;
   down: boolean;
   stackRank: number;
   groupCount: number;
@@ -144,8 +167,6 @@ const TL_PLOT: TlPlot[] = (() => {
     else byYear.set(y, [i]);
   });
   for (const idxs of byYear.values()) {
-    const n = idxs.length;
-    const clusterXFrac = idxs.reduce((s, i) => s + TL_XFRAC[i], 0) / n;
     const sub: Record<"up" | "down", number[]> = { up: [], down: [] };
     for (const i of idxs) sub[PROJECTS[i].elevation < 0 ? "down" : "up"].push(i);
     for (const dir of ["up", "down"] as const) {
@@ -154,8 +175,7 @@ const TL_PLOT: TlPlot[] = (() => {
       const groupMajor = g.some((i) => PROJECTS[i].major);
       g.forEach((i, rank) => {
         out[i] = {
-          clusterXFrac,
-          xSlot: idxs.indexOf(i) - (n - 1) / 2,
+          xFrac: TL_XFRAC_J[i],
           down: dir === "down",
           stackRank: rank,
           groupCount: g.length,
@@ -696,8 +716,16 @@ export default function RidgelineStage() {
       let dialDragging = false;
       let dialStartAngle = 0, dialStartX = 0; // drag anchor
       let dialLastNotch = 0;      // detent-tick bookkeeping during a drag
-      const dialMobile = () =>    // narrow → the vertical list owns it; the trace never runs
+      // MOBILE PAN (req 7): on a narrow screen the timeline is zoomed wider than the viewport and a
+      // drag scrolls it left/right (instead of the desktop scrub). panX is the eased px offset.
+      let panX = 0, tPanX = 0, panVel = 0;
+      let panDragging = false, panStartX = 0, panStartOff = 0;
+      let panFollowSel = -1; // last selection the pan auto-scrolled to (-1 ⇒ next open jumps to it)
+      let panMoved = false;  // a pan drag travelled past the click slop → swallow the trailing click
+      const dialMobile = () =>    // narrow → the timeline zooms + pans (req 7) instead of scrubbing
         typeof matchMedia === "function" && matchMedia("(max-width: 860px)").matches;
+      // the most-negative pan offset for the current width (panMin..0); 0 on desktop (zoom 1 ⇒ no pan)
+      const tlPanMin = (W: number) => tlAxisSpan(W) * (1 - TL_MOBILE_ZOOM);
       // glide the moon to project i — LINEAR (clamped to the range; a timeline never wraps)
       const dialGoto = (i: number) => {
         tDialAngle = Math.min(DIAL_MAX_ANGLE, Math.max(0, i * DIAL_SLOT));
@@ -782,8 +810,24 @@ export default function RidgelineStage() {
 
       const onDown = (e: PointerEvent) => {
         if (e.pointerType === "mouse" && e.button !== 0) return; // left only
-        // PROJECTS DIAL: a drag spins the knob (scrolls the project selection), never the orbit.
+        // PROJECTS: a drag never orbits. On MOBILE it PANS the zoomed timeline (req 7); on desktop
+        // it spins the knob (scrolls the project selection).
         if (projectsOpenRef.current) {
+          if (dialMobile()) {
+            panDragging = true;
+            panMoved = false;
+            pid = e.pointerId;
+            panStartOff = tPanX;
+            panStartX = e.clientX;
+            lastT = e.timeStamp;
+            panVel = 0;
+            stopInviting();
+            try { cvs.setPointerCapture(pid); } catch { /* capture optional */ }
+            cvs.style.cursor = "grabbing";
+            haptic(10, e.timeStamp);
+            e.preventDefault();
+            return;
+          }
           dialDragging = true;
           pid = e.pointerId;
           dialStartAngle = tDialAngle;
@@ -821,6 +865,24 @@ export default function RidgelineStage() {
       };
 
       const onMove = (e: PointerEvent) => {
+        // PROJECTS MOBILE drag → pan the zoomed timeline left/right (req 7)
+        if (projectsOpenRef.current && panDragging && e.pointerId === pid) {
+          const ddt = Math.min(Math.max((e.timeStamp - lastT) / 1000, 1 / 240), 1 / 30);
+          lastT = e.timeStamp;
+          const panMin = tlPanMin(cvs.clientWidth);
+          const prev = tPanX;
+          // drag right → reveal EARLIER work (offset toward 0); clamped to [panMin, 0]
+          tPanX = Math.min(0, Math.max(panMin, panStartOff + (e.clientX - panStartX)));
+          panVel = Math.max(
+            -TL_PAN_MAX_VEL,
+            Math.min(TL_PAN_MAX_VEL, panVel * 0.5 + ((tPanX - prev) / ddt) * 0.5),
+          );
+          // a pan that travels past the click slop must swallow the trailing click, so a drag that
+          // STARTED on a name label doesn't also fire that label's onSelect (see onPanDownCapture).
+          if (Math.abs(e.clientX - panStartX) > CLICK_SLOP) panMoved = true;
+          e.preventDefault();
+          return;
+        }
         // PROJECTS DIAL drag → spin the knob (the globe + the fan follow dialAngle)
         if (projectsOpenRef.current && dialDragging && e.pointerId === pid) {
           const ddt = Math.min(Math.max((e.timeStamp - lastT) / 1000, 1 / 240), 1 / 30);
@@ -874,6 +936,15 @@ export default function RidgelineStage() {
       };
 
       const onUp = (e: PointerEvent) => {
+        // PROJECTS MOBILE pan release — the pan drifts to rest on the frame loop's inertia
+        if (panDragging && e.pointerId === pid) {
+          panDragging = false;
+          pid = -1;
+          try { cvs.releasePointerCapture(e.pointerId); } catch { /* already gone */ }
+          cvs.style.cursor = "grab";
+          e.preventDefault();
+          return;
+        }
         // PROJECTS DIAL release — the knob settles to its detent via the frame loop's inertia
         if (dialDragging && e.pointerId === pid) {
           dialDragging = false;
@@ -1010,7 +1081,36 @@ export default function RidgelineStage() {
         if (!e.relatedTarget) { hx = -1; hy = -1; } // pointer left the window
       };
 
+      // MOBILE PAN from the name labels (req 7): onDown only sees EMPTY-space presses (it's on the
+      // canvas; the labels sit above it with their own hit area). So a drag that starts ON a name
+      // would be swallowed as a tap and never pan. This capture-phase listener catches those
+      // label-originated presses (target ≠ canvas) and arms the same pan — strictly gated to the
+      // mobile Projects view, so it's inert everywhere else. Empty-space presses still go to onDown
+      // (we skip target === cvs here to avoid double-arming). The trailing click is swallowed below
+      // only if the press actually became a drag, so a genuine TAP still selects.
+      const onPanDownCapture = (e: PointerEvent) => {
+        if (!projectsOpenRef.current || !dialMobile()) return;
+        if (e.target === cvs || panDragging || dialDragging) return;
+        if (e.pointerType === "mouse" && e.button !== 0) return;
+        panDragging = true;
+        panMoved = false;
+        pid = e.pointerId;
+        panStartOff = tPanX;
+        panStartX = e.clientX;
+        lastT = e.timeStamp;
+        panVel = 0;
+        stopInviting();
+        try { cvs.setPointerCapture(pid); } catch { /* capture optional */ }
+        // don't preventDefault: a genuine tap must still reach the label's click to select.
+      };
+      // swallow the click that trails a label-originated pan drag (so the pan doesn't also select)
+      const onPanClickCapture = (e: MouseEvent) => {
+        if (panMoved) { panMoved = false; e.stopPropagation(); e.preventDefault(); }
+      };
+
       cvs.addEventListener("pointerdown", onDown);
+      window.addEventListener("pointerdown", onPanDownCapture, true);
+      window.addEventListener("click", onPanClickCapture, true);
       window.addEventListener("pointermove", onMove);
       window.addEventListener("pointermove", onHover);
       window.addEventListener("pointerout", onHoverOut);
@@ -1019,6 +1119,8 @@ export default function RidgelineStage() {
       window.addEventListener("keydown", onKey);
       teardown.push(() => {
         cvs.removeEventListener("pointerdown", onDown);
+        window.removeEventListener("pointerdown", onPanDownCapture, true);
+        window.removeEventListener("click", onPanClickCapture, true);
         window.removeEventListener("pointermove", onMove);
         window.removeEventListener("pointermove", onHover);
         window.removeEventListener("pointerout", onHoverOut);
@@ -1374,15 +1476,19 @@ export default function RidgelineStage() {
         }
       };
 
-      // ---- Projects SURVEY-LINE welder: lay the career out in pure screen space — a minimal red
-      // baseline and one STRAIGHT vertical line per project, clustered tight by year. Within a year
-      // the latest project's line is tallest and the earlier ones step DOWN by one label-row so the
-      // names stack; year peaks trace the elevation envelope (a sinus skyline) and the below-axis
-      // studies hang DOWN. The line wipes in as the folded globe lands, the branches rise left→right
-      // (pDraw), then the names resolve (pLabel); the selected line + name light amber. `baseY` is
-      // welded by the frame loop to the projected globe centre, so the plot lands exactly where the
-      // globe folds. Imperative DOM writes only — nothing re-renders React. Desktop-only; narrow uses
-      // the list.
+      // ---- Projects SURVEY-LINE welder: lay the career out in pure screen space — a minimal mono
+      // baseline (the fixed horizon) and one STRAIGHT vertical line per project, rooted at its TRUE
+      // date x with a small organic jitter so the spacing reads like events at different times (req
+      // 5). Within a (year, direction) group the latest project's line is tallest and the earlier
+      // ones step DOWN by one label-row; year peaks trace the elevation envelope (a sinus skyline)
+      // and the below-axis studies hang DOWN. A glowing NUB sits at each line's foot (close nubs
+      // blend into a bigger glow — req 3), the names sit in a LEFT-ALIGNED column to the RIGHT of
+      // each year's lines (req 4), and a faint MIRROR clone reflects everything below the baseline
+      // so the skyline continues underneath (req 6). Everything is the SAME mono off-white as the
+      // globe filaments (req 2); the selected line + nub brighten and the selected name lights amber.
+      // On MOBILE the plot is zoomed wider than the viewport and `panX` scrolls it (req 7). `baseY`
+      // is welded by the frame loop to the projected globe centre, so the plot lands exactly where
+      // the globe folds. Imperative DOM writes only — nothing re-renders React.
       const updateTimeline = (
         W: number,
         H: number,
@@ -1391,62 +1497,69 @@ export default function RidgelineStage() {
         pDraw: number,
         pLabel: number,
         baseY: number,
+        panX: number,
+        mobile: boolean,
       ) => {
         const dom = dialDomRef.current;
         if (!dom) return;
-        const mobile = dialMobile();
-        // masthead readout + mobile-list selection track every frame (cheap text/class writes)
-        if (dom.plate) dom.plate.textContent = `PLATE ${String(sel + 1).padStart(2, "0")} / ${DIAL_N}`;
-        if (dom.live) dom.live.textContent = PROJECTS[sel].title;
         // share the live baseline with CSS (the year ruler sits just below it via --tl-base)
         if (dom.root) dom.root.style.setProperty("--tl-base", `${baseY.toFixed(1)}px`);
-        // mobile list: selection class + roving tabindex (only the selected row is tabbable, so the
-        // ~80-row list isn't a tab trap — mirrors the desktop label roving tabindex below).
-        if (dom.listItems.length === DIAL_N)
-          for (let i = 0; i < DIAL_N; i++) {
-            const it = dom.listItems[i];
-            it.classList.toggle("is-selected", i === sel);
-            it.tabIndex = i === sel ? 0 : -1;
-          }
 
-        const { branches, labels, axis } = dom;
-        if (branches.length === DIAL_N && !mobile) {
+        const { branches, labels, nubs, axis } = dom;
+        if (branches.length === DIAL_N) {
           const padPx = TL_PAD * W;
-          const plotW = W - 2 * padPx;
+          const viewW = W - 2 * padPx; // the baseline horizon width (full minus both pads)
+          const zoom = mobile ? TL_MOBILE_ZOOM : 1; // mobile widens the plot so names aren't tiny
+          // the date axis maps across axisSpan (≤ viewW): it stops short of the right edge so the
+          // latest year's name column (which sits to the RIGHT of its lines, req 4) stays on-screen.
+          const plotW = tlAxisSpan(W) * zoom; // the virtual (possibly off-screen) date axis width
+          const pan = mobile ? panX : 0; // desktop never pans
           const baseYs = baseY.toFixed(1);
-          // vertical room each direction (kept clear of the masthead / the year ruler)
+          // vertical room each direction (kept clear of the top edge / the year ruler)
           const upRoom = baseY - TL_TOP_MARGIN * H;
           const downRoom = (1 - TL_BOT_MARGIN) * H - baseY;
 
-          // the minimal red baseline wipes in left→right across the plotted span as the fold lands.
-          // The fade gradient is userSpaceOnUse, so its x-vector is pinned to the live canvas width.
+          // the baseline is the FIXED horizon across the viewport (it never pans); it wipes in
+          // left→right as the fold lands. The fade gradient is userSpaceOnUse → its x-vector tracks
+          // the live canvas width, so the line bleeds to nothing at both screen edges.
           const pAxis = smooth(0.3, 0.62, amt);
           if (axis) {
             axis.setAttribute("x1", padPx.toFixed(1));
             axis.setAttribute("y1", baseYs);
-            axis.setAttribute("x2", (padPx + pAxis * plotW).toFixed(1));
+            axis.setAttribute("x2", (padPx + pAxis * viewW).toFixed(1));
             axis.setAttribute("y2", baseYs);
             axis.style.opacity = smooth(0.3, 0.66, amt).toFixed(3);
           }
           if (dom.axisGrad) dom.axisGrad.setAttribute("x2", W.toFixed(0));
+          // the mirror reflects the whole branch group about the live baseline (y → 2·baseY − y),
+          // so every line casts a reflection and the sinus continues below (req 6).
+          if (dom.mirror)
+            dom.mirror.setAttribute("transform", `matrix(1 0 0 -1 0 ${(2 * baseY).toFixed(1)})`);
+
+          // the year ruler — placed from the same date map (so it tracks the mobile zoom + pan),
+          // fading in with the baseline.
+          if (dom.years.length === TL_YEAR_FRAC.length)
+            for (let k = 0; k < dom.years.length; k++) {
+              const yx = padPx + TL_YEAR_FRAC[k] * plotW + pan;
+              dom.years[k].style.transform = `translateX(${yx.toFixed(1)}px) translateX(-50%)`;
+            }
+          if (dom.yearsRoot) dom.yearsRoot.style.opacity = smooth(0.34, 0.7, amt).toFixed(3);
 
           for (let i = 0; i < DIAL_N; i++) {
             const pl = TL_PLOT[i];
-            const branch = branches[i], label = labels[i];
+            const branch = branches[i], label = labels[i], nub = nubs[i];
             const isSel = i === sel;
             const major = PROJECTS[i].major;
-            const clusterX = padPx + pl.clusterXFrac * plotW;
-            const lineX = clusterX + pl.xSlot * TL_GAP;
+            const lineX = padPx + pl.xFrac * plotW + pan; // true-date x (jittered) + the mobile pan
             const dirY = pl.down ? 1 : -1;
 
             // the year-peak (group-level, identical for every member): the elevation envelope,
             // floored so the whole stack fits and capped to the available room so nothing clips.
             const room = pl.down ? downRoom : upRoom;
-            // the stack must FIT within `room` (clear of the masthead / the year ruler): if a year is
+            // the stack must FIT within `room` (clear of the top edge / the year ruler): if a year is
             // too populous for the available height, COMPRESS the per-row step so the tallest line
-            // stays inside room rather than overflowing it into the masthead. In the common
-            // (tall-enough) case this is a no-op — fitStack === TL_STACK — so the spacing is unchanged.
-            // room is always > TL_FLOOR here (baseY clamped to [0.4H,0.6H] ⇒ room ≥ 0.24H), so fitStack > 0.
+            // stays inside room. In the common (tall-enough) case this is a no-op — fitStack ===
+            // TL_STACK. room is always > TL_FLOOR (baseY clamped to [0.4H,0.6H] ⇒ room ≥ 0.24H).
             const fitStack =
               pl.groupCount > 1
                 ? Math.min(TL_STACK, (room - TL_FLOOR) / (pl.groupCount - 1))
@@ -1459,47 +1572,60 @@ export default function RidgelineStage() {
             // (fitted) row, so the shortest is ≥ TL_FLOOR and the names stay clear of the chrome.
             const fullLen = peak - (pl.groupCount - 1 - pl.stackRank) * fitStack;
 
-            // staggered straight draw-on: the leftmost cluster rises first, the rightmost trails
-            const delay = pl.clusterXFrac * TL_DRAW_SPAN;
+            // staggered straight draw-on: the leftmost line rises first, the rightmost trails
+            const delay = pl.xFrac * TL_DRAW_SPAN;
             const grow = smooth(delay, Math.min(1, delay + TL_DRAW_RISE), pDraw);
             const tipY = baseY + dirY * fullLen * grow;
             const lx = lineX.toFixed(1);
             branch.setAttribute("d", `M${lx},${baseYs} L${lx},${tipY.toFixed(1)}`);
             branch.style.opacity = (amt * grow).toFixed(3);
 
-            // the name stacks at the CLUSTER centre, just beyond its line's full tip (above for up,
-            // below for down), resolving last (pLabel) with a tiny settle-out slide. Every name in a
-            // (year, direction) group shares clusterX and steps by TL_STACK → a clean vertical column.
+            // the glowing foot nub sits on the baseline at the line's root; the nub layer
+            // screen-blends, so a busy year's nubs overlap into one bigger glow (req 3).
+            nub.style.transform = `translate(${lx}px, ${baseYs}px)`;
+            nub.style.opacity = (amt * grow).toFixed(3);
+
+            // the name sits LEFT-ALIGNED just to the RIGHT of its OWN line (req 4), at that line's
+            // full tip (above for up, below for down), resolving last (pLabel) with a tiny settle
+            // slide. Because the lines step DOWN by date within a year, the names form a readable
+            // staircase beside them — the WiFi-survey reference look — instead of one crowded column.
             const labelGrow = smooth(delay, Math.min(1, delay + 0.5), pLabel);
             const fullTipY = baseY + dirY * fullLen;
             const labelY = fullTipY + dirY * (TL_LABEL_OFF + (1 - labelGrow) * 6);
+            const colX = lineX + TL_LABEL_GAP; // lineX already carries the mobile pan
             label.style.transform =
-              `translate(${clusterX.toFixed(1)}px, ${labelY.toFixed(1)}px) translate(-50%, ${pl.down ? "0%" : "-100%"})`;
+              `translate(${colX.toFixed(1)}px, ${labelY.toFixed(1)}px) translate(0, ${pl.down ? "0%" : "-100%"})`;
             label.style.opacity = (amt * labelGrow).toFixed(3);
             label.tabIndex = isSel ? 0 : -1;
 
             branch.classList.toggle("is-selected", isSel);
             branch.classList.toggle("is-major", major);
+            nub.classList.toggle("is-selected", isSel);
             label.classList.toggle("is-selected", isSel);
             label.classList.toggle("is-major", major);
           }
         }
 
-        // roving focus + a polite SR announcement when the selection changes
+        // selection-change-only work (NOT per frame): the polite SR announcement, roving focus, and
+        // the hidden mobile-list fallback's class + roving tabindex (it's display:none on every
+        // viewport now, so this only needs to track the selection, never run each frame).
         if (sel !== dialPrevSelected) {
           dialPrevSelected = sel;
+          if (dom.listItems.length === DIAL_N)
+            for (let i = 0; i < DIAL_N; i++) {
+              const it = dom.listItems[i];
+              it.classList.toggle("is-selected", i === sel);
+              it.tabIndex = i === sel ? 0 : -1;
+            }
           if (dom.liveRegion)
             // mirror the button aria-label (title · date · place) so the polite announcement loses
-            // nothing — the name-only rule (req 5) governs the VISIBLE dial, not the SR readout
+            // nothing — the name-only rule governs the VISIBLE dial, not the SR readout
             dom.liveRegion.textContent =
               `${PROJECTS[sel].title}, ${formatMonthYearLong(PROJECTS[sel].date)}, ${PROJECTS[sel].place}`;
           const act = typeof document !== "undefined" ? document.activeElement : null;
-          if (
-            act &&
-            (act.classList?.contains("tl-label") || act.classList?.contains("dial-list-item"))
-          ) {
-            (mobile ? dom.listItems[sel] : labels[sel])?.focus?.();
-          }
+          // the timeline labels are the hit targets on both desktop and mobile now; move focus to
+          // the selected one if focus was already on a label (keyboard stepping), never steal it.
+          if (act && act.classList?.contains("tl-label")) labels[sel]?.focus?.();
         }
       };
 
@@ -1542,6 +1668,10 @@ export default function RidgelineStage() {
         const projTau = projTarget > projAmt ? PROJ_OPEN_TAU : PROJ_CLOSE_TAU;
         projAmt += (projTarget - projAmt) * (reduceMotion ? 1 : 1 - Math.exp(-dt / projTau));
         if (projTarget === 0 && projAmt < 1e-3) projAmt = 0;
+        // a closed timeline clears its mobile pan state; panFollowSel = -1 marks the NEXT open so the
+        // pan jumps straight to the live selection (so the highlighted project is on-screen at open,
+        // and a reopen lands on the same project the viewer left — see the follow block below).
+        if (projAmt === 0) { panX = 0; tPanX = 0; panVel = 0; panFollowSel = -1; }
         // ---- transition phase windows: sub-ranges of the SAME monotonic projAmt, so the close
         // reverses the open exactly. The globe FOLD leads (the threads collapse onto the baseline +
         // dissolve — shaped in the shader off F.mph.w = projAmt, fully gone by ~0.72); pDraw then
@@ -1549,7 +1679,44 @@ export default function RidgelineStage() {
         // last. (The shader fold + the line wipe overlap so the line is there as the globe vanishes.)
         const pDraw = smooth(0.42, 1.0, projAmt);
         const pLabel = smooth(0.68, 1.0, projAmt);
+        // read the narrow-screen breakpoint ONCE per frame (matchMedia allocates a MediaQueryList per
+        // call) and thread it to the pan block + updateTimeline below.
+        const mobile = dialMobile();
         if (projectsOpenRef.current) {
+          // MOBILE: ease the zoomed-timeline pan toward its target with a release-flick (req 7),
+          // clamped to [panMin, 0] for the live width. Desktop keeps panX === 0 (zoom 1 ⇒ no pan).
+          if (mobile) {
+            const W = cvs.clientWidth;
+            const panMin = tlPanMin(W);
+            // FOLLOW THE SELECTION (req 7): the zoomed plot shows only a slice, so a selection made by
+            // tap / keyboard (which moves the scrub, not the pan) must scroll its line into view —
+            // otherwise the highlighted "you-are-here" line opens off-screen. Drive off the TARGET
+            // selection (round of tDialAngle); never fight an in-progress free drag.
+            const tSel = Math.min(DIAL_N - 1, Math.max(0, Math.round(tDialAngle / DIAL_SLOT)));
+            if (!panDragging && tSel !== panFollowSel) {
+              const opening = panFollowSel === -1; // first frame after open/reset
+              panFollowSel = tSel;
+              const padPx = TL_PAD * W;
+              const plotW = tlAxisSpan(W) * TL_MOBILE_ZOOM;
+              const selX = padPx + TL_XFRAC_J[tSel] * plotW; // the selected line's UN-panned x
+              const centered = Math.min(0, Math.max(panMin, W * 0.5 - selX)); // pan that centres it
+              if (opening) {
+                panX = tPanX = centered; // jump, so the timeline draws on already showing the selection
+              } else {
+                const curX = selX + tPanX; // where it sits at the current target pan
+                if (curX < W * 0.16 || curX > W * 0.84) tPanX = centered; // only re-pan near/off an edge
+              }
+            }
+            if (!panDragging) {
+              panVel *= Math.exp(-dt / DIAL_INERTIA_TAU);
+              tPanX += panVel * dt;
+              if (tPanX > 0) { tPanX = 0; if (panVel > 0) panVel = 0; }
+              else if (tPanX < panMin) { tPanX = panMin; if (panVel < 0) panVel = 0; }
+            } else {
+              tPanX = Math.min(0, Math.max(panMin, tPanX)); // a rotate/resize can shrink the range
+            }
+            panX += (tPanX - panX) * (reduceMotion ? 1 : 1 - Math.exp(-dt / DIAL_SMOOTH_TAU));
+          }
           if (!dialDragging) {
             velDial *= Math.exp(-dt / DIAL_INERTIA_TAU);
             tDialAngle += velDial * dt;
@@ -1681,7 +1848,7 @@ export default function RidgelineStage() {
         // mc ≈ 0.70, and mix01(globeStart, 1.0, 1) === 1.0 for ANY start, so the finished-mountain
         // dolly is byte-identical no matter how big the globe is framed. While Projects opens the
         // globe holds its full framing and FOLDS in place into the baseline (no moon, no shrink).
-        const tlActive = projAmt > 0.001 && !dialMobile();
+        const tlActive = projAmt > 0.001; // the timeline now runs on mobile too (req 7)
         const globeStart = globeFitRadiusScale(aspectNow);
         const globeRadius = mix01(globeStart, 1.0, smooth(0.0, 0.70, mc));
         const rscale = radiusScale * globeRadius;
@@ -1788,7 +1955,7 @@ export default function RidgelineStage() {
           if (cloudRef.current) cloudRef.current.style.opacity = (1 - projAmt).toFixed(3);
           // plot the Projects survey line — pure screen space, its baseline welded to the folding globe
           if (projAmt > 0.002)
-            updateTimeline(cvs.clientWidth, cvs.clientHeight, projAmt, dialSelected, pDraw, pLabel, projBaseY);
+            updateTimeline(cvs.clientWidth, cvs.clientHeight, projAmt, dialSelected, pDraw, pLabel, projBaseY, panX, mobile);
         } else if (cloudRef.current && cloudRef.current.style.visibility !== "hidden") {
           cloudRef.current.style.visibility = "hidden"; // mountain is whole — drop the cloud
         }
