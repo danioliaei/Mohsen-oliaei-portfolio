@@ -3,45 +3,57 @@ import { motion } from "motion/react";
 import { PROJECTS, formatMonthYearLong, TIME_MIN, TIME_MAX } from "../data/projects";
 
 /* =========================================================================
-   ProjectsOverlay — "The Transit".
+   ProjectsOverlay — "The Filament".
 
-   NOT a frosted modal, and no longer the radial dial. A transparent layer welded
-   over the LIVE globe: as the Projects view opens, the chaotic GPU globe CALMS,
-   shrinks to a luminous MOON and lifts into the sky, while the whole career plots
-   itself as a horizontal RIDGELINE TIMELINE along an ember baseline — ~80 vertical
-   "signal" stems, one per project, placed by date (x) and significance/elevation
-   (height), tracing two massifs with a central R&D valley exactly like the WiFi-SSID
-   data-art reference. The moon then TRANSITS the range left↔right as you scrub,
-   riding the cresting skyline; the project under it is the selection.
+   NOT a frosted modal, and no longer the vertical-stem ridgeline. A transparent
+   layer welded over the LIVE globe: as the Projects view opens, the chaotic GPU
+   globe CALMS and collapses onto a single horizontal GLOWING LINE — a warm, bloomed
+   filament with light PULSES travelling along it — that the calmed globe rides as a
+   luminous MOON. From that line the whole career STRAYS OUT: one organic, curving
+   BRANCH per project, rooted on the line at its date (x), splaying up or down and
+   gently floating, with the more important (flagship) work reaching FURTHER. The
+   points where the branches leave the line are the BOLD nodes; a name floats at each
+   branch tip. The moon TRANSITS the line left↔right as you scrub; the branch it sits
+   over is the selection. (Reference: the organic data-art "filament" still.)
 
    This component renders only a STATIC skeleton (the masthead, the close control,
-   the baseline axis, the ~80 stem/node/label nodes, the year ticks, the mobile
-   list, an aria-live region). All per-frame geometry — the stem endpoints, the
-   draw-on of the trace, the label emphasis, the moon-following focus spotlight,
-   the live readout — is written imperatively by the rAF loop in RidgelineStage
-   (`updateTimeline`), exactly like the survey callouts and the letter cloud, so
-   nothing re-renders React during interaction and the plot stays welded to the
-   projected (transiting) globe. The loop reaches our DOM through `domRef`;
+   the glowing line + its bloom + the travelling pulses, the ~80 branch/origin/tip/
+   label nodes, the year ruler, the mobile list, an aria-live region). All per-frame
+   geometry — the line wipe, the pulses, every branch curve, its draw-on and organic
+   float, the bold origin nodes, the label emphasis, the moon-following focus
+   spotlight, the live readout — is written imperatively by the rAF loop in
+   RidgelineStage (`updateTimeline`), exactly like the survey callouts and the letter
+   cloud, so nothing re-renders React during interaction and the plot stays welded to
+   the projected (transiting) globe. The loop reaches our DOM through `domRef`;
    selecting a project (click / mobile tap / the loop's keyboard stepping) routes
    through `onSelect`.
 
    Same Inter / --mono / tracked-caps grammar as the site headers; warm-dusk ink,
-   amber only as the sparing "you-are-here" accent on the selected stem + date.
+   amber only as the sparing "you-are-here" accent on the selected branch + name.
    ========================================================================= */
 
 const EASE = [0.22, 1, 0.36, 1] as const;
 const TOTAL = PROJECTS.length;
+// a few light pulses that travel the glowing line (rAF-driven; cheap). Phase-offset so
+// they ripple down the filament rather than marching in lock-step.
+const PULSES = [0, 1, 2, 3] as const;
 
 /** the live DOM handles the RidgelineStage rAF loop welds each frame */
 export type ProjectsDialDom = {
   root: HTMLDivElement | null;
-  /** the ember baseline (loop sets its x-extent + y) */
+  /** the crisp glowing line (loop sets its x-extent + y as it wipes in) */
   axis: SVGLineElement | null;
-  /** one vertical stem per project, in PROJECTS order */
-  stems: SVGLineElement[];
-  /** the tip node riding each stem head */
-  nodes: SVGCircleElement[];
-  /** the name label at each stem tip (a button / hit target) */
+  /** the wide blurred bloom under the crisp line (same geometry, soft halo) */
+  axisGlow: SVGLineElement | null;
+  /** the light pulses travelling along the line */
+  pulses: SVGCircleElement[];
+  /** one organic branch curve per project, in PROJECTS order */
+  branches: SVGPathElement[];
+  /** the BOLD node where each branch leaves the line (rooted on the line) */
+  origins: SVGCircleElement[];
+  /** the faint node at each branch tip */
+  tips: SVGCircleElement[];
+  /** the name label floating at each branch tip (a button / hit target) */
   labels: HTMLElement[];
   listItems: HTMLElement[];
   plate: HTMLElement | null;
@@ -49,7 +61,7 @@ export type ProjectsDialDom = {
   liveRegion: HTMLElement | null; // visually-hidden aria-live announcer
   /** the focus scrim — the loop slides its spotlight (--fx/--fy) under the moon */
   frost: HTMLElement | null;
-  /** the baseline's fade gradient — the loop sets its x-extent to the live canvas width
+  /** the line's fade gradient — the loop sets its x-extent to the live canvas width
       (userSpaceOnUse needs absolute coords, so the end-fades track the viewport) */
   axisGrad: SVGLinearGradientElement | null;
 };
@@ -78,6 +90,7 @@ const ProjectsOverlay = forwardRef<HTMLButtonElement, Props>(
     const rootRef = useRef<HTMLDivElement>(null);
     const svgRef = useRef<SVGSVGElement>(null);
     const axisRef = useRef<SVGLineElement>(null);
+    const axisGlowRef = useRef<SVGLineElement>(null);
     const labelsRef = useRef<HTMLDivElement>(null);
     const listRef = useRef<HTMLDivElement>(null);
     const plateRef = useRef<HTMLSpanElement>(null);
@@ -95,8 +108,11 @@ const ProjectsOverlay = forwardRef<HTMLButtonElement, Props>(
       domRef.current = {
         root: rootRef.current,
         axis: axisRef.current,
-        stems: Array.from(svg.querySelectorAll<SVGLineElement>(".tl-stem")),
-        nodes: Array.from(svg.querySelectorAll<SVGCircleElement>(".tl-node")),
+        axisGlow: axisGlowRef.current,
+        pulses: Array.from(svg.querySelectorAll<SVGCircleElement>(".tl-pulse")),
+        branches: Array.from(svg.querySelectorAll<SVGPathElement>(".tl-branch")),
+        origins: Array.from(svg.querySelectorAll<SVGCircleElement>(".tl-origin")),
+        tips: Array.from(svg.querySelectorAll<SVGCircleElement>(".tl-tip")),
         labels: Array.from(labelsWrap.querySelectorAll<HTMLElement>(".tl-label")),
         listItems: listRef.current
           ? Array.from(listRef.current.querySelectorAll<HTMLElement>(".dial-list-item"))
@@ -187,13 +203,16 @@ const ProjectsOverlay = forwardRef<HTMLButtonElement, Props>(
           </p>
         </div>
 
-        {/* the trace layer — stem geometry welded each frame (desktop ridgeline) */}
+        {/* the filament layer — line, pulses + branch geometry welded each frame (desktop).
+            Painted back-to-front: the soft bloom, the crisp line, the branch curves, their
+            tip nodes, then the BOLD origin nodes and the travelling pulses on top so the
+            line reads brightest where the work leaves it. */}
         <svg className="projects-tl-svg" ref={svgRef} aria-hidden="true">
           <defs>
-            {/* the baseline fades to nothing at both ends so the ember axis bleeds into the
-                dark rather than stopping at a hard cap. userSpaceOnUse needs ABSOLUTE coords
+            {/* the line fades to nothing at both ends so the filament bleeds into the dark
+                rather than stopping at a hard cap. userSpaceOnUse needs ABSOLUTE coords
                 (percentages are out of spec here), so the rAF loop sets x2 to the live canvas
-                width each frame and the 12%/88% stops track the viewport. */}
+                width each frame and the 10%/90% stops track the viewport. */}
             <linearGradient
               id="tl-axis-fade"
               ref={axisGradRef}
@@ -203,24 +222,34 @@ const ProjectsOverlay = forwardRef<HTMLButtonElement, Props>(
               x2="0"
               y2="0"
             >
-              <stop offset="0" stopColor="var(--c-education)" stopOpacity="0" />
-              <stop offset="0.12" stopColor="var(--c-education)" stopOpacity="0.85" />
-              <stop offset="0.88" stopColor="var(--c-education)" stopOpacity="0.85" />
-              <stop offset="1" stopColor="var(--c-education)" stopOpacity="0" />
+              <stop offset="0" stopColor="var(--c-line)" stopOpacity="0" />
+              <stop offset="0.1" stopColor="var(--c-line)" stopOpacity="1" />
+              <stop offset="0.9" stopColor="var(--c-line)" stopOpacity="1" />
+              <stop offset="1" stopColor="var(--c-line)" stopOpacity="0" />
             </linearGradient>
           </defs>
-          {/* the ember baseline (the "red line" of the reference) */}
+          {/* the glowing line — a wide blurred bloom beneath a crisp bright core */}
+          <line className="tl-axis-glow" ref={axisGlowRef} x1="0" y1="0" x2="0" y2="0" />
           <line className="tl-axis" ref={axisRef} x1="0" y1="0" x2="0" y2="0" />
-          {/* stems + tip nodes, one per project */}
+          {/* one organic branch curve per project */}
           {PROJECTS.map((p) => (
-            <line className="tl-stem" key={`stem-${p.id}`} x1="0" y1="0" x2="0" y2="0" />
+            <path className="tl-branch" key={`branch-${p.id}`} d="" />
           ))}
+          {/* the faint tip node at each branch end */}
           {PROJECTS.map((p) => (
-            <circle className="tl-node" key={`node-${p.id}`} cx="0" cy="0" r="1.6" />
+            <circle className="tl-tip" key={`tip-${p.id}`} cx="0" cy="0" />
+          ))}
+          {/* the BOLD origin node where each branch leaves the line (req: bolder points) */}
+          {PROJECTS.map((p) => (
+            <circle className="tl-origin" key={`origin-${p.id}`} cx="0" cy="0" />
+          ))}
+          {/* the light pulses that travel the line */}
+          {PULSES.map((k) => (
+            <circle className="tl-pulse" key={`pulse-${k}`} cx="0" cy="0" />
           ))}
         </svg>
 
-        {/* the year axis — static, placed by the same fractional x-map as the stems */}
+        {/* the year ruler — static, placed by the same fractional x-map as the branch roots */}
         <div className="tl-years" aria-hidden="true">
           {YEARS.map((y) => (
             <span className="tl-year" key={`year-${y}`} style={{ left: `${yearFrac(y)}%` }}>
@@ -230,9 +259,9 @@ const ProjectsOverlay = forwardRef<HTMLButtonElement, Props>(
         </div>
 
         {/* the label layer — each project is a positioned button (its own hit target). NAME
-            ONLY: the short label the rAF loop stands the tip on, rotated to read upward like
-            the reference's SSID columns; the selected one brightens to the amber accent. The
-            full record (date, place) stays in the aria-label so screen readers lose nothing. */}
+            ONLY: the short label the rAF loop floats at the branch tip (horizontal, centred on
+            the tip), the selected one brightening to the amber accent. The full record (date,
+            place) stays in the aria-label so screen readers lose nothing. */}
         <div className="projects-tl-labels" ref={labelsRef}>
           {PROJECTS.map((p, i) => (
             <button

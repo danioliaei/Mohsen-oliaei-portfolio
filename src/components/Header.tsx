@@ -1,8 +1,15 @@
 import { useEffect, useRef, useState } from "react";
 
 /* =========================================================================
-   Header — a fixed top bar (name wordmark · "Menu" button) over the black hero,
-   and the expanding FULL-SCREEN menu it opens.
+   Header — a fixed top bar over the black hero, and the expanding FULL-SCREEN
+   menu it opens.
+
+   RESPONSIVE (req 1): on DESKTOP the bar is a normal header — the name wordmark
+   left, the three primary links (CV · Projects · Book me) inline on the right, and
+   NO menu button. On PHONES / narrow screens (≤760px) the inline nav collapses and
+   a single "Menu" button opens the full-screen overlay, where EVERYTHING lives. The
+   swap is pure CSS (`.header-nav` vs `.menu-btn` at the 760px breakpoint, see
+   index.css) — the same markup serves both, so there's no JS branch on width.
 
    The bar carries no `motion` import on purpose: it's the first thing painted, so
    its entrance is plain CSS (see index.css `header` animation) and the menu's
@@ -130,17 +137,30 @@ export default function Header() {
         <a className="wordmark" href="#home">
           Daniel Oliaei
         </a>
-        <button
-          ref={menuBtnRef}
-          type="button"
-          className="menu-btn"
-          aria-haspopup="dialog"
-          aria-expanded={open}
-          aria-controls="site-menu"
-          onClick={openMenu}
-        >
-          Menu
-        </button>
+        {/* the right cluster: an inline nav on desktop (the three primary experiences),
+            and the hamburger "Menu" on phones. CSS hides one or the other at the 760px
+            breakpoint — desktop never shows the button, phones never show the inline nav,
+            and everything still lives in the full-screen overlay for the phone menu. */}
+        <div className="header-right">
+          <nav className="header-nav" aria-label="Primary">
+            {PRIMARY.map((item) => (
+              <a key={item.href + item.label} href={item.href}>
+                {item.label}
+              </a>
+            ))}
+          </nav>
+          <button
+            ref={menuBtnRef}
+            type="button"
+            className="menu-btn"
+            aria-haspopup="dialog"
+            aria-expanded={open}
+            aria-controls="site-menu"
+            onClick={openMenu}
+          >
+            Menu
+          </button>
+        </div>
       </header>
 
       {/* the expanding full-screen menu. aria-hidden + inert tabindex when closed so it
