@@ -2,12 +2,13 @@
    projects.ts — the project survey, plotted on the Projects Dial overlay
    (ProjectsOverlay). A flat data module, mirroring the shape of stations.ts.
 
-   `elevation` (−0.4 .. 1.0) is the AUTHORED tip height: read left→right in
-   date order, the tips trace two mountain massifs with a central below-axis
-   valley — exactly like the WiFi-SSID data-art reference, translated into the
-   warm-dusk identity. The list is pre-sorted oldest→newest so the entrance
-   draws strictly left→right. Below-axis is reserved for a few speculative
-   study entries (their lines hang BELOW the ember baseline).
+   The plotted skyline is ONE SMOOTH CURVE driven purely by each project's DATE (see
+   bandCurve below): it rises from near the axis (2014) to a first PEAK (2017), eases
+   down through the baseline into a central VALLEY (2021), then rises to a second PEAK
+   (2025) and settles into 2026 — the hand-drawn target. The per-project `elevation`
+   authored below is LEGACY (no longer read for the plot); the curve alone sets every
+   tip's height and side. The list is pre-sorted oldest→newest so the entrance draws
+   strictly left→right.
 
    `major` is a CURATED significance flag: true = flagship work = the Dial
    draws a LONGER spoke; false = a smaller script / study / retrofit = a
@@ -31,7 +32,9 @@ export type Project = {
   short: string;
   /** "YYYY-MM" */
   date: string;
-  /** authored tip height, −0.4 .. 1.0 (negative = below the axis) */
+  /** LEGACY authored tip magnitude. No longer read for the plot — the skyline's height
+      AND side are now a smooth function of DATE (see bandCurve below). Kept on the
+      record so the values aren't lost (and to ease a future revert). */
   elevation: number;
   /** curated significance — true = flagship = LONGER Dial spoke */
   major: boolean;
@@ -122,11 +125,11 @@ const CORE: readonly Project[] = [
   { id: "carbon-dash-2026",    title: "Embodied-Carbon Dashboard",            short: "Carbon",       date: "2026-06", elevation: 0.80,  major: true,  descriptor: "Power BI board joining quantities to an embodied-carbon dataset",        place: "Stockholm, Sweden",  tags: ["Power BI", "Carbon", "Sustainability"] },
 ];
 
-// ---- densification (req: as dense as the WiFi-survey reference, with the BELOW axis now as
-// populated as the above). A run of speculative R&D probes / sketches / experiments that hang
-// BELOW the baseline across the whole 2014→2026 span — the "unbuilt" counter-massif mirroring the
-// delivered work above — plus a couple of early above-axis fills for the thin first year. Same
-// voice + place-by-year as CORE; a few probes are flagged major so the below skyline has tall peaks.
+// ---- densification (req: as dense as the WiFi-survey reference). A run of speculative R&D probes /
+// sketches / experiments spread across the whole 2014→2026 span, packed in among the delivered work.
+// They no longer form a separate below-axis massif — every tip now rides the single smooth skyline
+// curve whose height + side is a function of DATE (bandCurve): a probe sits ABOVE in the early/late
+// massifs and BELOW only through the central valley. Same voice + place-by-year as CORE.
 const EXTRA: readonly Project[] = [
   // 2014 — Tehran (two above to thicken the very first year, two below)
   { id: "hatch-lib-2014",      title: "ArchiCAD Hatch & Pen Library",         short: "Hatch Lib",    date: "2014-09", elevation: 0.14,  major: false, descriptor: "First reusable hatch + pen set standardising drawing output",             place: "Tehran, Iran",       tags: ["ArchiCAD", "Standards", "Documentation"] },
@@ -191,24 +194,56 @@ const EXTRA: readonly Project[] = [
   { id: "occ-heat-2026",       title: "Occupancy Heat-Map Probe",             short: "Heat Map",     date: "2026-06", elevation: -0.34, major: false, descriptor: "Below-axis occupancy heat-map probe from live sensor logs",              place: "Stockholm, Sweden",  tags: ["Python", "Data", "R&D"] },
 ];
 
-// the plotted survey, merged + stable-sorted oldest→newest (by year then month) so the scrub steps
-// chronologically and the entrance still draws strictly left→right.
-export const PROJECTS: readonly Project[] = [...CORE, ...EXTRA].sort(
-  (a, b) =>
-    (Number(a.date.slice(0, 4)) * 12 + Number(a.date.slice(5, 7))) -
-    (Number(b.date.slice(0, 4)) * 12 + Number(b.date.slice(5, 7))),
-);
+/** decimal year for x-placement + the band split, e.g. "2025-04" → 2025.25 */
+export const decimalYear = (date: string): number => {
+  const [y, m] = date.split("-").map(Number);
+  return y + (m - 1) / 12;
+};
+
+// ---- the single SKYLINE curve (req): every tip's height AND side is a SMOOTH function of its DATE, so
+// the whole survey traces ONE continuous, gently-undulating curve — no per-year steps, no per-project
+// jumps. It rises from near the axis (2014) to a first PEAK (2017), eases down THROUGH the baseline
+// (~2019) into a central VALLEY (2021), rises back THROUGH the baseline (~2023) to a second PEAK (2025),
+// then settles a touch into 2026 — the hand-drawn target. Built as a smooth S-rise into the first peak,
+// then a single cosine cycle carrying peak→valley→peak (its zeros ARE the two axis crossings, its slope
+// continuous throughout). Returns a SIGNED height in [−1, +1]: the sign is the side (above/below), the
+// magnitude is how far the tip reaches. Tweak the constants to reshape where it peaks, dips, and crosses.
+const CURVE_FIRST_PEAK = 2017; // decimal year of the first massif's crest (and where the cosine begins)
+const CURVE_CYCLE = 8;         // years for one peak→valley→peak → crossings at ±2y, the valley at +4y
+const CURVE_RISE_FROM = 2014;  // the opening rise starts near the axis here…
+const CURVE_RISE_FLOOR = 0.12; // …at this fraction of full, easing up to the first peak (2014 just off-axis)
+const smoothstep = (e0: number, e1: number, x: number): number => {
+  const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0)));
+  return t * t * (3 - 2 * t);
+};
+const lerp = (a: number, b: number, t: number): number => a + (b - a) * t;
+// signed skyline height in [−1, +1] at a date — see the block comment above.
+const bandCurve = (date: string): number => {
+  const dy = decimalYear(date);
+  // first massif: a smooth S-rise from just off the axis up to the crest, landing with slope 0 so it
+  // meets the cosine seamlessly at the peak.
+  if (dy <= CURVE_FIRST_PEAK)
+    return lerp(CURVE_RISE_FLOOR, 1, smoothstep(CURVE_RISE_FROM, CURVE_FIRST_PEAK, dy));
+  // from the crest on: one cosine cycle — peak (2017) → 0 (2019) → trough (2021) → 0 (2023) → peak
+  // (2025) → gentle fall (2026), all C¹-smooth (no kinks at the crossings).
+  return Math.cos((2 * Math.PI * (dy - CURVE_FIRST_PEAK)) / CURVE_CYCLE);
+};
+
+// the plotted survey: merged, each tip's height + side stamped by the smooth skyline curve at its DATE,
+// then stable-sorted oldest→newest (by year then month) so the scrub steps chronologically and the
+// entrance still draws strictly left→right.
+export const PROJECTS: readonly Project[] = [...CORE, ...EXTRA]
+  .map((p) => ({ ...p, elevation: bandCurve(p.date) }))
+  .sort(
+    (a, b) =>
+      (Number(a.date.slice(0, 4)) * 12 + Number(a.date.slice(5, 7))) -
+      (Number(b.date.slice(0, 4)) * 12 + Number(b.date.slice(5, 7))),
+  );
 
 const MONTHS_LONG = [
   "January", "February", "March", "April", "May", "June",
   "July", "August", "September", "October", "November", "December",
 ] as const;
-
-/** decimal year for x-placement, e.g. "2025-04" → 2025.25 */
-export const decimalYear = (date: string): number => {
-  const [y, m] = date.split("-").map(Number);
-  return y + (m - 1) / 12;
-};
 
 /** screen-reader date fragment, e.g. "April 2025" */
 export const formatMonthYearLong = (date: string): string => {

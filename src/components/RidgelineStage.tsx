@@ -103,16 +103,14 @@ const TL_BASE_Y = 0.55; // FALLBACK baseline height (fraction of H); the loop WE
 
 // ---- straight-line plot geometry (px unless noted). The WiFi-survey look: one vertical hairline
 // per project, rooted at its TRUE date x (a small organic jitter added so the spacing reads like
-// events at genuinely different times — req 5). Within a (year, direction) group the LATEST
-// project's line is tallest and the earlier ones step DOWN by a row, so the tips form a staircase and
-// each line's VERTICAL name (req 1) starts at a distinct height — keeping year-mates' names apart.
-// Each year-peak traces the elevation envelope → a sinus skyline; the below-axis studies hang DOWN,
-// and a faint MIRROR clone reflects everything below the baseline so the skyline continues (req 6).
-const TL_STACK = 15; // px a line steps down per earlier project == one stacked label row
-const TL_FLOOR = 18; // px shortest line in a group (keeps even the earliest readable)
-const TL_PEAK_MIN = 0.05; // a year-peak's floor (fraction of H)
-const TL_PEAK_RANGE = 0.3; // …+ this × the group's max |elevation| → the sinus envelope height
-const TL_MAJOR_BONUS = 0.045; // a flagship-bearing year reaches a touch further (fraction of H)
+// events at genuinely different times — req 5). Each line's LENGTH is the smooth skyline curve sampled
+// at its date (bandCurve in projects.ts) — so the tips of all 127 lines trace ONE continuous, gently
+// undulating curve (first peak ~2017, valley ~2021, second peak ~2025), NOT a per-year staircase.
+// Up-tips rise above the baseline, the central-valley tips hang BELOW it; the names de-collide off the
+// settled tips by a small push-down (no staircase needed to separate them anymore).
+const TL_FLOOR = 18; // px shortest visible line (keeps tips near a crossing readable)
+const TL_PEAK_MIN = 0.04; // the skyline's floor (fraction of H) — added to every tip
+const TL_PEAK_RANGE = 0.19; // …+ this × |smooth band height| → the tip's reach (moderate amplitude; peak ≈ 0.23H)
 const TL_TOP_MARGIN = 0.12; // up-lines never rise above this (× H) — the skyline cap below the header
 // the names are HORIZONTAL in right-hand columns now (not vertical above the tips), so a tall up-tip
 // only needs to clear the fixed header chrome (~86px) — this absolute reserve floors the tallest up-tip
@@ -174,50 +172,18 @@ const tlJitter = (i: number) => {
 // the jittered TRUE-date x for every project (0..1 along the axis)
 const TL_XFRAC_J = PROJECTS.map((_, i) => TL_XFRAC[i] + tlJitter(i));
 
-// per-project plot inputs, precomputed once (W/H-independent fractions). For each project: its
-// jittered true-date x, up/down direction (below-axis studies go DOWN), and — within its (year,
-// direction) sub-group ordered by date — its stack rank, the group size, whether the group carries
-// flagship work, and the group's max |elevation| (the envelope driver).
+// per-project plot inputs, precomputed once (W/H-independent fractions). For each project: its jittered
+// true-date x and which side of the axis its tip points — set by the SIGN of the smooth skyline curve
+// (bandCurve in projects.ts; negative = the central valley → DOWN). Tip HEIGHT is no longer grouped by
+// year; each tip follows its own smooth curve height in the loop, so the whole skyline reads as one curve.
 type TlPlot = {
   xFrac: number;
   down: boolean;
-  stackRank: number;
-  groupCount: number;
-  groupMajor: boolean;
-  groupMaxAbs: number;
 };
-const TL_PLOT: TlPlot[] = (() => {
-  const out: TlPlot[] = new Array(PROJECTS.length);
-  // PROJECTS is pre-sorted oldest→newest, so each year's index list (and each sub-group) is in
-  // date order — the last entry in a (year, direction) group is that year's latest.
-  const byYear = new Map<number, number[]>();
-  PROJECTS.forEach((p, i) => {
-    const y = Number(p.date.slice(0, 4));
-    const arr = byYear.get(y);
-    if (arr) arr.push(i);
-    else byYear.set(y, [i]);
-  });
-  for (const idxs of byYear.values()) {
-    const sub: Record<"up" | "down", number[]> = { up: [], down: [] };
-    for (const i of idxs) sub[PROJECTS[i].elevation < 0 ? "down" : "up"].push(i);
-    for (const dir of ["up", "down"] as const) {
-      const g = sub[dir];
-      const groupMaxAbs = g.reduce((m, i) => Math.max(m, Math.abs(PROJECTS[i].elevation)), 0.18);
-      const groupMajor = g.some((i) => PROJECTS[i].major);
-      g.forEach((i, rank) => {
-        out[i] = {
-          xFrac: TL_XFRAC_J[i],
-          down: dir === "down",
-          stackRank: rank,
-          groupCount: g.length,
-          groupMajor,
-          groupMaxAbs,
-        };
-      });
-    }
-  }
-  return out;
-})();
+const TL_PLOT: TlPlot[] = PROJECTS.map((p, i) => ({
+  xFrac: TL_XFRAC_J[i],
+  down: p.elevation < 0,
+}));
 
 // DATE CLUSTERS for the name columns (req 3). Walk the projects in date order and break a new cluster
 // on a big enough x-gap OR once a cluster is full — so near-in-time lines group together and a long,
@@ -1732,24 +1698,13 @@ export default function RidgelineStage() {
             const lineX = warpX(padPx + pl.xFrac * plotW + pan); // jittered date-x + pan, then hover lens
             const dirY = pl.down ? 1 : -1;
 
-            // the year-peak (group-level, identical for every member): the elevation envelope,
-            // floored so the whole stack fits and capped to the available room so nothing clips.
+            // each tip's LENGTH is the smooth skyline curve (|elevation|, set by date in projects.ts'
+            // bandCurve) — so all 127 tips trace ONE continuous, gently undulating curve, NOT a per-year
+            // staircase. Floored so the shallow tips near a crossing stay visible; capped to the room so
+            // the peaks / valley never clip the header or the year ruler.
             const room = pl.down ? downRoom : upRoom;
-            // the stack must FIT within `room` (clear of the top edge / the year ruler): if a year is
-            // too populous for the available height, COMPRESS the per-row step so the tallest line
-            // stays inside room. In the common (tall-enough) case this is a no-op — fitStack ===
-            // TL_STACK. room is always > TL_FLOOR (baseY clamped to [0.46H,0.58H] ⇒ room stays positive).
-            const fitStack =
-              pl.groupCount > 1
-                ? Math.min(TL_STACK, (room - TL_FLOOR) / (pl.groupCount - 1))
-                : TL_STACK;
-            const stackReq = (pl.groupCount - 1) * fitStack + TL_FLOOR; // ≤ room by construction
-            const envel =
-              (TL_PEAK_MIN + pl.groupMaxAbs * TL_PEAK_RANGE + (pl.groupMajor ? TL_MAJOR_BONUS : 0)) * H;
-            const peak = Math.min(Math.max(envel, stackReq), room);
-            // the latest in the group reaches `peak` (≤ room); each earlier one steps down one
-            // (fitted) row, so the shortest is ≥ TL_FLOOR and the names stay clear of the chrome.
-            const fullLen = peak - (pl.groupCount - 1 - pl.stackRank) * fitStack;
+            const envel = (TL_PEAK_MIN + Math.abs(PROJECTS[i].elevation) * TL_PEAK_RANGE) * H;
+            const fullLen = Math.min(Math.max(envel, TL_FLOOR), room);
             const fullTipY = baseY + dirY * fullLen; // SETTLED tip — drives the name column + hover pick
             tlTipY[i] = fullTipY;
 
@@ -1797,16 +1752,17 @@ export default function RidgelineStage() {
           // ---- the NAME columns (req 2/3). Each date cluster's names share ONE left edge just to the
           // RIGHT of the cluster's right-most line (TL_CLUSTER_MAXX → px), so a horizontal name never
           // crosses a line in its own cluster. Within the column each name sits at its line's settled
-          // tip height (the staircase the per-year step-down already traces) and is nudged DOWN only if
-          // two would overlap (dense, but legible) — keyed off the stashed tip so it never jitters as
-          // the lines draw in. Resolves last (pLabel) with a tiny settle slide outward.
+          // tip height (its smooth-curve height) and is nudged DOWN only if two would overlap (dense, but
+          // legible) — keyed off the stashed tip so it never jitters as the lines draw in. Resolves last
+          // (pLabel) with a tiny settle slide outward.
           const rowMin = mobile ? 16 : 12; // min px between stacked names (≥ the live name height)
           for (const cluster of TL_CLUSTERS) {
             // the column left-aligns just past the cluster's right-most line — warped with the lines so the
             // names track their (spread) cluster, then the fixed GAP added in screen space.
             const colX = warpX(padPx + TL_CLUSTER_MAXX[cluster[0]] * plotW + pan) + TL_LABEL_GAP;
             // order rows top→bottom (up-names above the baseline first, down-names below) then push down
-            // to keep a min gap; the staircase already separates same-year names so this rarely fires.
+            // to keep a min gap; neighbouring tips now sit at similar heights on the smooth curve, so
+            // this push-down is what keeps a cluster's names apart.
             const rows = cluster.slice().sort((a, b) => tlTipY[a] - tlTipY[b]);
             let prevY = -Infinity;
             for (const i of rows) {
