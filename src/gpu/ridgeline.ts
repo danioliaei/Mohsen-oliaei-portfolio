@@ -397,8 +397,9 @@ const NZ = 420;
 /* ---- PHONE RENDER PROFILE (tunable) -------------------------------------------------
    Small / touch viewports trade GEOMETRY for SHARPER lines: a lighter terrain mesh +
    thinner globe + wider contour spacing free the GPU budget so the phone can render at a
-   higher DPR (set in RidgelineStage.resize + scCap below) without the thermal throttle the
-   on-device telemetry caught (see TELEMETRY.md). Detected ONCE at scene construction (a
+   higher DPR (set in RidgelineStage.resize + the supersample profile in resize() below) without
+   the thermal throttle the on-device telemetry caught (see TELEMETRY.md). Detected ONCE at scene
+   construction (a
    phone stays a phone); desktop keeps the full-fat path. Dial these to taste. */
 const phoneRender = (): boolean =>
   typeof matchMedia === "function" &&
@@ -468,6 +469,11 @@ export interface RidgeFrame {
    *  while the moon transits, this tracks it so it never blurs. (Packed into lod.y/lod.z.) */
   focalX?: number;
   focalY?: number;
+  /** One-shot mountain REVEAL 0..1: 0 = the white-on-black contour model, 1 = the finished
+   *  realistic rock/snow render. The stage advances it from 0→1 a single time once the massif
+   *  lands and then HOLDS it at 1 (it no longer ping-pongs), so the detailed mountain stays put.
+   *  Defaults to 1 (any caller that omits it renders the fully-revealed mountain). Packed into lod.w. */
+  reveal?: number;
 }
 
 /* ---- orbit camera: drag to spin a full turn around the summit -------------
@@ -887,8 +893,8 @@ export class RidgelineScene {
   private sc = 1;
   private dprUsed = 1;
   // phone render profile (set once in the constructor from phoneRender()):
-  private lineScale = 1; // contour-spacing scale fed to the shader as F.lod.x
-  private scCap = 2;     // HDR scene supersample cap (raised on phones for sharper hairlines)
+  private isPhone = false; // touch / small viewport → lighter geometry + the thermal-bound supersample profile
+  private lineScale = 1;   // contour-spacing scale fed to the shader as F.lod.x
 
   // ---- DYNAMIC RESOLUTION SCALING (zero-churn sub-rect) -------------------------------------
   // The scene pass is the dominant fill cost (heavy terrain FS over the supersampled HDR target).
@@ -940,8 +946,8 @@ export class RidgelineScene {
     // ---- phone render profile: a lighter mesh + thinner globe + wider contours, paid
     // back as a higher render DPR (sharper lines). Resolved once here at construction. ----
     const phone = phoneRender();
+    this.isPhone = phone;
     this.lineScale = phone ? PHONE_LINE_SCALE : 1;
-    this.scCap = phone ? PHONE_SC_CAP : 2.25; // desktop supersample cap (was 2 → +crispness; the lighter globe/mountain geometry frees the fill budget). Phone stays at PHONE_SC_CAP (fill/thermal-bound).
     const nx = phone ? PHONE_NX : NX;
     const nz = phone ? PHONE_NZ : NZ;
 
@@ -1144,16 +1150,23 @@ export class RidgelineScene {
     this.dprUsed = dpr; // the effective (already-clamped) DPR — surfaced via info()
     this.canvas.width = Math.max(1, Math.round(W * dpr));
     this.canvas.height = Math.max(1, Math.round(H * dpr));
-    // supersample the HDR scene so the composite box-downsample yields clean,
-    // un-aliased hairlines and ridge silhouettes (scCap is raised on phones for extra crispness)
-    this.sc = Math.min(dpr * 1.4, this.scCap);
+    // supersample the HDR scene so the composite box-downsample yields clean, un-aliased hairlines
+    // and ridge silhouettes. DESKTOP / LARGER SCREENS push the supersample HIGHER for crisper globe
+    // lines (req 4): a steeper DPR multiplier + a viewport-size-tiered cap (the bigger the display,
+    // the more supersampling). Phones keep their own fill/thermal-bound profile. DRS still scales the
+    // render-scale back under sustained load, so the steady globe — which has ample headroom — renders
+    // at this full crispness while the heavier mountain leans on DRS if it must.
+    const big = Math.max(W, H) >= 1440; // CSS px — a roomy desktop / large display
+    const scMul = this.isPhone ? 1.4 : 1.75;
+    const scCap = this.isPhone ? PHONE_SC_CAP : (big ? 2.85 : 2.6);
+    this.sc = Math.min(dpr * scMul, scCap);
     const fit = (d.limits.maxTextureDimension2D - 16) / Math.max(W, H, 1);
     this.sc = Math.max(1, Math.min(this.sc, fit));
     this.rw = Math.max(1, Math.round(W * this.sc));
     this.rh = Math.max(1, Math.round(H * this.sc));
     // DRS floor: never let the effective device-pixel ratio (sc × scale) fall below 1, or the lines
-    // would raw-alias — so the floor is max(0.66, 1/sc) against the LIVE sc (which can be 1.4 on a
-    // 1×-DPR monitor), not 1/scCap. Re-clamp any persisted scale into the new range.
+    // would raw-alias — so the floor is max(0.66, 1/sc) against the LIVE sc (which can be ~1.75 on a
+    // 1×-DPR desktop), not 1/(the cap). Re-clamp any persisted scale into the new range.
     this.drsFloor = Math.max(0.66, 1 / this.sc);
     this.scale = Math.max(this.drsFloor, Math.min(1, this.scale));
     this.aw = this.rw;
@@ -1247,12 +1260,17 @@ export class RidgelineScene {
     // filament flow (0 on reduced-motion → the web holds still), defaulting to 1. projAmt calms the
     // filaments as the Projects dial opens (globe-only; defaults to 0 → today's chaotic ball).
     u[36] = s.morph ?? 1; u[37] = s.globeSpin ?? 0; u[38] = s.motion ?? 1; u[39] = s.projAmt ?? 0;
-    // lod = (contourScale, focalX, focalY, _) — x widens the mountain's scan-line + fine-contour
+    // lod = (contourScale, focalX, focalY, reveal) — x widens the mountain's scan-line + fine-contour
     // spacing on phones (1.0 on desktop); y/z carry the Projects depth-of-field FOCAL POINT in
-    // composite UV (default frame-centre 0.5,0.5 ⇒ the DoF dead branch stays byte-identical).
+    // composite UV (default frame-centre 0.5,0.5 ⇒ the DoF dead branch stays byte-identical); w is the
+    // one-shot mountain reveal (below).
     u[40] = this.lineScale;
     u[41] = s.focalX ?? 0.5;
     u[42] = s.focalY ?? 0.5;
+    // lod.w = the one-shot mountain reveal (0 = contour model … 1 = fully realistic). The stage
+    // sweeps it 0→1 once after the massif lands and HOLDS at 1, so the detail no longer ping-pongs.
+    // Defaults to 1 ⇒ a caller that omits it renders the finished, fully-revealed mountain.
+    u[43] = s.reveal ?? 1;
     // drs = (sceneRectX, sceneRectY, _, _): the fraction of the (max) HDR target the live scene
     // occupies this frame. The composite folds it into every sceneTex tap. (1,1) at full scale.
     u[44] = this.aw / this.rw;

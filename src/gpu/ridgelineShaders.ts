@@ -26,7 +26,7 @@ struct Frame {
   eye  : vec4<f32>,   // xyz camera eye (world), w unused
   hov  : vec4<f32>,   // x hovered slice index (-1 none), y pulse 0..1, zw unused
   mph  : vec4<f32>,   // x morph 0..1 (0 = intro globe, 1 = finished mountain), y globeSpin (rad), z motion, w projAmt (0 = globe chaos … 1 = dial-calm)
-  lod  : vec4<f32>,   // x contour-spacing scale (1 = desktop; >1 on phones widens the spacing → fewer lines), yzw unused
+  lod  : vec4<f32>,   // x contour-spacing scale (1 = desktop; >1 on phones widens the spacing → fewer lines), y/z Projects DoF focal point (composite UV), w one-shot mountain reveal 0..1 (1 = fully realistic; default 1)
   drs  : vec4<f32>,   // x,y = DRS scene sub-rect (fraction of the max HDR target the live scene fills; (1,1) at full quality), zw unused
 };
 @group(0) @binding(0) var<uniform> F : Frame;
@@ -371,26 +371,25 @@ struct VsOut {
   //  to compile. Designed + adversarially WGSL-reviewed via a fan-out workflow.
   // ----------------------------------------------------------------------------
   let screenX01 = i.pos.x / F.a.y;                 // 0 at the left edge -> 1 at the right edge of the (supersampled) target
-  // the reveal sweep stays ALIVE through every state — at rest, behind a focused
-  // career dossier, and behind the "Your Assignment?" brief alike — so the mountain
-  // keeps breathing under all of them. (It used to park to a frozen contour schematic
-  // on focus via F.hov.w; that made the experience overlay static while the assignment
-  // overlay — which never raises focusAmt — kept pulsing. Decoupled so they match.
-  // The band / halo / slice dimming further down STILL keys off F.hov.w; only the
-  // sweep is freed.)
-  // the realistic sweep is the FINISHING flourish: absent on the globe, ramped in over the
-  // last of the morph, and exactly 1.0 at vmF = 1 → the endpoint equals today's mountain.
+  // the reveal seam is NOT keyed off focus (F.hov.w) — it runs the same behind a focused career
+  // dossier, the "Your Assignment?" brief, or at rest. The seam position is driven purely by the
+  // one-shot eased (F.lod.w) below + the per-vertex landing calm; the band / halo / slice dimming
+  // further down still keys off F.hov.w, only the sweep is independent.
+  // the realistic render is the FINISHING flourish: absent on the globe, ramped in over the last
+  // of the morph (via calm), then swept fully in ONCE by the one-shot reveal — and held there.
   let calm = smoothstep(0.50, 1.0, vmF);         // realistic rock/snow grows WITH the emerging contour model, not bunched in the tail (endpoint pinned: =1 at vmF=1)
-  // ping-pong PHASE from unbounded time via cos() (no fract precision drift at large t)
-  let SWEEP_W = 0.52;                              // rad/s -> ~12.1s for a full there-and-back cycle
-  let ph = 0.5 - 0.5 * cos(F.a.x * SWEEP_W);       // 0 -> 1 -> 0, symmetric, smooth turn-arounds
-  let dwelled = smoothstep(0.08, 0.92, ph);        // gentle symmetric ease + a soft rest at BOTH ends (no latch)
-  let eased = dwelled * dwelled * (3.0 - 2.0 * dwelled);   // smootherstep S-curve, still symmetric
+  // ONE-SHOT reveal (req 1): the seam used to ping-pong forever off a cos(time) phase, so the
+  // finished mountain endlessly flickered between the white-on-black CONTOUR MODEL and the lit
+  // rock/snow render — a "coming and going" pulse. It is now driven by F.lod.w, a monotonic 0->1
+  // progress the stage advances EXACTLY ONCE after the massif lands and then HOLDS at 1. So the seam
+  // sweeps across a single time and the mountain stays on the detailed realistic render thereafter.
+  // (lod.w defaults to 1 ⇒ any path that omits it shows the finished, fully-revealed mountain.)
+  let eased = clamp(F.lod.w, 0.0, 1.0);            // 0 = all contour model … 1 = fully realistic (held)
   // wavefront position: eased 0 -> seam off the RIGHT (all contour model); eased 1 ->
   // seam off the LEFT (all realistic). The seam recedes right->left and the render
   // fills in behind it. Over-scan past both edges (-0.10..1.10) so the seam fully clears.
   let travel = mix(1.10, -0.10, eased);
-  let front = mix(1.10, travel, calm);             // calm=0 (focused) parks it at 1.10 = all contour model, frozen
+  let front = mix(1.10, travel, calm);             // calm=0 (an un-formed vertex) parks it at 1.10 = all contour model
   let band = mix(0.012, 0.090, calm);              // transition half-width; wider while free so the moving seam is soft
   // real = 0 LEFT of the seam (contour model — "left stays the model"), 1 to the RIGHT
   // in its wake (the shaded render); smooth across the band.
