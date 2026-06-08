@@ -398,9 +398,11 @@ export default function RidgelineStage() {
     }
   }, [assignmentOpen]);
 
-  // the same focus dance for the Projects timeline: remember what held focus (the
-  // Projects nav link), move focus to its close control on open, restore on close —
-  // falling back to the nav link when nothing meaningful held it.
+  // the same focus dance for the Projects timeline: remember what held focus, move focus
+  // to its close control on open, restore on close — falling back to the header's always-
+  // visible "Menu" button when nothing meaningful held it. (The old fallback pointed at a
+  // desktop nav link that no longer exists — the nav now lives inside the closed, inert
+  // full-screen menu, where .focus() is a no-op — so target the bar's Menu button instead.)
   useEffect(() => {
     if (projectsOpen) {
       projectsLastFocusRef.current = document.activeElement as HTMLElement | null;
@@ -409,17 +411,17 @@ export default function RidgelineStage() {
     } else if (projectsWasOpenRef.current) {
       projectsWasOpenRef.current = false;
       const prev = projectsLastFocusRef.current;
-      const navLink =
+      const fallback =
         typeof document !== "undefined"
-          ? document.querySelector<HTMLElement>('nav a[href="#projects"]')
+          ? document.querySelector<HTMLElement>("header .menu-btn")
           : null;
-      (prev && prev !== document.body ? prev : navLink)?.focus?.();
+      (prev && prev !== document.body ? prev : fallback)?.focus?.();
     }
   }, [projectsOpen]);
 
-  // the same focus dance for the "Book me" session menu: remember what held focus
-  // (the Book me nav link), move focus to its close control on open, restore on close —
-  // falling back to the nav link when nothing meaningful held it.
+  // the same focus dance for the "Book me" session menu: remember what held focus, move
+  // focus to its close control on open, restore on close — falling back to the header's
+  // always-visible "Menu" button (see the Projects effect note above) when nothing held it.
   useEffect(() => {
     if (bookOpen) {
       bookLastFocusRef.current = document.activeElement as HTMLElement | null;
@@ -428,11 +430,11 @@ export default function RidgelineStage() {
     } else if (bookWasOpenRef.current) {
       bookWasOpenRef.current = false;
       const prev = bookLastFocusRef.current;
-      const navLink =
+      const fallback =
         typeof document !== "undefined"
-          ? document.querySelector<HTMLElement>('nav a[href="#book"]')
+          ? document.querySelector<HTMLElement>("header .menu-btn")
           : null;
-      (prev && prev !== document.body ? prev : navLink)?.focus?.();
+      (prev && prev !== document.body ? prev : fallback)?.focus?.();
     }
   }, [bookOpen]);
 
@@ -615,6 +617,14 @@ export default function RidgelineStage() {
       let globeSpin = 0;        // radians about Y; advances whenever the globe shows, eased to rest as terrain forms
       const mix01 = (a: number, b: number, t: number) => a + (b - a) * t;
       let hintOpacity = 0;      // eased opacity of the bottom "drag to rotate" cue (globe-only, loop-owned)
+
+      // ---- ONE-SHOT mountain reveal (req 1): the contour-model → realistic sweep used to ping-pong
+      // forever in the shader (cos(time)), so the finished mountain kept flickering between the two
+      // looks. revealClock is a monotonic 0→1 progress this loop advances EXACTLY ONCE, after the
+      // massif lands, then latches at 1 — so the seam sweeps a single time and the detailed render
+      // stays put. It is shaped (smootherstep) into `reveal` (lod.w) each frame for a graceful sweep.
+      const REVEAL_DUR = 4.0;   // s — the one-time contour→realistic sweep
+      let revealClock = 0;      // 0 = contour model … 1 = fully revealed (latched; never decreases)
 
       // ---- Projects "Transit" loop state (shared by the frame + the projects-mode pointer/key
       // handlers + updateTimeline, all in this one closure). projAmt eases the whole timeline in/out;
@@ -1509,6 +1519,19 @@ export default function RidgelineStage() {
         const spinOut = globeSpin + dialAngle * projAmt;
         const landed = mc > 0.985;
 
+        // advance the one-shot reveal once the mountain has landed, then hold at 1 (req 1). Latched so
+        // it plays a single time per session; reduced motion snaps straight to the revealed render.
+        if (landed && morphTargetRef.current === 1) {
+          revealClock = Math.min(1, revealClock + (reduceMotion ? 1 : dt / REVEAL_DUR));
+        }
+        // smootherstep the linear progress so the sweep eases in and out gracefully
+        const reveal =
+          revealClock <= 0
+            ? 0
+            : revealClock >= 1
+              ? 1
+              : revealClock * revealClock * revealClock * (revealClock * (revealClock * 6 - 15) + 10);
+
         // after release, inertia drifts the TARGET, eased out until it settles
         if (!dragging && (velYaw !== 0 || velPitch !== 0)) {
           tYaw += velYaw * dt;
@@ -1701,6 +1724,7 @@ export default function RidgelineStage() {
           focalX,
           focalY,
           projAmt,
+          reveal,
         });
 
         // bottom drag hint: shown only on the whole globe (mc≈0) and only until the first rotate

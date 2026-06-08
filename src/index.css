@@ -1,10 +1,32 @@
 :root {
-  /* ONE global UI typeface, used at many weights (the wordmark's family) */
+  /* the site UI typeface, used at many weights */
   --sans: "Inter", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  /* the fixed header + full-screen menu typeface — a friendly grotesque (req 5). The look
+     I'm after is ABC Dinamo "Social"; "ABC Social" leads the stack as an @font-face swap
+     point (see below) and falls through to Hanken Grotesk until it's licensed + dropped in. */
+  --nav: "ABC Social", "Hanken Grotesk", "Inter", "Helvetica Neue", Helvetica, Arial, sans-serif;
   --ink: #f4f1ea;
   /* accent used by the WebGPU-required notice eyebrow */
   --c-education: #ffc45c;
 }
+
+/* ABC Dinamo "Social" swap point — drop the licensed files in and the header + menu pick it
+   up automatically (it's first in the --nav stack). Uncomment + point at the real files:
+@font-face {
+  font-family: "ABC Social";
+  src: url("/fonts/ABCSocial-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "ABC Social";
+  src: url("/fonts/ABCSocial-Light.woff2") format("woff2");
+  font-weight: 300;
+  font-style: normal;
+  font-display: swap;
+}
+*/
 
 * {
   margin: 0;
@@ -39,18 +61,13 @@ body::after {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
 }
 
-/* ---------------- header ---------------- */
-/* Entrance animations live here (not in `motion`) so the header paints + animates with no
-   JS library on the critical path — see Header.tsx. Mirrors the old framer-motion values:
-   header fade/slide-down (y -18 → 0, 0.9s, delay 0.1s); nav links fade/slide (y -10 → 0,
-   0.6s, per-link delay set inline). `both` fill-mode holds the hidden start state through
-   the delay, matching motion's `initial`. */
+/* ---------------- header (fixed top bar) ----------------
+   A fixed bar over the black hero: the name wordmark top-LEFT, a "Menu" button top-RIGHT
+   (req 5). Hanken Grotesk (--nav), light/regular weights, tight negative tracking. The
+   entrance fade/slide lives here (not in `motion`) so the bar paints + animates with no JS
+   library on the critical path — see Header.tsx. */
 @keyframes header-enter {
   from { opacity: 0; transform: translateY(-18px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-@keyframes navlink-enter {
-  from { opacity: 0; transform: translateY(-10px); }
   to { opacity: 1; transform: translateY(0); }
 }
 header {
@@ -60,269 +77,264 @@ header {
   right: 0;
   z-index: 40;
   animation: header-enter 0.9s cubic-bezier(0.22, 1, 0.36, 1) 0.1s both;
-  /* the bar spans the full width but only the wordmark + nav links should catch
-     clicks — let its empty centre band fall through to the apex beacon (and the
-     orbit canvas) beneath, which otherwise sit under this z-40 stacking context */
+  /* the bar spans the full width but only the wordmark + Menu button should catch clicks —
+     let its empty centre band fall through to the apex beacon (and the orbit canvas)
+     beneath, which otherwise sit under this z-40 stacking context */
   pointer-events: none;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 28px 34px;
-  /* a crisp, tight shadow keeps the wordmark + nav legible over the bright
-     summit without the old fuzzy halo */
+  padding: 26px 34px;
+  /* a crisp, tight shadow keeps the wordmark + button legible over the bright summit */
   text-shadow:
     0 1px 2px rgba(18, 8, 2, 0.5),
     0 2px 16px rgba(18, 8, 2, 0.34);
 }
 .wordmark {
-  pointer-events: auto; /* the bar is click-through; its links are not */
-  font-family: var(--sans);
-  font-size: 27px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
+  pointer-events: auto; /* the bar is click-through; its controls are not */
+  font-family: var(--nav);
+  font-size: 26px;
+  font-weight: 400;
+  letter-spacing: -0.02em; /* tight negative tracking on the large type */
   color: var(--ink);
   text-decoration: none;
   white-space: nowrap;
+  -webkit-font-smoothing: antialiased;
   transition: opacity 0.25s ease;
 }
 .wordmark:hover {
-  opacity: 0.7;
+  opacity: 0.6;
 }
-nav {
-  display: flex;
-  gap: 30px;
-}
-nav a {
-  pointer-events: auto; /* the bar is click-through; its links are not */
-  position: relative;
-  font-size: 12px;
-  font-weight: 500;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  color: rgba(244, 241, 234, 0.78);
+/* the "Menu" / "Close" control — a real <button>, no border / no background, white text;
+   hover lowers the opacity (req 5) */
+.menu-btn {
+  pointer-events: auto;
+  padding: 4px 0;
+  border: 0;
+  background: none;
+  font-family: var(--nav);
+  font-size: 17px;
+  font-weight: 400;
+  letter-spacing: -0.01em;
+  color: var(--ink);
   text-decoration: none;
-  transition: color 0.3s ease;
-  animation: navlink-enter 0.6s cubic-bezier(0.22, 1, 0.36, 1) both; /* per-link delay set inline (Header.tsx) */
+  cursor: pointer;
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+  transition: opacity 0.25s ease;
 }
-/* the scene already honours reduced-motion; the header should too — skip the entrance
-   slide/fade and land straight in its resting state. */
+.menu-btn:hover {
+  opacity: 0.6;
+}
 @media (prefers-reduced-motion: reduce) {
-  header,
-  nav a {
+  header {
     animation: none;
   }
 }
-nav a::after {
-  content: "";
-  position: absolute;
-  left: 0;
-  right: 100%;
-  bottom: -6px;
-  height: 1px;
-  background: currentColor;
-  transition: right 0.4s cubic-bezier(0.22, 1, 0.36, 1);
-}
-nav a:hover {
-  color: var(--ink);
-}
-nav a:hover::after {
-  right: 0.16em; /* stop the rule short of the trailing letter-spacing */
-}
 
-/* ---------------- phone menu: the glass "+" disc + its frosted drop panel ----------------
-   On phones the five-link row is swapped for a single liquid-glass "+" control (same frosted
-   disc as .role-close / .beacon-core). Tapping it morphs + → × and reveals a frosted panel
-   of the same links. Hidden entirely on desktop, where the inline .nav-desktop row is used. */
-.nav-mobile {
-  display: none;
-}
-@media (max-width: 760px) {
-  .nav-mobile {
-    display: block;
-    position: relative;
-  }
-}
-
-/* the frosted disc — borrows the role-close / beacon glass recipe (dark plate, soft blur,
-   machined hairline border, inset top highlight) so it reads as the same family of control */
-.menu-toggle {
-  pointer-events: auto; /* the bar is click-through; this control is not */
-  position: relative;
-  z-index: 2; /* above the scrim, inside the header's stacking context */
-  display: grid;
-  place-items: center;
-  width: 42px;
-  height: 42px;
-  padding: 0;
-  border: 1px solid rgba(244, 241, 234, 0.3);
-  border-radius: 50%;
-  background: radial-gradient(
-    120% 120% at 50% 32%,
-    rgba(244, 241, 234, 0.13),
-    rgba(8, 9, 12, 0.46) 72%
-  );
-  -webkit-backdrop-filter: blur(9px) saturate(1.05);
-  backdrop-filter: blur(9px) saturate(1.05);
-  cursor: pointer;
-  box-shadow:
-    0 8px 26px rgba(0, 0, 0, 0.42),
-    inset 0 1px 0 rgba(255, 255, 255, 0.08);
-  transition:
-    border-color 0.3s ease,
-    background 0.3s ease,
-    box-shadow 0.3s ease;
-}
-.menu-toggle:hover {
-  border-color: rgba(244, 241, 234, 0.52);
-  background: radial-gradient(
-    120% 120% at 50% 32%,
-    rgba(244, 241, 234, 0.17),
-    rgba(20, 22, 28, 0.5) 72%
-  );
-  box-shadow:
-    0 10px 30px rgba(0, 0, 0, 0.46),
-    inset 0 1px 0 rgba(255, 255, 255, 0.1),
-    0 0 22px 1px rgba(244, 241, 234, 0.07);
-}
-.menu-toggle:active {
-  transform: scale(0.94);
-}
-
-/* the "+" itself: two welded bars. Rotating the pair 135° lands them at 45°/135° — i.e. an
-   ×. The spin is the whole gesture, so it gets the generous summit-ease curve. */
-.menu-toggle-icon {
-  position: relative;
-  display: block;
-  width: 16px;
-  height: 16px;
-  transition: transform 0.5s cubic-bezier(0.22, 1, 0.36, 1);
-}
-.menu-toggle-icon span {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  width: 16px;
-  height: 1.6px;
-  border-radius: 2px;
-  background: rgba(244, 241, 234, 0.94);
-  box-shadow: 0 1px 8px rgba(0, 0, 0, 0.6);
-  transform: translate(-50%, -50%);
-}
-.menu-toggle-icon span:nth-child(2) {
-  transform: translate(-50%, -50%) rotate(90deg);
-}
-.nav-mobile.is-open .menu-toggle-icon {
-  transform: rotate(135deg);
-}
-.nav-mobile.is-open .menu-toggle {
-  border-color: rgba(244, 241, 234, 0.52);
-  background: radial-gradient(
-    120% 120% at 50% 32%,
-    rgba(244, 241, 234, 0.17),
-    rgba(20, 22, 28, 0.5) 72%
-  );
-}
-
-/* a whisper of frost behind the panel — taps outside the panel land here and close the
-   menu, while the highlighted mountain still reads clearly through the light blur */
-.menu-scrim {
+/* ---------------- the expanding full-screen menu ----------------
+   "Menu" opens a pure-black overlay that fades in + slides DOWN (~0.5s), covers the whole
+   viewport and locks page scroll (Header.tsx). It mirrors the header (wordmark left, Close
+   right), then stacks: a few LARGE primary links, an underlined search field, a responsive
+   grid of secondary link groups, and the © footer. Items fade-up in a STAGGERED sequence on
+   open (incremental transition-delays set inline in Header.tsx) and reveal instantly on close.
+   Close via the Close button, the backdrop, or Escape. No external JS libs — pure CSS state. */
+.menu-overlay {
   position: fixed;
   inset: 0;
-  z-index: 1;
-  background: rgba(6, 7, 10, 0.26);
-  -webkit-backdrop-filter: blur(2px);
-  backdrop-filter: blur(2px);
+  z-index: 50; /* above the header (40); below the film grain (60) */
+  background: #000;
+  color: var(--ink);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-font-smoothing: antialiased;
+  /* closed: faded out, nudged up a touch, and inert (no taps; out of the a11y tree) */
   opacity: 0;
+  visibility: hidden;
+  transform: translateY(-16px);
   pointer-events: none;
-  transition: opacity 0.4s ease;
+  transition:
+    opacity 0.5s cubic-bezier(0.22, 1, 0.36, 1),
+    transform 0.5s cubic-bezier(0.22, 1, 0.36, 1),
+    visibility 0s linear 0.5s; /* hold visibility until the fade-out finishes */
 }
-.nav-mobile.is-open .menu-scrim {
+.menu-overlay.is-open {
   opacity: 1;
+  visibility: visible;
+  transform: translateY(0); /* fades in + slides DOWN into place */
   pointer-events: auto;
+  transition:
+    opacity 0.5s cubic-bezier(0.22, 1, 0.36, 1),
+    transform 0.5s cubic-bezier(0.22, 1, 0.36, 1),
+    visibility 0s;
 }
-
-/* the drop panel — a heavier frosted plate (the role overlay's deep-glass recipe) that
-   unfurls from the disc's top-right corner: fade + rise + clearing blur, the same reveal
-   the beacon label uses. Closed by default and inert (pointer-events:none, links untabbable
-   via tabIndex), so it never traps focus or catches taps when hidden. */
-.menu-panel {
-  position: absolute;
-  top: calc(100% + 12px);
-  right: 0;
-  z-index: 2;
-  min-width: 210px;
-  max-width: 90vw; /* never let the plate run off-screen on ultra-narrow phones */
+.menu-inner {
+  min-height: 100%;
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  padding: 10px;
-  border: 1px solid rgba(244, 241, 234, 0.16);
-  border-radius: 20px;
-  background: rgba(8, 9, 12, 0.52);
-  -webkit-backdrop-filter: blur(20px) saturate(1.06);
-  backdrop-filter: blur(20px) saturate(1.06);
-  box-shadow:
-    0 20px 54px rgba(0, 0, 0, 0.52),
-    inset 0 1px 0 rgba(255, 255, 255, 0.06);
-  transform-origin: top right;
+  gap: clamp(28px, 4.5vh, 56px);
+  /* origin matches the header padding so the overlay's wordmark + Close mirror the bar */
+  padding: 26px 34px calc(40px + env(safe-area-inset-bottom));
+}
+/* the overlay top bar mirrors the fixed header */
+.menu-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* the staggered fade-up items (primary links, search, each group, footer). The inline
+   transition-delay (Header.tsx) staggers them on open and is 0 on close → instant reveal. */
+.menu-primary a,
+.menu-search,
+.menu-group,
+.menu-foot {
   opacity: 0;
-  transform: translateY(-10px) scale(0.96);
-  filter: blur(6px);
-  pointer-events: none;
+  transform: translateY(14px);
   transition:
-    opacity 0.42s cubic-bezier(0.22, 1, 0.36, 1),
-    transform 0.46s cubic-bezier(0.22, 1, 0.36, 1),
-    filter 0.42s ease;
+    opacity 0.55s cubic-bezier(0.22, 1, 0.36, 1),
+    transform 0.55s cubic-bezier(0.22, 1, 0.36, 1);
 }
-.nav-mobile.is-open .menu-panel {
-  opacity: 1;
-  transform: translateY(0) scale(1);
-  filter: blur(0);
-  pointer-events: auto;
-}
-.menu-panel a {
-  pointer-events: auto;
-  display: block;
-  padding: 12px 16px;
-  border-radius: 12px;
-  font-family: var(--sans);
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  text-align: right;
-  color: rgba(244, 241, 234, 0.82);
-  text-decoration: none;
-  /* per-link stagger: rise into place; delay set inline (Header.tsx) only while open */
-  opacity: 0;
-  transform: translateY(9px);
-  transition:
-    color 0.25s ease,
-    background 0.25s ease,
-    opacity 0.42s cubic-bezier(0.22, 1, 0.36, 1),
-    transform 0.42s cubic-bezier(0.22, 1, 0.36, 1);
-}
-.nav-mobile.is-open .menu-panel a {
+.menu-overlay.is-open .menu-primary a,
+.menu-overlay.is-open .menu-search,
+.menu-overlay.is-open .menu-group,
+.menu-overlay.is-open .menu-foot {
   opacity: 1;
   transform: translateY(0);
 }
-.menu-panel a:hover,
-.menu-panel a:focus-visible {
+
+/* 1 — the LARGE primary links, stacked vertically */
+.menu-primary {
+  display: flex;
+  flex-direction: column;
+  gap: clamp(2px, 1vh, 10px);
+  margin-top: clamp(8px, 3vh, 40px);
+}
+.menu-primary a {
+  width: max-content;
+  max-width: 100%;
+  font-family: var(--nav);
+  font-size: clamp(40px, 9vw, 84px);
+  font-weight: 300;
+  line-height: 1.04;
+  letter-spacing: -0.03em; /* tight negative tracking on the big type */
   color: var(--ink);
-  background: rgba(244, 241, 234, 0.08);
+  text-decoration: none;
+  transition:
+    opacity 0.55s cubic-bezier(0.22, 1, 0.36, 1),
+    transform 0.55s cubic-bezier(0.22, 1, 0.36, 1),
+    color 0.25s ease;
+}
+.menu-primary a:hover {
+  opacity: 0.6;
 }
 
-/* reduced-motion: keep the toggle/panel functional but drop the spin, rise and blur —
-   they snap between states instead of animating */
-@media (prefers-reduced-motion: reduce) {
-  .menu-toggle-icon,
-  .menu-panel,
-  .menu-panel a {
-    transition-duration: 0.001s;
+/* 2 — the underlined, transparent search field */
+.menu-search {
+  max-width: 640px;
+}
+.menu-search input {
+  width: 100%;
+  padding: 10px 2px;
+  border: 0;
+  border-bottom: 1px solid rgba(244, 241, 234, 0.28);
+  background: transparent;
+  font-family: var(--nav);
+  font-size: clamp(18px, 2.4vw, 24px);
+  font-weight: 300;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+  -webkit-appearance: none;
+  appearance: none;
+  transition: border-color 0.25s ease;
+}
+.menu-search input::placeholder {
+  color: rgba(244, 241, 234, 0.4);
+}
+.menu-search input:focus {
+  outline: none;
+  border-bottom-color: rgba(244, 241, 234, 0.7);
+}
+/* drop the native search decorations so the field stays a clean underline */
+.menu-search input::-webkit-search-decoration,
+.menu-search input::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+}
+
+/* 3 — the responsive grid of secondary link groups (1 column → 3 across when wide) */
+.menu-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: clamp(24px, 4vw, 48px) clamp(24px, 5vw, 64px);
+  padding-top: clamp(20px, 3vh, 34px);
+  border-top: 1px solid rgba(244, 241, 234, 0.1); /* hairline divider above the groups */
+}
+.menu-group-title {
+  margin: 0 0 14px;
+  font-family: var(--nav);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: rgba(244, 241, 234, 0.42); /* small, muted grey section header */
+}
+.menu-group ul {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.menu-group a {
+  display: inline-block;
+  padding: 5px 0;
+  font-family: var(--nav);
+  font-size: 20px;
+  font-weight: 300;
+  letter-spacing: -0.01em;
+  color: rgba(244, 241, 234, 0.86);
+  text-decoration: none;
+  transition: color 0.25s ease, opacity 0.25s ease;
+}
+.menu-group a:hover {
+  color: var(--ink);
+  opacity: 0.7;
+}
+
+/* 4 — the muted footer line, pinned to the foot of the column */
+.menu-foot {
+  margin: 0;
+  margin-top: auto;
+  padding-top: clamp(20px, 3vh, 34px);
+  font-family: var(--nav);
+  font-size: 13px;
+  font-weight: 400;
+  letter-spacing: -0.005em;
+  color: rgba(244, 241, 234, 0.4);
+}
+
+/* matches the header/menu mobile-padding breakpoint (760px) so the layout switches at one width */
+@media (min-width: 761px) {
+  .menu-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
-  .menu-panel,
-  .menu-panel a {
-    filter: none;
+}
+
+/* reduced motion: no slide / no stagger — the overlay + its items just appear / hide */
+@media (prefers-reduced-motion: reduce) {
+  .menu-overlay {
+    transform: none;
+    transition: opacity 0.001s, visibility 0s linear 0.001s;
+  }
+  .menu-overlay.is-open {
+    transform: none;
+    transition: opacity 0.001s, visibility 0s;
+  }
+  .menu-primary a,
+  .menu-search,
+  .menu-group,
+  .menu-foot {
+    transform: none;
+    transition: opacity 0.001s, color 0.25s ease;
   }
 }
 
@@ -368,28 +380,32 @@ nav a:hover::after {
   text-shadow: 0 1px 18px rgba(0, 0, 0, 0.5);
 }
 
+/* phones: tighten the bar, and keep the menu overlay's inner padding in lock-step with
+   the header padding so the overlay wordmark + Close stay mirrored over the bar */
 @media (max-width: 760px) {
   header {
-    padding: 16px 18px;
+    padding: 18px 20px;
   }
-  /* the inline link row is folded into the glass "+" menu, so the wordmark no longer
-     has to share the bar with five tracked-caps links — let it grow nice and bold */
-  .nav-desktop {
-    display: none;
-  }
-  .wordmark {
-    font-size: 24px;
-  }
-}
-
-/* the very narrow phones: only the wordmark + the "+" disc share the bar, so the
-   wordmark stays large — just eased down a touch to clear the disc with room to spare */
-@media (max-width: 400px) {
-  header {
-    padding: 14px 15px;
+  .menu-inner {
+    padding: 18px 20px calc(36px + env(safe-area-inset-bottom));
   }
   .wordmark {
     font-size: 22px;
+  }
+  .menu-btn {
+    font-size: 16px;
+  }
+}
+@media (max-width: 400px) {
+  header {
+    padding: 16px 16px;
+  }
+  .menu-inner {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+  .wordmark {
+    font-size: 20px;
   }
 }
 
@@ -848,13 +864,6 @@ canvas#ridge:active {
 .role-scroll::-webkit-scrollbar-track {
   background: transparent;
 }
-/* the mobile scroller is .role-overlay itself — leave its scrollbar hidden */
-.role-overlay {
-  scrollbar-width: none;
-}
-.role-overlay::-webkit-scrollbar {
-  display: none;
-}
 .role-doc {
   display: flex;
   flex-direction: column;
@@ -1190,21 +1199,19 @@ canvas#ridge:active {
   color: rgba(244, 241, 234, 0.9);
 }
 
-/* ---- mobile: stack the plate as a hero band above the scrolling dossier ----- */
+/* ---- mobile: a single full-width scrolling column over the lit ridge ----------
+   The overlay keeps the SAME structure as desktop: a fixed, NON-scrolling shell, with
+   .role-scroll as the (absolutely-positioned) scroller and .role-close sitting in the
+   shell. The old mobile path made .role-overlay ITSELF the momentum scroller
+   (overflow-y:auto + -webkit-overflow-scrolling:touch) and pinned .role-close with
+   position:fixed INSIDE it — an iOS Safari combo where a fixed descendant of a
+   momentum-scrolling container silently stops receiving taps, so the ✕ did nothing
+   (req 2/3). Keeping the close control OUT of the scroller fixes that on every device. */
 @media (max-width: 860px) {
-  .role-overlay {
-    overflow-y: auto;
-    -webkit-overflow-scrolling: touch;
-  }
-  /* both frost layers pin to the viewport (the overlay itself scrolls on mobile)
-     and feather vertically — the lightly-frosted ridge shows behind the masthead at
-     the top, heavy frost ramps in below for the record. The desktop left-heavy split
-     does NOT apply here. */
-  .role-overlay::before {
-    position: fixed;
-  }
+  /* both frost layers fill the fixed shell (position:absolute = the viewport here) and
+     feather vertically — the lightly-frosted ridge shows behind the masthead at the top,
+     heavy frost ramps in below for the record. The desktop left-heavy split does NOT apply. */
   .role-frost {
-    position: fixed;
     background: linear-gradient(
       180deg,
       rgba(6, 7, 10, 0) 26%,
@@ -1215,10 +1222,6 @@ canvas#ridge:active {
     mask-image: linear-gradient(180deg, transparent 0%, transparent 28%, #000 48%, #000 100%);
   }
   .role-scroll {
-    position: static;
-    width: auto;
-    height: auto;
-    overflow: visible;
     /* no plate hero band now — the masthead opens directly, with enough top room to
        clear the fixed header and sit over the light upper ridge */
     padding: clamp(88px, 13vh, 124px) 18px calc(48px + env(safe-area-inset-bottom));
@@ -1231,7 +1234,8 @@ canvas#ridge:active {
       rgba(6, 7, 10, 0.4) 26%,
       rgba(6, 7, 10, 0) 52%
     );
-    /* the overlay itself scrolls on mobile, so the desktop top-fade doesn't apply */
+    /* the scroller fills the whole shell on mobile, so the desktop left-column top-fade
+       mask doesn't apply */
     -webkit-mask-image: none;
     mask-image: none;
   }
@@ -1247,8 +1251,9 @@ canvas#ridge:active {
   .role-code {
     max-width: 100%;
   }
+  /* .role-close stays position:absolute in the fixed shell (NOT fixed in the scroller) —
+     just seated a touch higher to clear the site header */
   .role-close {
-    position: fixed;
     top: clamp(62px, 9vh, 76px);
   }
   .role-title {
@@ -2347,14 +2352,10 @@ canvas#ridge:active {
   }
 }
 @media (max-width: 860px) {
-  /* the overlay itself scrolls on mobile (.role-overlay rule above), so pin the frost
-     to the viewport and let .book-scroll flow in the normal document */
-  .book-frost {
-    position: fixed;
-  }
+  /* keep .book-scroll the absolutely-positioned scroller inside the fixed shell (NOT the
+     overlay itself), so .role-close stays a non-scrolling control whose ✕ keeps working on
+     iOS — see the .role-overlay mobile note above (req 2/3). .book-frost fills the shell. */
   .book-scroll {
-    position: static;
-    overflow: visible;
     padding: clamp(88px, 13vh, 124px) 16px calc(48px + env(safe-area-inset-bottom));
     -webkit-mask-image: none;
     mask-image: none;
