@@ -1731,8 +1731,10 @@ canvas#ridge:active {
   font-family: var(--nav); /* match the site header type (req 1) */
   pointer-events: none; /* the empty field stays a drag surface for the scrub */
   --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Fira Code", Menlo, Consolas, monospace;
-  /* the baseline colour — red, like the reference (req 5); amber (--c-education) stays the accent */
-  --c-line: #e0222e;
+  /* every line is the SAME mono off-white as the globe filaments (req 2) — the baseline, the
+     branches, their mirror and the foot nubs. Amber (--c-education) survives only on the selected
+     NAME, the one sparing you-are-here accent. */
+  --c-line: var(--ink);
   /* the live baseline height in px (the rAF loop welds it to the folded globe); the year ruler
      hangs just below it. Fallback ≈ TL_BASE_Y for the first frame before the loop writes it. */
   --tl-base: 60vh;
@@ -1770,46 +1772,8 @@ canvas#ridge:active {
   }
 }
 
-/* masthead — the surveyor spine, top-left, in the shared site grammar */
-.projects-tl-masthead {
-  position: absolute;
-  z-index: 4;
-  top: clamp(92px, 12vh, 128px);
-  left: clamp(34px, 6vw, 84px);
-  right: clamp(34px, 6vw, 84px);
-  display: flex;
-  flex-direction: column;
-  gap: clamp(8px, 1.4vh, 16px);
-  pointer-events: none;
-}
-/* the eyebrow is now the ONLY heading (the big "Projects" title is gone — req 4); a quiet
-   tracked-caps label in the header type. */
-.projects-tl-eyebrow {
-  margin: 0;
-  font-size: 12px;
-  font-weight: 400;
-  letter-spacing: 0.2em;
-  text-transform: uppercase;
-  color: rgba(244, 241, 234, 0.66);
-  text-shadow: 0 1px 16px rgba(0, 0, 0, 0.5);
-}
-.projects-tl-coords {
-  margin: 2px 0 0;
-  font-size: 12px;
-  font-weight: 400;
-  letter-spacing: 0.04em;
-  color: rgba(244, 241, 234, 0.5);
-  text-shadow: 0 1px 16px rgba(0, 0, 0, 0.5);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.projects-tl-coords .plate {
-  color: rgba(244, 241, 234, 0.7);
-}
-.projects-tl-coords .live {
-  color: var(--c-education);
-}
+/* the top-left masthead (eyebrow + plate + live readout) is intentionally gone (req 1); the
+   dialog name now lives in an .sr-only <h2> for assistive tech only. */
 
 /* the filament layer — geometry written each frame; pointer-events off so the canvas
    stays a drag surface (the label buttons below catch the clicks) */
@@ -1820,20 +1784,22 @@ canvas#ridge:active {
   overflow: visible;
   pointer-events: none;
 }
-/* the BASELINE — minimal + red, NOT glowing (req 3, req 5). Thin, faded at both ends by the
-   gradient stroke. NO filter / NO transitions (geometry is rewritten every frame). */
+/* the BASELINE — minimal, mono off-white like the globe filaments (req 2), NOT glowing. Thin,
+   faded at both ends by the gradient stroke. NO transitions (geometry is rewritten every frame). */
 .tl-axis {
   fill: none;
   stroke: url(#tl-axis-fade);
   stroke-width: 1.2;
   stroke-linecap: butt;
+  opacity: 0.62; /* a soft horizon, not a hard white rule */
 }
 /* the straight vertical branches rising (and the valley studies dropping) out of the baseline.
-   Faint hairlines by default; flagship (major) work reads a touch brighter + heavier, the selected
-   one is the solid amber you-are-here accent. No glow — the reference is just clean lines. */
+   ALL the same mono off-white as the filaments (req 2): faint hairlines by default; flagship
+   (major) work reads a touch brighter + heavier; the selected one brightens to near-white with a
+   soft white glow (the you-are-here cue — no amber on the lines). */
 .tl-branch {
   fill: none;
-  stroke: rgba(244, 241, 234, 0.28);
+  stroke: rgba(244, 241, 234, 0.3);
   stroke-width: 1;
   stroke-linecap: butt;
 }
@@ -1842,29 +1808,74 @@ canvas#ridge:active {
   stroke-width: 1.1;
 }
 .tl-branch.is-selected {
-  stroke: var(--c-education);
+  stroke: rgba(248, 246, 240, 0.95);
   stroke-width: 1.6;
-  filter: drop-shadow(0 0 4px rgba(255, 196, 92, 0.45));
+  filter: drop-shadow(0 0 4px rgba(244, 241, 234, 0.5));
+}
+/* the MIRROR — a live <use> clone of the whole branch group, reflected about the baseline by the
+   loop, so every line casts a reflection and the sinus skyline continues below (req 6). Faint, like
+   a reflection on water; it clones the branches' per-line opacities so it appears/wipes with them. */
+.tl-mirror {
+  opacity: 0.3;
 }
 
-/* the year ruler — a faint date legend sitting just BELOW the baseline (req 2: close to the line),
-   placed by the same fractional x-map as the branch clusters. --tl-base is the live baseline the
-   rAF loop writes each frame, so the ruler tracks the welded line. */
+/* the FOOT NUBS — a glowing dot at each line's root on the baseline (req 3). The layer is its own
+   isolated stacking context and each nub screen-blends, so when lines are close (a busy year) their
+   halos overlap into a single bigger glow — exactly the globe's bright convergence nodes. */
+.tl-nubs {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  isolation: isolate; /* confine the screen-blend to the nub layer (don't wash out the globe) */
+}
+.tl-nub {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 22px;
+  height: 22px;
+  margin: -11px 0 0 -11px; /* centre the dot on the (x, baseY) the loop translates it to */
+  border-radius: 50%;
+  background: radial-gradient(
+    circle closest-side,
+    rgba(244, 241, 234, 0.82) 0%,
+    rgba(244, 241, 234, 0.3) 38%,
+    rgba(244, 241, 234, 0) 72%
+  );
+  mix-blend-mode: screen; /* overlapping nubs add toward white → a bigger merged glow */
+  opacity: 0; /* the rAF loop owns transform + opacity */
+  will-change: transform, opacity;
+}
+.tl-nub.is-selected {
+  background: radial-gradient(
+    circle closest-side,
+    rgba(255, 255, 255, 0.98) 0%,
+    rgba(244, 241, 234, 0.5) 42%,
+    rgba(244, 241, 234, 0) 76%
+  );
+}
+
+/* the year ruler — a faint date legend sitting just BELOW the baseline, POSITIONED by the rAF loop
+   each frame (transform in px) so it tracks the mobile zoom + pan. --tl-base is the live baseline
+   the loop writes each frame, so the ruler tracks the welded line. */
 .tl-years {
   position: absolute;
   inset: 0;
   z-index: 1;
   pointer-events: none;
+  opacity: 0; /* loop fades it in with the baseline wipe */
 }
 .tl-year {
   position: absolute;
   top: calc(var(--tl-base, 60vh) + 12px);
-  transform: translateX(-50%);
+  left: 0; /* the loop owns the x via transform: translateX(px) translateX(-50%) */
   font-size: 11px;
   font-weight: 400;
   letter-spacing: 0.06em;
   color: rgba(244, 241, 234, 0.34);
   text-shadow: 0 1px 10px rgba(0, 0, 0, 0.6);
+  will-change: transform;
 }
 
 /* the label layer — each project is a positioned button (its own hit target) */
@@ -1873,9 +1884,9 @@ canvas#ridge:active {
   inset: 0;
   z-index: 2;
 }
-/* a single NAME floating horizontally just beyond the branch tip — the rAF loop centres it on the
-   tip with a trailing translate(-50%, -50%) (so the box stays centred whatever its size). No
-   bloom-to-record — the selected one just brightens to the amber you-are-here accent. */
+/* a single NAME in a LEFT-ALIGNED column just to the RIGHT of its year's lines (req 4) — the rAF
+   loop anchors the box's left edge a little past the lines and stacks the year's names on top of
+   each other. The selected one brightens to the amber you-are-here accent. */
 .tl-label {
   position: absolute;
   top: 0;
@@ -1885,6 +1896,7 @@ canvas#ridge:active {
   border: 0;
   background: none;
   color: inherit;
+  text-align: left; /* names grow rightward from the column's left edge (req 4) */
   cursor: pointer;
   pointer-events: auto;
   opacity: 0; /* the rAF loop owns transform + opacity */
@@ -1950,78 +1962,26 @@ canvas#ridge:active {
   border: 0;
 }
 
-/* the mobile fallback — a compact vertical list; the GPU globe stays behind it */
+/* the old compact vertical list is kept in the DOM as a non-visual fallback only — the timeline
+   itself now runs on mobile (req 7), so the list is always hidden. */
 .dial-list {
   display: none;
 }
 
+/* MOBILE (req 7): the SAME timeline runs, just zoomed wider than the viewport (the loop sets the
+   zoom) so the names read at a comfortable size; a drag scrolls it left/right. We only bump the
+   type + nub size a touch here — all the geometry (zoom + pan) is loop-driven. */
 @media (max-width: 860px) {
-  .projects-tl-svg,
-  .projects-tl-labels,
-  .tl-years {
-    display: none;
+  .tl-label-name {
+    font-size: 13px;
   }
-  .projects-tl-masthead {
-    top: clamp(70px, 10vh, 96px);
-    left: 16px;
-    right: 16px;
-  }
-  .dial-list {
-    position: absolute;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    top: 44vh;
-    z-index: 3;
-    display: flex;
-    flex-direction: column;
-    gap: 1px;
-    padding: 0 16px calc(24px + env(safe-area-inset-bottom));
-    overflow-y: auto;
-    -webkit-overflow-scrolling: touch;
-    pointer-events: auto;
-    /* fade the top edge so rows dissolve up under the masthead */
-    -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 40px);
-    mask-image: linear-gradient(180deg, transparent 0, #000 40px);
-  }
-  .dial-list-item {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    width: 100%;
-    margin: 0;
-    padding: 12px 14px;
-    border: 1px solid rgba(244, 241, 234, 0.08);
-    border-radius: 7px;
-    background: rgba(8, 9, 12, 0.28);
-    color: inherit;
-    text-align: left;
-    cursor: pointer;
-    -webkit-tap-highlight-color: transparent;
-    transition:
-      background 0.25s ease,
-      border-color 0.25s ease;
-  }
-  .dial-list-item.is-selected {
-    background: rgba(22, 24, 30, 0.6);
-    border-color: rgba(244, 241, 234, 0.34);
-  }
-  .dial-list-item .short {
+  .tl-year {
     font-size: 12px;
-    font-weight: 500;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    color: rgba(244, 241, 234, 0.84);
   }
-  .dial-list-item .year {
-    margin-left: auto;
-    font-family: var(--mono);
-    font-size: 10px;
-    letter-spacing: 0.08em;
-    color: rgba(244, 241, 234, 0.5);
-  }
-  .dial-list-item.is-selected .year {
-    color: var(--c-education);
+  .tl-nub {
+    width: 26px;
+    height: 26px;
+    margin: -13px 0 0 -13px;
   }
 }
 
@@ -2032,7 +1992,8 @@ canvas#ridge:active {
   }
   /* the geometry layers are loop-written (no CSS transitions to suppress). */
   .tl-axis,
-  .tl-branch {
+  .tl-branch,
+  .tl-nub {
     transition: none;
   }
 }
