@@ -1847,6 +1847,25 @@ canvas#ridge:active {
   text-shadow: 0 0 8px rgba(6, 7, 10, 0.9);
   white-space: nowrap;
 }
+/* the MOBILE reading-head playhead — a small amber caret pinned to screen-centre, sitting just below the
+   live baseline and pointing UP at the plot. The timeline scrubs under it; the line on it is selected.
+   Anchored to --tl-base (no loop wiring). display:none by default — desktop has no fixed centre (it
+   selects by hovering a line); the mobile media query turns it on. */
+.tl-readhead {
+  display: none;
+  position: absolute;
+  left: 50%;
+  top: var(--tl-base, 55vh);
+  z-index: 2;
+  width: 0;
+  height: 0;
+  border-left: 6px solid transparent;
+  border-right: 6px solid transparent;
+  border-bottom: 8px solid rgba(255, 196, 92, 0.72);
+  transform: translate(-50%, 7px);
+  pointer-events: none;
+  filter: drop-shadow(0 1px 4px rgba(6, 7, 10, 0.9));
+}
 /* the straight vertical branches rising (and the valley studies dropping) out of the baseline.
    ALL hairline, the same mono off-white as the filaments (req 2/4): faint by default; flagship
    (major) work reads a touch brighter (same hairline weight); the selected one brightens to near-
@@ -2095,6 +2114,12 @@ canvas#ridge:active {
   /* keep the button strut equal to the larger mobile name so the row centring stays exact */
   .tl-label {
     font-size: 13px;
+  }
+  /* the reading head (req): a small fixed amber playhead at screen-centre, sitting just below the live
+     baseline and pointing UP at the plot. The timeline scrubs under it; the project line on it is the
+     selection. Quiet but unmistakably "here". (Desktop has no fixed centre, so it's display:none there.) */
+  .tl-readhead {
+    display: block;
   }
   .tl-year {
     font-size: 12px;
