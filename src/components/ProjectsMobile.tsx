@@ -1,6 +1,6 @@
-import { forwardRef, useEffect, useMemo, useRef, useState } from "react";
+import { forwardRef, useEffect, useRef, useState } from "react";
 import { motion, useReducedMotion } from "motion/react";
-import { PROJECTS, formatMonthYearLong } from "../data/projects";
+import { PROJECTS, formatMonthYearLong, type Project } from "../data/projects";
 
 /* =========================================================================
    ProjectsMobile — the phone-native Projects view: a TUNING DIAL.
@@ -25,8 +25,8 @@ const N = PROJECTS.length;
 const EASE = [0.22, 1, 0.36, 1] as const;
 
 // ---- dial geometry / physics --------------------------------------------------
-const STEP = (8.5 * Math.PI) / 180; // angular gap between neighbouring projects
-const CULL = (47 * Math.PI) / 180; // hide ticks past this angle from the apex
+const STEP = (2.6 * Math.PI) / 180; // tight angular gap → a DENSE fan of ticks
+const CULL = (62 * Math.PI) / 180; // a wide visible sweep, so many ticks read at once
 const WIN = Math.ceil(CULL / STEP) + 1; // index half-window kept positioned each frame
 const MAX_VEL = 17; // cap on a release flick (projects/sec)
 const V_SNAP = 0.55; // below this speed the dial eases to the nearest detent
@@ -41,6 +41,18 @@ const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 const cleanDescriptor = (d: string): string => {
   const s = d.replace(/^below-axis\s+/i, "").trim();
   return s.charAt(0).toUpperCase() + s.slice(1);
+};
+
+// join a list into readable prose: ["a","b","c"] → "a, b and c"
+const joinList = (xs: readonly string[]): string =>
+  xs.length <= 1 ? xs.join("") : `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}`;
+
+// the card no longer shows tag chips, so the record reads as a couple of sentences: the
+// descriptor, then a second sentence folding the project's stack back in as prose.
+const buildRecord = (pr: Project): string => {
+  const lead = cleanDescriptor(pr.descriptor).replace(/[.\s]+$/, "");
+  const stack = pr.tags.length ? ` The work drew on ${joinList(pr.tags)}.` : "";
+  return `${lead}.${stack}`;
 };
 
 // the newest flagship — a strong project to open the dial on (≈ "now")
@@ -70,16 +82,69 @@ const ProjectsMobile = forwardRef<HTMLButtonElement, Props>(
     const vel = useRef(0); // projects/sec
     const goal = useRef<number | null>(null); // a prev/next/keyboard target to ease to
     const selIdx = useRef(OPEN_INDEX); // last committed detent (mirrors `selected`)
-    const ppp = useRef(46); // px of horizontal drag per project (set from R each frame)
+    const ppp = useRef(18); // px of horizontal drag per project (set from R each frame)
     const drag = useRef({ active: false, startX: 0, startAngle: 0, lastX: 0, lastT: 0 });
     const win = useRef({ lo: -1, hi: -1 });
     const lastW = useRef(-1);
+    const lastH = useRef(-1);
     const lastDrawn = useRef(NaN); // skip the per-tick rewrite when nothing moved
 
-    // a soft detent tick on selection change (mobile only, never under reduced motion)
+    // ---- haptics ----
+    const iosTickRef = useRef<HTMLLabelElement | null>(null); // hidden iOS-Safari "tock" element
+    const lastBuzzRef = useRef(-1e9); // throttle so a fast spin ticks, never buzzes
+    const dragLastSel = useRef(OPEN_INDEX); // detent the active drag last ticked (iOS in-gesture)
+
+    // a soft detent tick on selection change. Two transports so it fires on BOTH platforms:
+    // the Vibration API (Android / Chrome) and the iOS-Safari trick — clicking a hidden
+    // <input switch> plays the system "tock". iOS only honours that inside a touch gesture,
+    // so the drag handler ticks too; this path also covers Android momentum + the keyboard.
     const buzz = () => {
-      if (!reduce && typeof navigator !== "undefined" && navigator.vibrate) navigator.vibrate(7);
+      if (reduce) return;
+      const now = performance.now();
+      if (now - lastBuzzRef.current < 24) return; // throttle → distinct notches, not a buzz
+      lastBuzzRef.current = now;
+      if (typeof navigator !== "undefined" && typeof navigator.vibrate === "function") {
+        try {
+          navigator.vibrate(7);
+        } catch {
+          /* ignore */
+        }
+      }
+      const tock = iosTickRef.current;
+      if (tock) {
+        try {
+          tock.click();
+        } catch {
+          /* ignore */
+        }
+      }
     };
+
+    // mount the hidden iOS-Safari haptic <input switch> once. Kept off-screen (not
+    // display:none, which would mute it) and removed on unmount.
+    useEffect(() => {
+      if (reduce) return;
+      let lbl: HTMLLabelElement | null = null;
+      try {
+        lbl = document.createElement("label");
+        lbl.setAttribute("aria-hidden", "true");
+        lbl.style.cssText =
+          "position:fixed;top:-9999px;left:-9999px;width:0;height:0;opacity:0;pointer-events:none;";
+        const inp = document.createElement("input");
+        inp.type = "checkbox";
+        inp.setAttribute("switch", ""); // Safari renders an iOS switch → haptic on toggle
+        inp.tabIndex = -1;
+        lbl.appendChild(inp);
+        document.body.appendChild(lbl);
+        iosTickRef.current = lbl;
+      } catch {
+        /* haptics are a bonus, never required */
+      }
+      return () => {
+        if (lbl && lbl.parentNode) lbl.parentNode.removeChild(lbl);
+        iosTickRef.current = null;
+      };
+    }, [reduce]);
 
     useEffect(() => {
       const stage = stageRef.current;
@@ -123,9 +188,15 @@ const ProjectsMobile = forwardRef<HTMLButtonElement, Props>(
         stage.style.setProperty("--apex-y", `${apexY.toFixed(1)}px`);
         stage.style.setProperty("--sel-len", `${selLen.toFixed(1)}px`);
 
-        // redraw the arc curve only when the width changes (it's angle-independent)
-        if (W !== lastW.current) {
+        // rebuild the arc + relayout the ticks whenever the stage resizes (orientation
+        // change, the mobile URL-bar showing/hiding). The curve shape depends on W; cy/apexY
+        // depend on H — so on ANY dimension change we redraw the path AND bust the idle-skip
+        // below (lastDrawn = NaN), or the ticks would stay pinned to the old geometry and
+        // detach from the arc/apex while the dial sits at rest.
+        if (W !== lastW.current || H !== lastH.current) {
           lastW.current = W;
+          lastH.current = H;
+          lastDrawn.current = NaN;
           let d = "";
           for (let sx = -24; sx <= W + 24; sx += 12) {
             const under = R * R - (sx - cx) * (sx - cx);
@@ -167,7 +238,10 @@ const ProjectsMobile = forwardRef<HTMLButtonElement, Props>(
           applySelClass(sel, selIdx.current);
           selIdx.current = sel;
           setSelected(sel);
-          buzz();
+          // onPointerMove owns the in-gesture detent tick (the only one iOS honours); the
+          // rAF path owns momentum + keyboard ticks. Gating here keeps the two transports
+          // from double-buzzing one notch when a slow frame straddles the throttle window.
+          if (!drag.current.active) buzz();
         }
 
         // idle: nothing moved and we've drawn this pose — skip the tick rewrite
@@ -231,6 +305,7 @@ const ProjectsMobile = forwardRef<HTMLButtonElement, Props>(
       };
       vel.current = 0;
       goal.current = null;
+      dragLastSel.current = clamp(Math.round(angle.current), 0, N - 1);
     };
     const onPointerMove = (e: React.PointerEvent) => {
       const d = drag.current;
@@ -244,6 +319,12 @@ const ProjectsMobile = forwardRef<HTMLButtonElement, Props>(
         vel.current = vel.current * 0.6 + inst * 0.4;
         d.lastX = e.clientX;
         d.lastT = now;
+      }
+      // fire the detent tick from WITHIN the gesture — the only context where iOS plays it
+      const sel = clamp(Math.round(angle.current), 0, N - 1);
+      if (sel !== dragLastSel.current) {
+        dragLastSel.current = sel;
+        buzz();
       }
     };
     const onPointerUp = () => {
@@ -259,7 +340,10 @@ const ProjectsMobile = forwardRef<HTMLButtonElement, Props>(
       vel.current = 0;
     };
     const onKeyDown = (e: React.KeyboardEvent) => {
-      if (e.key === "ArrowRight") {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onClose();
+      } else if (e.key === "ArrowRight") {
         e.preventDefault();
         goTo(selIdx.current + 1);
       } else if (e.key === "ArrowLeft") {
@@ -285,7 +369,16 @@ const ProjectsMobile = forwardRef<HTMLButtonElement, Props>(
       }
     };
 
-    const year = useMemo(() => p.date.slice(0, 4), [p.date]);
+    // the dialog's initial-focus + restore target used to be the X button; with it gone,
+    // the dial surface itself takes focus (it's an ARIA slider). Mirror the forwarded ref
+    // onto the stage so the parent's focus management keeps working.
+    const setStageRef = (el: HTMLDivElement | null) => {
+      stageRef.current = el;
+      if (typeof closeRef === "function") closeRef(el as unknown as HTMLButtonElement | null);
+      else if (closeRef)
+        (closeRef as React.MutableRefObject<HTMLButtonElement | null>).current =
+          el as unknown as HTMLButtonElement | null;
+    };
 
     return (
       <motion.div
@@ -304,46 +397,23 @@ const ProjectsMobile = forwardRef<HTMLButtonElement, Props>(
           Selected work, 2014 to 2026 — turn the dial to choose a project
         </h2>
 
-        {/* head — sits below the site header (wordmark + Menu stay live above it) */}
-        <div className="pmd-head">
-          <div className="pmd-eyebrow">
-            <span className="pmd-kicker">Selected work</span>
-            <span className="pmd-count">
-              {N} projects · 2014–26
-            </span>
-          </div>
-          <button
-            type="button"
-            className="pmd-close"
-            ref={closeRef}
-            onClick={onClose}
-            aria-label="Close projects"
-          >
-            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <path
-                d="M6 6l12 12M18 6L6 18"
-                stroke="currentColor"
-                strokeWidth="1.6"
-                strokeLinecap="round"
-              />
-            </svg>
-          </button>
-        </div>
-
-        {/* the dial stage — the drag surface; ticks are positioned imperatively */}
+        {/* the dial stage — the drag surface AND the focusable control (an ARIA slider over
+            the 127 projects); ticks are positioned imperatively by the rAF loop */}
         <div
           className="pmd-stage"
-          ref={stageRef}
+          ref={setStageRef}
+          role="slider"
+          tabIndex={0}
+          aria-label="Project timeline — drag or use the arrow keys to choose a project, Escape to close"
+          aria-valuemin={1}
+          aria-valuemax={N}
+          aria-valuenow={selected + 1}
+          aria-valuetext={`${p.title}, ${formatMonthYearLong(p.date)}, ${p.place}`}
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
           onPointerCancel={onPointerUp}
         >
-          {/* the year, big and ghostly, sitting behind the selected name */}
-          <span className="pmd-ghost-year" aria-hidden="true">
-            {year}
-          </span>
-
           {/* the selected project NAME, pinned above the apex where the lit tick points.
               The wrapper owns the centring transform; the inner span owns the entrance
               (so Motion's animated transform never clobbers the −50% centring). */}
@@ -404,32 +474,10 @@ const ProjectsMobile = forwardRef<HTMLButtonElement, Props>(
         {/* the record of the selected project — pinned at the very bottom, under the dial */}
         <div className="pmd-panel">
           <div className="pmd-panel-nav">
-            <button
-              type="button"
-              className="pmd-step"
-              onClick={() => goTo(selIdx.current - 1)}
-              disabled={selected === 0}
-              aria-label="Older project"
-            >
-              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                <path d="M15 5l-7 7 7 7" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-            </button>
             <span className="pmd-counter" aria-live="off">
               {String(selected + 1).padStart(3, "0")}
               <span className="pmd-counter-sep"> / {N}</span>
             </span>
-            <button
-              type="button"
-              className="pmd-step"
-              onClick={() => goTo(selIdx.current + 1)}
-              disabled={selected === N - 1}
-              aria-label="Newer project"
-            >
-              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                <path d="M9 5l7 7-7 7" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-            </button>
           </div>
 
           <motion.div
@@ -447,22 +495,9 @@ const ProjectsMobile = forwardRef<HTMLButtonElement, Props>(
                 ·
               </span>
               <span className="pmd-meta-place">{p.place}</span>
-              {p.major && <span className="pmd-flag">✦ Flagship</span>}
             </div>
-            <p className="pmd-desc">{cleanDescriptor(p.descriptor)}</p>
-            <ul className="pmd-tags">
-              {p.tags.map((t) => (
-                <li className="pmd-tag" key={t}>
-                  {t}
-                </li>
-              ))}
-            </ul>
+            <p className="pmd-desc">{buildRecord(p)}</p>
           </motion.div>
-        </div>
-
-        {/* polite SR announcement of the selected project */}
-        <div className="pmd-live" aria-live="polite">
-          {p.title}, {formatMonthYearLong(p.date)}, {p.place}
         </div>
       </motion.div>
     );
