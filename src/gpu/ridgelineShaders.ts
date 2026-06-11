@@ -23,7 +23,7 @@ struct Frame {
   a    : vec4<f32>,   // x time, y Wpx(render), z Hpx(render), w aspect
   b    : vec4<f32>,   // x zNear, y zFar, z worldHeightMax, w haloSpin
   post : vec4<f32>,   // x bloomAmt, y vignette, z grain, w exposure
-  eye  : vec4<f32>,   // xyz camera eye (world), w unused
+  eye  : vec4<f32>,   // xyz camera eye (world), w phone profile (0 desktop / 1 phone — filament centre/depth trims)
   hov  : vec4<f32>,   // x hovered slice index (-1 none), y pulse 0..1, zw unused
   mph  : vec4<f32>,   // x morph 0..1 (0 = intro globe, 1 = finished mountain), y globeSpin (rad), z motion, w projAmt (0 = globe chaos … 1 = dial-calm)
   lod  : vec4<f32>,   // x contour-spacing scale (1 = desktop; >1 on phones widens the spacing → fewer lines), y/z Projects DoF focal point (composite UV), w one-shot mountain reveal 0..1 (1 = fully realistic; default 1)
@@ -670,9 +670,13 @@ struct FOut {
   let tw = 0.86 + 0.14 * sin(tt * 3.0 + sseed * 40.0) + dust * 0.18 * sin(tt * 7.0 + sseed * 90.0);
   glow = glow * mix(1.0, tw, motion);
   // depth volume — widen the recession so the back of the deep tangle sinks further, and darken the
-  // interior a touch vs the crust (a light-falloff cue that reads as a luminous WELL)
-  glow = glow * mix(0.22, 1.14, frontness);
-  glow = glow * mix(0.7, 1.0, depth01);
+  // interior a touch vs the crust (a light-falloff cue that reads as a luminous WELL). On the PHONE
+  // ball (F.eye.w = 1, ~⅓ the physical size) the additive heap stacks ~4× the light per square cm and
+  // flattens these cues into a scribble — sink the back/interior harder so the small ball still reads
+  // as a layered volume. Desktop (eye.w = 0) is byte-identical.
+  let phone = F.eye.w;
+  glow = glow * mix(mix(0.22, 0.12, phone), 1.14, frontness);
+  glow = glow * mix(mix(0.7, 0.56, phone), 1.0, depth01);
   // SPOKES FIRE OUTWARD — a wave that travels core→rim every few seconds (only for armature lines)
   let aw = (0.5 - abs(fract(tt * 0.4 - at.w) - 0.5)) * 8.0;
   let armWave = exp(-aw * aw);
@@ -694,10 +698,13 @@ struct FOut {
   // stays lit from any angle); the bloom pass lifts it into a luminous orb with no extra pass.
   let coreK = clamp((0.18 - at.w) / 0.18, 0.0, 1.0);
   let somaBeat = 0.8 + 0.2 * sin(tt * 1.15) * motion;
-  glow = glow + coreK * coreK * 1.5 * somaBeat;        // was 2.6 → a softer, "glooming" core, no longer blown-out at the centre
+  // phone trim: the core's additive boosts land inside a ~40px disc on the small ball — every
+  // centre-grazing vertex (nucleus sparks, core-trail tips, inner spoke dashes, deep motes) stacks
+  // them into a hard white starburst. Ease both toward calmer phone amplitudes (eye.w lerp).
+  glow = glow + coreK * coreK * mix(1.5, 0.85, phone) * somaBeat; // was 2.6 → a softer, "glooming" core, no longer blown-out at the centre
   // FIRING WAVE — the instant the climb begins, a brightness wave discharges core→shell
   let fr = (at.w - clamp(morph * 2.4, 0.0, 1.4)) * 7.0;
-  glow = glow * (1.0 + 0.9 * exp(-fr * fr));           // was 1.6 → calms the over-bright core at home (this term peaks at the centre when morph=0)
+  glow = glow * (1.0 + mix(0.9, 0.5, phone) * exp(-fr * fr)); // was 1.6 → calms the over-bright core at home (this term peaks at the centre when morph=0)
 
   // PROJECTS FOLD GLOW (req 1): as the threads collapse onto the baseline the converged line should
   // read as a HOT glowing streak. The additive overlap already brightens it where the threads stack;

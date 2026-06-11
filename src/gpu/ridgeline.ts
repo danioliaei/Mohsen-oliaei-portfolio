@@ -174,10 +174,19 @@ function v3rot(v: V3, k: V3, a: number): V3 {
 
 /** Build the filament line-list. Returns the flat vertex buffer. */
 export function buildFilamentGeometry(phone = false): Float32Array<ArrayBuffer> {
-  // on phones, spin fewer threads per node and fewer interior motes (a lighter tangle,
-  // less additive overdraw) — the rest of the armature (nodes, spokes, rings) is untouched
+  // on phones, spin fewer threads per node, fewer interior motes, and a thinner / dimmer
+  // armature (spokes + node stars + nucleus) — the small ball packs the same additive light
+  // into ~¼ the area, so without these trims it reads as a scribble with a blown-out core
+  // (see the PHONE RENDER PROFILE block). Gimbal rings + the orbital halo are kept in full:
+  // they're the legible "designed" structure at small scale.
   const perNode = phone ? PHONE_FIL_PER_NODE : FIL_PER_NODE;
   const moteCount = phone ? PHONE_MOTE_COUNT : MOTE_COUNT;
+  const spokeCount = phone ? PHONE_SPOKE_COUNT : SPOKE_COUNT;
+  const nucleusSparks = phone ? PHONE_NUCLEUS_SPARKS : NUCLEUS_SPARKS;
+  const filSparks = phone ? PHONE_FIL_SPARKS : FIL_SPARKS;
+  const moteBias = phone ? PHONE_MOTE_BIAS : 1.35;
+  const spokePeak = phone ? PHONE_SPOKE_PEAK : 1.7;
+  const nucleusBright = phone ? PHONE_NUCLEUS_BRIGHT : 3.0;
   // mulberry32 — a tiny deterministic PRNG (stable layout, no Math.random)
   let st = 0x1a2b3c4d >>> 0;
   const rnd = (): number => {
@@ -251,7 +260,7 @@ export function buildFilamentGeometry(phone = false): Float32Array<ArrayBuffer> 
   // point reads as a hot, blooming star (sits on the outer shell with the letters) ----
   for (let n = 0; n < FIL_NODES; n++) {
     const base: V3 = [nodes[n * 3], nodes[n * 3 + 1], nodes[n * 3 + 2]];
-    for (let b = 0; b < FIL_SPARKS; b++) {
+    for (let b = 0; b < filSparks; b++) {
       const r: V3 = [rsym(), rsym(), rsym()];
       const dp = r[0] * base[0] + r[1] * base[1] + r[2] * base[2];
       const tang = v3norm(r[0] - base[0] * dp, r[1] - base[1] * dp, r[2] - base[2] * dp);
@@ -268,7 +277,7 @@ export function buildFilamentGeometry(phone = false): Float32Array<ArrayBuffer> 
   // bias (pow > 1) packs the deep interior densest → the "fall into the well" feeling. ----
   for (let m = 0; m < moteCount; m++) {
     const dir = v3norm(rsym(), rsym(), rsym());
-    const rad = 0.1 + 0.82 * Math.pow(rnd(), 1.35); // 0.10..0.92, biased toward the core
+    const rad = 0.1 + 0.82 * Math.pow(rnd(), moteBias); // 0.10..0.92, biased toward the core (bias relaxed on phones — see PHONE_MOTE_BIAS)
     const seed = rnd();                             // class [0,1), fract = per-mote phase
     const len = 0.012 + 0.016 * rnd();              // half-length of the speck (material units)
     // a tangent crossing axis (Gram–Schmidt against dir) so the speck reads as a tiny crossing
@@ -286,8 +295,8 @@ export function buildFilamentGeometry(phone = false): Float32Array<ArrayBuffer> 
   // (radial 0.06) out to the rim (radial 1.0), brightest at the inner end so light reads as
   // emanating FROM the centre. Their own Fibonacci set (not the node dirs) so they form a distinct
   // cage. seed sentinel ∈ [1,2) marks the class; t runs 0→1 inner→outer to steer the flow outward. */
-  const spokeDirs = fibSphere(SPOKE_COUNT, 2.1);
-  for (let s = 0; s < SPOKE_COUNT; s++) {
+  const spokeDirs = fibSphere(spokeCount, 2.1);
+  for (let s = 0; s < spokeCount; s++) {
     const dir: V3 = [spokeDirs[s * 3], spokeDirs[s * 3 + 1], spokeDirs[s * 3 + 2]];
     const sentinel = 1.0 + rnd() * 0.9; // class = spoke; fract ∈ [0,0.90) (the ring flag is ≥ 0.90)
     for (let i = 0; i < SPOKE_DASHES; i++) {
@@ -295,8 +304,8 @@ export function buildFilamentGeometry(phone = false): Float32Array<ArrayBuffer> 
       const u1 = (i + 0.7) / SPOKE_DASHES; // 70% dash, 30% gap → a measurement-tick rhythm
       const rA = 0.06 + 0.94 * u0;
       const rB = 0.06 + 0.94 * u1;
-      push(dir, u0, sentinel, 1.7 + (0.42 - 1.7) * u0, rA);
-      push(dir, u1, sentinel, 1.7 + (0.42 - 1.7) * u1, rB);
+      push(dir, u0, sentinel, spokePeak + (0.42 - spokePeak) * u0, rA);
+      push(dir, u1, sentinel, spokePeak + (0.42 - spokePeak) * u1, rB);
     }
   }
 
@@ -336,12 +345,12 @@ export function buildFilamentGeometry(phone = false): Float32Array<ArrayBuffer> 
   // through the exact globe centre (= F_GLOBE_C = the morph-sphere centre = the summit axis), at a
   // brightness that crosses the 0.82 bloom threshold so the additive heap blooms into a luminous
   // core with no extra pass. seed sentinel ∈ [2,3) marks the class (the VS lifts these to the summit). */
-  for (let b = 0; b < NUCLEUS_SPARKS; b++) {
+  for (let b = 0; b < nucleusSparks; b++) {
     const dir = v3norm(rsym(), rsym(), rsym());
     const rad = 0.02 + 0.08 * rnd();
     const sentinel = 2.0 + rnd() * 0.999;
-    push([-dir[0], -dir[1], -dir[2]], 0, sentinel, 3.0, rad); // one side of the crossing…
-    push(dir, 1, sentinel, 3.0, rad);                          // …to the other, through the centre
+    push([-dir[0], -dir[1], -dir[2]], 0, sentinel, nucleusBright, rad); // one side of the crossing…
+    push(dir, 1, sentinel, nucleusBright, rad);                          // …to the other, through the centre
   }
 
   // ---- NUCLEUS ORBITAL HALO: a bright slow ring just outside the core (radial ~0.16) — gives the
@@ -405,10 +414,26 @@ const phoneRender = (): boolean =>
   typeof matchMedia === "function" &&
   (matchMedia("(pointer: coarse)").matches || matchMedia("(max-width: 860px)").matches);
 const PHONE_NX = 520, PHONE_NZ = 290;  // terrain mesh LOD (vs 760×420 → ~150k tris, ~76% fewer — TBDR vertex/binning win; contour LINES are shader-drawn so density is unchanged)
-const PHONE_FIL_PER_NODE = 10;         // globe curl-threads per node (vs desktop 12 → an even lighter phone tangle, less additive overdraw + smaller init VBO)
-const PHONE_MOTE_COUNT = 1100;         // globe interior dust motes (vs desktop 1600 → lighter phone dust, smaller init VBO)
+const PHONE_FIL_PER_NODE = 8;          // globe curl-threads per node (vs desktop 12 → a much lighter phone tangle, less additive overdraw + smaller init VBO)
+const PHONE_MOTE_COUNT = 760;          // globe interior dust motes (vs desktop 1600 → lighter phone dust, smaller init VBO)
 const PHONE_LINE_SCALE = 1.25;         // contour spacing ×: 1 = desktop, 1.25 ≈ 20% fewer lines on the mountain (F.lod.x)
 const PHONE_SC_CAP = 2.75;             // HDR scene supersample cap (raised from 2.5 → crisper, more-supersampled hairlines on phone; paid for by the lighter globe/mountain geometry above)
+/* the globe is ~⅓ the physical size on a phone, so the SAME line counts pack ~4× the
+   additive light per square cm — the ball reads as a flat white scribble with a blown-out
+   centre starburst (every bright element converges inside a ~40px disc). These trims keep
+   the composition but rebalance it for the small ball; the shader applies matching
+   centre/depth trims via F.eye.w (see RIDGE_FILAMENT_WGSL). Desktop is untouched. */
+const PHONE_SPOKE_COUNT = 34;          // radial sight-line spokes (vs 48 — fewer rays converging at the nucleus)
+const PHONE_NUCLEUS_SPARKS = 42;       // centre-crossing core sparks (vs 64 — the heap still blooms, no longer blows out)
+const PHONE_FIL_SPARKS = 3;            // node-star crossing segments (vs 4 — calmer convergence stars)
+const PHONE_MOTE_BIAS = 1.12;          // mote radial pow bias (vs 1.35 — spreads the dust off the packed centre)
+const PHONE_SPOKE_PEAK = 1.15;         // spoke inner-end brightness (vs 1.7 — the rays no longer torch the core; rim end stays 0.42)
+const PHONE_NUCLEUS_BRIGHT = 2.5;      // per-spark core brightness (vs 3.0 — still over the 0.82 bloom threshold)
+// DRS floor while the GLOBE shows (morph < 0.5): the landing view never drops below near-native
+// crispness even when a browser frame-cap (iOS Low Power Mode ≈ 30fps rAF) reads as permanent
+// "load" to the wall-clock controller — see the morph-aware floor in render(). 0.85 × the phone's
+// 2.75 supersample ≈ 2.3, still above the 2.5-DPR panel's ~0.9× native; the mountain keeps 0.66.
+const GLOBE_DRS_FLOOR = 0.85;
 
 /** Per-frame inputs from the stage (orbit offsets + clock). */
 export interface RidgeFrame {
@@ -908,6 +933,7 @@ export class RidgelineScene {
   private ah = 1;        // active scene height = round(rh * scale)
   private drsEnabled = true;   // pinned off (scale held at 1) under ?perf so telemetry is stationary
   private drsFloor = 0.66;     // lower scale bound (re-derived per-resize so device-px never drop < 1)
+  private drsFloorLive = 0.66; // the floor tickScale sheds against THIS frame — raised on the globe (see render())
   private drsEwma = 1000 / 60; // EWMA of frame time (ms)
   private drsBreachRun = 0;    // consecutive over-budget frames (debounce for a shed)
   private drsClearRun = 0;     // consecutive within-budget frames (debounce for a recover)
@@ -1250,7 +1276,9 @@ export class RidgelineScene {
     u[16] = s.time; u[17] = this.aw; u[18] = this.ah; u[19] = aspect;
     u[20] = NEAR; u[21] = FAR; u[22] = WORLD_H_MAX; u[23] = s.time * 0.012; // haloSpin
     u[24] = 0.34; u[25] = 0.34; u[26] = 0.03; u[27] = 1.0; // bloomAmt, vignette, grain, exposure
-    u[28] = ex; u[29] = ey; u[30] = ez; u[31] = 0;
+    // eye.w carries the PHONE profile flag (0 desktop / 1 phone): the filament shader lerps its
+    // centre-glow + depth-recession constants toward the small-ball trims (see RIDGE_FILAMENT_WGSL).
+    u[28] = ex; u[29] = ey; u[30] = ez; u[31] = this.isPhone ? 1 : 0;
     // hov = (hoverBand, hoverGlow, focusBand, focusAmt): x/y light a hovered slice,
     // z/w recede every OTHER band so the focused (clicked) slice reads as the hero.
     u[32] = s.hoverBand ?? -1; u[33] = s.hoverGlow ?? 0;
@@ -1280,6 +1308,18 @@ export class RidgelineScene {
 
   render(s: RidgeFrame): void {
     const d = this.g.device;
+
+    // ---- DRS floor, morph-aware. The GLOBE is the cheap resting scene ("ample headroom") AND the
+    // first thing a visitor sees — never let DRS mush the landing view. A browser frame-cap (iOS Low
+    // Power Mode pins rAF at ~30fps) is indistinguishable from GPU load by wall-clock dt, so under a
+    // cap the controller sheds to the floor within seconds and provably never recovers (the 30-held-
+    // frame clear run needs sub-18.7ms frames a capped rAF can never deliver) — the landing globe
+    // rendered permanently soft. Hold the globe at a near-native floor (crisp at a capped fps beats
+    // mush at 60) and hand the mountain — the heavy scene DRS actually protects (TELEMETRY.md) — the
+    // full 0.66 thermal range as it assembles. morph defaults to 1 (mountain) like the uniform. ----
+    const floorLive = Math.max(this.drsFloor, (s.morph ?? 1) < 0.5 ? GLOBE_DRS_FLOOR : 0);
+    this.drsFloorLive = floorLive;
+    if (this.scale < floorLive) this.scale = floorLive; // returning home snaps crisp (sub-rect only — no realloc)
 
     // ---- DRS sub-rect sizing (BEFORE writeUniforms, which packs the active size + rect) ----
     const scale = this.drsEnabled ? this.scale : 1;
@@ -1411,8 +1451,8 @@ export class RidgelineScene {
     if (this.drsEwma > SHED) {
       this.drsClearRun = 0;
       this.drsBreachRun++;
-      if (this.drsBreachRun >= 4 && this.drsCooldown === 0 && this.scale > this.drsFloor) {
-        this.scale = Math.max(this.drsFloor, Math.round(this.scale * 0.92 / 0.02) * 0.02);
+      if (this.drsBreachRun >= 4 && this.drsCooldown === 0 && this.scale > this.drsFloorLive) {
+        this.scale = Math.max(this.drsFloorLive, Math.round(this.scale * 0.92 / 0.02) * 0.02);
         this.drsBreachRun = 0;
         this.drsCooldown = 8;
       }
