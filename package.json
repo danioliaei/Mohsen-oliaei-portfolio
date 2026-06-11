@@ -7,11 +7,12 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "preview": "vite preview",
+    "preview": "npm run build && wrangler dev",
     "perf:build": "cross-env VITE_PERF=1 vite build",
     "perf:preview": "cross-env VITE_PERF=1 vite build && vite preview --host --port 4173",
     "tunnel": "npx -y cloudflared tunnel --url http://localhost:5173",
-    "tunnel:preview": "npx -y cloudflared tunnel --url http://localhost:4173"
+    "tunnel:preview": "npx -y cloudflared tunnel --url http://localhost:4173",
+    "deploy": "npm run build && wrangler deploy"
   },
   "dependencies": {
     "motion": "^11.15.0",
@@ -19,6 +20,7 @@
     "react-dom": "^19.0.0"
   },
   "devDependencies": {
+    "@cloudflare/vite-plugin": "^1.40.2",
     "@types/node": "^22.19.20",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
@@ -26,6 +28,7 @@
     "@webgpu/types": "^0.1.70",
     "cross-env": "^10.1.0",
     "typescript": "^5.7.2",
-    "vite": "^6.0.5"
+    "vite": "^6.0.5",
+    "wrangler": "^4.100.0"
   }
 }

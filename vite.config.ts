@@ -2,12 +2,14 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { telemetryCollector } from "./telemetry-collector";
 
+import { cloudflare } from "@cloudflare/vite-plugin";
+
 // https://vite.dev/config/
 export default defineConfig({
   // telemetryCollector mounts POST /telemetry on the dev/preview server (same origin,
   // so the HTTPS phone behind the tunnel can beacon to it). It adds nothing to the
   // client bundle and is inert on a real deploy.
-  plugins: [react(), telemetryCollector()],
+  plugins: [react(), telemetryCollector(), cloudflare()],
   // bind to 0.0.0.0 so a LAN device / tunnel can reach the server, and allow the
   // cloudflared quick-tunnel domain through Vite's Host-header check (otherwise the
   // phone gets "Blocked request. This host is not allowed."). The quick-tunnel
