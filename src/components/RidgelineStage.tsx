@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence } from "motion/react";
+import { globePointerStrength } from "../gpu/globePointer";
 import {
   RidgelineScene,
   PITCH_LO,
@@ -753,17 +754,26 @@ export default function RidgelineStage() {
       const HOVER_TAU = 0.28; // s — wash rise/fall + slice-to-slice cross-dissolve (gentle)
       const OP_TAU = 0.22; // s — callout highlight/dim easing, so titles never pop
       let hx = -1, hy = -1; // pointer in canvas px, or -1 when off-canvas
+      let pointerOnCanvas = false;
+      let fieldX = 0, fieldY = 0, fieldStrength = 0;
+      let pointerEnergy = 0, fieldEnergy = 0, pointerTime = 0;
+      let pointerTiltYaw = 0, pointerTiltPitch = 0;
       let hoverBand = -1; // slice under the pointer THIS frame (set in updateSurvey)
       let shownBand = -1; // the slice the wash is CURRENTLY on (cross-dissolve bookkeeping)
       let hoverAmt = 0; // eased presence 0..1
       let beaconOp = 0; // eased apex-beacon opacity 0..1 (fades on overlay-open / off-screen)
-      const reduceMotion =
-        typeof matchMedia === "function" &&
-        matchMedia("(prefers-reduced-motion: reduce)").matches;
+      const motionPreference = matchMedia("(prefers-reduced-motion: reduce)");
+      let reduceMotion = motionPreference.matches;
 
       // ---- Home (globe) ⇄ CV (mountain) morph (loop-locals; read by frame + the pointer
       // handlers, which all live in this one closure so they share the live values) ----
-      const SPIN = reduceMotion ? 0 : GLOBE_SPIN_RATE; // idle planet spin (held still on reduced-motion)
+      let SPIN = reduceMotion ? 0 : GLOBE_SPIN_RATE;
+      const onMotionPreference = () => {
+        reduceMotion = motionPreference.matches;
+        SPIN = reduceMotion ? 0 : GLOBE_SPIN_RATE;
+      };
+      motionPreference.addEventListener("change", onMotionPreference);
+      teardown.push(() => motionPreference.removeEventListener("change", onMotionPreference));
       // The morph is a constant-DURATION clock: mClock is driven LINEARLY in time toward the view
       // target (0 = globe/Home, 1 = mountain/CV) at 1/MORPH_DUR per second, then shaped ONCE by a
       // smootherstep into the perceptual clock `mc` every VISUAL consumer reads (the GPU uniform, the
@@ -1202,12 +1212,19 @@ export default function RidgelineStage() {
       // never fires this, so the slice-glow stays a pointer-device delight. ----------
       const onHover = (e: PointerEvent) => {
         if (e.pointerType !== "mouse") return;
+        pointerOnCanvas = e.target === cvs;
         const r = cvs.getBoundingClientRect();
+        if (pointerOnCanvas && hx >= 0 && pointerTime > 0) {
+          const speed = Math.hypot(e.clientX - r.left - hx, e.clientY - r.top - hy) /
+            Math.max(16, e.timeStamp - pointerTime);
+          pointerEnergy = Math.min(1, speed / 1.2);
+        }
+        pointerTime = e.timeStamp;
         hx = e.clientX - r.left;
         hy = e.clientY - r.top;
       };
       const onHoverOut = (e: PointerEvent) => {
-        if (!e.relatedTarget) { hx = -1; hy = -1; } // pointer left the window
+        if (!e.relatedTarget) { hx = -1; hy = -1; pointerOnCanvas = false; }
       };
 
       // MOBILE PAN from the name labels (req 7): onDown only sees EMPTY-space presses (it's on the
@@ -1879,12 +1896,13 @@ export default function RidgelineStage() {
 
       let raf = 0;
       let prev = performance.now();
-      const startT = prev;
+      let sceneTime = 0;
       const frame = (now: number) => {
         perf?.frame(now); // ?perf=1 telemetry: raw frame cadence (no-op when perf is off)
         const dt = Math.min((now - prev) / 1000, 0.05);
         prev = now;
-        const t = (now - startT) / 1000;
+        if (!reduceMotion) sceneTime += dt;
+        const t = sceneTime; // hidden tabs and reduced motion do not advance ambient phases
         lastFrameT = t; // so a click can pick against the exact frame on screen
 
         // ease the morph toward the current view target (0 = Home/globe, 1 = CV/mountain)
@@ -2078,7 +2096,7 @@ export default function RidgelineStage() {
           const turns = Math.round(tYaw / TWO_PI);
           tYaw -= turns * TWO_PI;
           yaw -= turns * TWO_PI;
-          const reso = smooth(0.04, 0.55, mc);
+          const reso = 1 - Math.exp(-dt * 12 * smooth(0.04, 0.55, mc));
           tYaw *= 1 - reso;
           tPitch *= 1 - reso;
           velYaw *= 1 - reso;
@@ -2101,7 +2119,7 @@ export default function RidgelineStage() {
           shownBand !== hoverBand ? 0 : hoverBand >= 0 ? 1 : 0;
         if (shownBand !== hoverBand && hoverAmt < 0.02) shownBand = hoverBand;
         hoverAmt += (amtTarget - hoverAmt) * (1 - Math.exp(-dt / HOVER_TAU));
-        const breath = reduceMotion ? 0.66 : 0.64 + 0.22 * Math.sin(t * 2.2);
+        const breath = reduceMotion ? 0.66 : 0.66 + 0.09 * Math.sin(t * 1.2);
         const hoverGlow = hoverAmt * breath;
 
         // focus dolly + isolation: ease the camera lean-in and the dim toward the
@@ -2195,10 +2213,44 @@ export default function RidgelineStage() {
         // so a resume/GC spike can't pollute the EWMA) — it adjusts the render-scale BEFORE we render.
         gpu.tickScale(dt * 1000);
 
+        // Project the sphere boundary once per frame. Mouse influence fades at its
+        // edge and while dragging/morphing/opening overlays, so navigation never
+        // accidentally lights the globe. Touch retains its direct orbit gesture.
+        let fieldTarget = 0, tiltX = 0, tiltY = 0;
+        if (pointerOnCanvas && !dragging && mc < 0.001 && projAmt < 0.001 &&
+            !assignmentOpenRef.current && !bookOpenRef.current && selectedRef.current == null) {
+          const cam = ridgeCamera(yaw, pitch, aspectNow, t, rscale, focusShift, fShiftY);
+          const centre = projectToScreen(cam.vp, GLOBE.cx, GLOBE.cy, GLOBE.cz, cvs.clientWidth, cvs.clientHeight);
+          const distance = Math.hypot(cam.eye[0] - GLOBE.cx, cam.eye[1] - GLOBE.cy, cam.eye[2] - GLOBE.cz);
+          const focal = Math.hypot(cam.vp[1], cam.vp[5], cam.vp[9]);
+          const radius = cvs.clientHeight * 0.5 * focal * GLOBE.r /
+            Math.sqrt(Math.max(1, distance * distance - GLOBE.r * GLOBE.r));
+          if (centre.visible) {
+            fieldTarget = globePointerStrength(hx, hy, centre.x, centre.y, radius);
+            tiltX = (hx - centre.x) / radius * fieldTarget;
+            tiltY = (hy - centre.y) / radius * fieldTarget;
+          }
+        }
+        const fieldEase = reduceMotion ? 1 : 1 - Math.exp(-dt / 0.16);
+        if (fieldTarget > 0) {
+          const x = hx / cvs.clientWidth * 2 - 1;
+          const y = 1 - hy / cvs.clientHeight * 2;
+          // On entry, place the field before fading it in; don't sweep from the old cursor.
+          const follow = fieldStrength < 0.01 ? 1 : fieldEase;
+          fieldX += (x - fieldX) * follow;
+          fieldY += (y - fieldY) * follow;
+        }
+        fieldStrength += (fieldTarget - fieldStrength) * fieldEase;
+        pointerEnergy *= Math.exp(-dt / 0.3);
+        fieldEnergy += (pointerEnergy * fieldTarget - fieldEnergy) * fieldEase;
+        const tiltEase = 1 - Math.exp(-dt / 0.45);
+        pointerTiltYaw += ((reduceMotion ? 0 : tiltX * 0.09) - pointerTiltYaw) * tiltEase;
+        pointerTiltPitch += ((reduceMotion ? 0 : -tiltY * 0.06) - pointerTiltPitch) * tiltEase;
+
         gpu.render({
           time: t,
-          yaw,
-          pitch,
+          yaw: yaw + pointerTiltYaw,
+          pitch: pitch + pointerTiltPitch,
           morph: mc,
           globeSpin: spinOut,
           motion: reduceMotion ? 0 : 1,
@@ -2213,6 +2265,10 @@ export default function RidgelineStage() {
           focalY,
           projAmt,
           reveal,
+          pointerX: fieldX,
+          pointerY: fieldY,
+          pointerStrength: fieldStrength,
+          pointerEnergy: fieldEnergy,
         });
 
         // bottom drag hint: shown only on the whole globe (mc≈0) and only until the first rotate
@@ -2221,7 +2277,7 @@ export default function RidgelineStage() {
         const hint = hintRef.current;
         if (hint) {
           const hintTarget = invited && mc < 0.05 && morphTargetRef.current === 0 ? 1 : 0;
-          hintOpacity += (hintTarget - hintOpacity) * (reduceMotion ? 1 : 0.12);
+          hintOpacity += (hintTarget - hintOpacity) * (reduceMotion ? 1 : 1 - Math.exp(-dt / 0.18));
           hint.style.opacity = hintOpacity < 0.002 ? "0" : hintOpacity.toFixed(3);
         }
 
@@ -2232,7 +2288,7 @@ export default function RidgelineStage() {
         if (mc < 0.999) {
           // reuse aspectNow from the top of the frame — the canvas can't resize
           // mid-frame, so a second clientWidth/clientHeight read would be redundant.
-          const cam = ridgeCamera(yaw, pitch, aspectNow, t, rscale, focusShift, fShiftY);
+          const cam = ridgeCamera(yaw + pointerTiltYaw, pitch + pointerTiltPitch, aspectNow, t, rscale, focusShift, fShiftY);
           // spinOut (idle + scrub roll) so the cloud co-rotates with the GPU ball in BOTH phases
           updateCloud(cam.vp, cam.eye, spinOut, mc, cvs.clientWidth, cvs.clientHeight);
           // the chaotic letter-cloud is part of "the mess" — fade it out as the trace organises
@@ -2243,7 +2299,7 @@ export default function RidgelineStage() {
         } else if (cloudRef.current && cloudRef.current.style.visibility !== "hidden") {
           cloudRef.current.style.visibility = "hidden"; // mountain is whole — drop the cloud
         }
-        updateSurvey(yaw, pitch, t, dt, rscale, focusShift, fShiftY, mc);
+        updateSurvey(yaw + pointerTiltYaw, pitch + pointerTiltPitch, t, dt, rscale, focusShift, fShiftY, mc);
         raf = requestAnimationFrame(frame);
       };
       raf = requestAnimationFrame(frame);
@@ -2375,21 +2431,15 @@ export default function RidgelineStage() {
         </span>
       </button>
 
-      {/* bottom drag hint — a tracked small-caps cue flanked by two little CURVED arrows
-          (curving outward, one pointing left, one right) signalling the globe can be spun.
+      {/* A single orbital rotation symbol, with correctly tangent arrowheads.
           Globe-only: opacity is driven from the rAF loop (1 while mc≈0 & still inviting, else
           0) and retired by stopInviting on the first rotate. aria-hidden + pointer-events:none
           so a drag passes straight through to the canvas beneath. */}
       <div className="globe-hint" ref={hintRef} aria-hidden="true">
-        <svg className="globe-hint-arrow" viewBox="0 0 24 20" fill="none" aria-hidden="true">
-          <path d="M21 13.5 Q12 6.5 3 10.5" />
-          <path d="M3 10.5 L6 6.9 M3 10.5 L7.4 11.4" />
+        <svg className="globe-hint-arrow" viewBox="0 0 32 24" fill="none" aria-hidden="true">
+          <path d="M5 12a11 7 0 0 1 22 0m0 0-3-3m3 3 3-3M27 12a11 7 0 0 1-22 0m0 0-3 3m3-3 3 3" />
         </svg>
         <span className="globe-hint-text">drag to rotate</span>
-        <svg className="globe-hint-arrow" viewBox="0 0 24 20" fill="none" aria-hidden="true">
-          <path d="M3 13.5 Q12 6.5 21 10.5" />
-          <path d="M21 10.5 L18 6.9 M21 10.5 L16.6 11.4" />
-        </svg>
       </div>
 
       {/* focused experience: clicking a slice dims the rest of the massif and dollies

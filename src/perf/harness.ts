@@ -376,6 +376,7 @@ export function startPerf(opts: PerfOptions = {}): PerfHandle {
   const onHide = () => send(buildSample(performance.now()));
   const onVisibility = () => {
     if (document.visibilityState === "hidden") onHide();
+    prev = -1; // a intentional rendering pause is not a dropped frame
   };
   window.addEventListener("pagehide", onHide);
   window.addEventListener("visibilitychange", onVisibility);

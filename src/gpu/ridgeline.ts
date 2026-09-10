@@ -35,7 +35,7 @@ const HDR: GPUTextureFormat = "rgba16float";
    GLOBE_R consts in ridgelineShaders.ts (the GPU sphere) so the DOM letter-cloud, projected
    through the same camera here, sits exactly on the rendered ball. ---------------------- */
 export const GLOBE = { cx: 0, cy: 2120, cz: 8200, r: 3600 } as const;
-export const GLOBE_SPIN_RATE = 0.16; // rad/s — the planet's slow idle rotation (0 on reduced-motion)
+export const GLOBE_SPIN_RATE = 0.09; // rad/s — restrained rotation lets the inner layers read clearly
 export const MORPH_DUR = 2.35;       // s — globe → mountain assembly, hand-authored constant duration (snapped on reduced-motion)
 
 /* ---- letter-cloud content, drawn from the real career record (data/stations.ts): the record is
@@ -341,16 +341,27 @@ export function buildFilamentGeometry(phone = false): Float32Array<ArrayBuffer> 
     }
   }
 
-  // ---- CLASS C — NUCLEUS: short crossing sparks INSIDE radial 0.02..0.10 whose midline passes
-  // through the exact globe centre (= F_GLOBE_C = the morph-sphere centre = the summit axis), at a
-  // brightness that crosses the 0.82 bloom threshold so the additive heap blooms into a luminous
-  // core with no extra pass. seed sentinel ∈ [2,3) marks the class (the VS lifts these to the summit). */
+  // A rounded nucleus made from short surface arcs. No segment crosses the centre:
+  // the old diameters accumulated into a flat white starburst. A Fibonacci shell
+  // distributes the strokes evenly; depth lighting in WGSL gives the core volume.
+  const coreDirs = fibSphere(nucleusSparks, 0.4);
   for (let b = 0; b < nucleusSparks; b++) {
-    const dir = v3norm(rsym(), rsym(), rsym());
-    const rad = 0.02 + 0.08 * rnd();
+    const dir: V3 = [coreDirs[b * 3], coreDirs[b * 3 + 1], coreDirs[b * 3 + 2]];
+    const tangent = v3norm(dir[2], 0.02, -dir[0]);
+    const rad = 0.072 + 0.018 * rnd();
     const sentinel = 2.0 + rnd() * 0.999;
-    push([-dir[0], -dir[1], -dir[2]], 0, sentinel, nucleusBright, rad); // one side of the crossing…
-    push(dir, 1, sentinel, nucleusBright, rad);                          // …to the other, through the centre
+    const brightness = nucleusBright * (0.16 + 0.1 * rnd());
+    for (let s = 0; s < 4; s++) {
+      for (const t of [s / 4, (s + 1) / 4]) {
+        const angle = (t - 0.5) * 0.48;
+        const point = v3norm(
+          dir[0] * Math.cos(angle) + tangent[0] * Math.sin(angle),
+          dir[1] * Math.cos(angle) + tangent[1] * Math.sin(angle),
+          dir[2] * Math.cos(angle) + tangent[2] * Math.sin(angle),
+        );
+        push(point, t, sentinel, brightness, rad);
+      }
+    }
   }
 
   // ---- NUCLEUS ORBITAL HALO: a bright slow ring just outside the core (radial ~0.16) — gives the
@@ -488,6 +499,11 @@ export interface RidgeFrame {
    *  INERT unless the globe is showing — the shader gates it by (morph→0) and the filament
    *  pass is skipped at morph>=0.72, so it can never alter the finished mountain. Defaults to 0. */
   projAmt?: number;
+  /** Local mouse field: NDC position and eased strength; absent on touch and overlays. */
+  pointerX?: number;
+  pointerY?: number;
+  pointerStrength?: number;
+  pointerEnergy?: number;
   /** Depth-of-field FOCAL POINT in composite UV (0..1, y down): the crisp centre the
    *  Projects DoF keeps in focus while the rest of the frame edges soften. Defaults to
    *  (0.5, 0.5) — frame centre — so at projAmt 0 the dead DoF branch is byte-identical;
@@ -527,7 +543,7 @@ const ORBIT = (() => {
    byte-identical regardless of what this returns. The DOM letter-cloud + survey project
    through the SAME ridgeCamera, so the fit stays consistent for free. */
 const GLOBE_FILL_W = 0.95;  // silhouette reaches this fraction of the half-WIDTH where it fits (phones / near-square) — raised from 0.9 so the phone globe grows to a tiny margin from the side borders
-const GLOBE_BLEED_V = 0.9;  // …but never past this fraction of the half-HEIGHT — LOWERED from 1.24 (which bled off the top/bottom of wide 4k screens) to 0.9 so the whole globe FITS on desktop with a comfortable margin for the header nav + footer/framing scrims (the camera aims a touch above centre, so the silhouette sits slightly low — 0.9 keeps the bottom rim clear of the footer)
+const GLOBE_BLEED_V = 0.8;  // smaller desktop globe with breathing room; portrait phones keep the width fit
 export function globeFitRadiusScale(aspect: number): number {
   const vHalf = FOVY / 2;
   const hHalf = Math.atan(Math.tan(vHalf) * Math.max(aspect, 0.2));
@@ -1303,6 +1319,10 @@ export class RidgelineScene {
     // occupies this frame. The composite folds it into every sceneTex tap. (1,1) at full scale.
     u[44] = this.aw / this.rw;
     u[45] = this.ah / this.rh;
+    u[48] = s.pointerX ?? 0;
+    u[49] = s.pointerY ?? 0;
+    u[50] = s.pointerStrength ?? 0;
+    u[51] = s.pointerEnergy ?? 0;
     this.g.device.queue.writeBuffer(this.uBuf, 0, u.buffer, 0, 256);
   }
 
@@ -1363,10 +1383,15 @@ export class RidgelineScene {
     pass.setBindGroup(0, this.frameBG);
     pass.setPipeline(this.backdropPipe);
     pass.draw(3);
-    pass.setPipeline(this.terrainPipe);
-    pass.setVertexBuffer(0, this.gridVBO);
-    pass.setIndexBuffer(this.gridIBO, "uint32");
-    pass.drawIndexed(this.indexCount);
+    // The Home terrain discards every fragment, including depth. Avoid its invisible
+    // vertex work until the very first CV morph frame.
+    const terrainDrew = (s.morph ?? 1) > 0;
+    if (terrainDrew) {
+      pass.setPipeline(this.terrainPipe);
+      pass.setVertexBuffer(0, this.gridVBO);
+      pass.setIndexBuffer(this.gridIBO, "uint32");
+      pass.drawIndexed(this.indexCount);
+    }
     // the intro filament ball — additive flowing threads over the sphere. Drawn only while the
     // globe is still showing (it has fully faded by morph 0.70); skipped on the finished mountain.
     const filamentDrew = (s.morph ?? 1) < 0.72;
@@ -1380,8 +1405,8 @@ export class RidgelineScene {
     // perf counters: backdrop + terrain (+ optional filament) in the HDR pass, then
     // bright + blurH + blurV + composite full-screen passes = 6 draws (7 with filament).
     // Triangles = the terrain mesh (indexCount/3) + the five full-screen-triangle passes.
-    this.lastDraws = 6 + (filamentDrew ? 1 : 0);
-    this.lastTris = this.indexCount / 3 + 5;
+    this.lastDraws = 5 + Number(terrainDrew) + Number(filamentDrew);
+    this.lastTris = (terrainDrew ? this.indexCount / 3 : 0) + 5;
     this.lastLines = filamentDrew ? (this.filaVertexCount / 2) | 0 : 0;
 
     // ---- bloom: bright-pass then one separable blur iteration (→ bloomA) ----

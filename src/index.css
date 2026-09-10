@@ -632,8 +632,8 @@ canvas#ridge:active {
   padding-left: 0.34em;
 }
 .globe-hint-arrow {
-  width: 26px;
-  height: 19px;
+  width: 30px;
+  height: 22px;
   stroke: currentColor;
   stroke-width: 1.7;
   stroke-linecap: round;
@@ -641,7 +641,6 @@ canvas#ridge:active {
   fill: none;
   overflow: visible;
   flex: none;
-  transform: scaleY(-1); /* req 4 — vertically mirror the drag arrows (they now arc downward) */
 }
 /* breathe a subtle downward drift (transform only — opacity stays loop-owned) */
 @keyframes globe-hint-breathe {
@@ -664,8 +663,8 @@ canvas#ridge:active {
     padding-left: 0.3em;
   }
   .globe-hint-arrow {
-    width: 21px;
-    height: 15px;
+    width: 27px;
+    height: 20px;
     stroke-width: 1.8;
   }
 }

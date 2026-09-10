@@ -28,6 +28,7 @@ struct Frame {
   mph  : vec4<f32>,   // x morph 0..1 (0 = intro globe, 1 = finished mountain), y globeSpin (rad), z motion, w projAmt (0 = globe chaos … 1 = dial-calm)
   lod  : vec4<f32>,   // x contour-spacing scale (1 = desktop; >1 on phones widens the spacing → fewer lines), y/z Projects DoF focal point (composite UV), w one-shot mountain reveal 0..1 (1 = fully realistic; default 1)
   drs  : vec4<f32>,   // x,y = DRS scene sub-rect (fraction of the max HDR target the live scene fills; (1,1) at full quality), zw unused
+  ptr  : vec4<f32>,   // xy mouse NDC, z eased influence, w decaying pointer energy
 };
 @group(0) @binding(0) var<uniform> F : Frame;
 `;
@@ -167,7 +168,35 @@ struct VsOut { @builtin(position) pos : vec4<f32>, @location(0) uv : vec2<f32> }
   return o;
 }
 const TWO_PI : f32 = 6.28318530718;
+// A softly lit sphere behind the core's surface arcs. Reuse the backdrop pass;
+// no new mesh, textures or bloom pass. Its projection follows the same camera
+// and nucleus lift as the filament shader.
+fn nucleusLight(uv : vec2<f32>) -> f32 {
+  let presence = (1.0 - smoothstep(0.55, 0.70, F.mph.x)) * (1.0 - smoothstep(0.0, 0.65, F.mph.w));
+  if (presence <= 0.0) { return 0.0; }
+  let centre = mix(vec3<f32>(0.0, 2120.0, 8200.0), vec3<f32>(0.0, 5230.0, 8200.0), smoothstep(0.36, 0.66, F.mph.x));
+  let clip = F.vp * vec4<f32>(centre, 1.0);
+  let centreUV = vec2<f32>(clip.x / clip.w * 0.5 + 0.5, 0.5 - clip.y / clip.w * 0.5);
+  let focal = length(vec3<f32>(F.vp[0].y, F.vp[1].y, F.vp[2].y));
+  // A deliberate four-second pulse: a luminous heart with an expanding corona,
+  // not flickering spikes. The motion gate freezes both radius and luminance.
+  let cycle = 0.5 + 0.5 * sin(F.a.x * 1.57);
+  let beat = mix(0.45, cycle * cycle, F.mph.z);
+  let radius = 270.0 * (1.0 + 0.10 * beat) * focal * 0.5 / max(length(F.eye.xyz - centre), 300.0);
+  let q = (uv - centreUV) * vec2<f32>(F.a.w, 1.0) / max(radius, 0.001);
+  let r2 = dot(q, q);
+  if (r2 > 9.0) { return 0.0; }
+  let normal = vec3<f32>(q.x, -q.y, sqrt(max(0.0, 1.0 - r2)));
+  let diffuse = max(0.0, dot(normal, normalize(vec3<f32>(-0.5, 0.65, 1.0))));
+  let edge = 1.0 - smoothstep(0.9, 1.06, sqrt(r2));
+  let surface = (0.12 + 1.25 * diffuse + 0.45 * diffuse * diffuse * diffuse * diffuse) * edge * (0.8 + 0.7 * beat);
+  let atmosphere = (0.16 + 0.22 * beat) * exp(-r2 * mix(1.5, 0.8, beat));
+  return (surface + atmosphere) * presence;
+}
 @fragment fn fs(i : VsOut) -> @location(0) vec4<f32> {
+  let core = nucleusLight(i.uv);
+  // Home has no mountain halo: skip its trigonometry and contour work entirely.
+  if (F.mph.x <= 0.66) { return vec4<f32>(vec3<f32>(core), 1.0); }
   let asp = F.a.w;
   // centre the halo behind the summit, in the upper third; aspect-correct so the
   // rings stay circular regardless of viewport shape
@@ -204,7 +233,7 @@ const TWO_PI : f32 = 6.28318530718;
   // so the spinning ball reads as a clean tangle in empty black. morph 0 = globe → no
   // halo; morph 1 = mountain → full halo.
   halo = halo * smoothstep(0.66, 0.92, F.mph.x);  // the sky rises WITH the settling massif and lands before the survey (0.80-1.0) → a continuous crescendo, no halo pop (full halo by 0.92 < 1.0; absent at morph 0)
-  return vec4<f32>(vec3<f32>(halo), 1.0);
+  return vec4<f32>(vec3<f32>(halo + core), 1.0);
 }
 `;
 
@@ -526,7 +555,7 @@ struct FOut {
 @vertex fn vs(@location(0) mdir : vec3<f32>, @location(1) at : vec4<f32>) -> FOut {
   let morph  = F.mph.x;
   let motion = F.mph.z;                          // 0 on reduced-motion → the web holds still
-  let tt     = F.a.x;
+  let tt     = F.a.x * 0.65; // one calm clock for the layered silk, pulses and orbital rings
 
   // ---- line CLASS, encoded as a sentinel range in at.y (the seed): [0,1) curl thread / surface
   // spark (organic), [1,2) radial spoke (rigid armature), [2,3) nucleus (the core, lifts to summit).
@@ -559,7 +588,7 @@ struct FOut {
   let projGate = smoothstep(0.20, 0.0, morph);
   let dial = F.mph.w * projGate;             // 0..1 dial-open progress, INERT at morph>=0.20 ⇒ morph=1 untouched
   let calmDown = mix(1.0, 0.10, dial);       // deeper rest as the dial opens (was 0.16) — the ball goes slow
-  let flowAmt = mix(0.068, 0.020, isArm) * mix(1.35, 1.0, depth01) * motion * calmDown; // interior silk more alive
+  let flowAmt = mix(0.038, 0.010, isArm) * mix(1.2, 1.0, depth01) * motion * calmDown;
   d = normalize(d + tang * flowAmt);
 
   // a tiny BREATHING PUMP so the whole web gently inhales (frozen on reduced motion)
@@ -649,13 +678,14 @@ struct FOut {
   var glow = at.z;
   // TRAVELLING PULSE — a hot bead races along each line (charge flowing), faster as the drain begins.
   // Gaussians use a*a (NOT pow): pow(x, 2.0) NaNs for x < 0 in WGSL.
-  let pSpeed = 0.55 * (1.0 + 3.0 * drainT);
+  let pSpeed = 0.24 * (1.0 + 2.0 * drainT);
   let p  = fract(tt * pSpeed + sseed);
   let pa = (0.5 - abs(fract(at.x - p) - 0.5)) * 14.0;        // wrapped distance to the pulse head
   let pulse = exp(-pa * pa);
   let ta = fract(at.x - p + 0.06) * 9.0;                     // a short comet afterglow trailing behind
   let tail = 0.42 * exp(-ta * ta);
-  glow = glow * mix(1.0, 0.55 + 2.2 * (pulse + tail), motion);
+  let highlight = smoothstep(0.45, 0.85, sseed);
+  glow = glow * mix(1.0, 0.72 + highlight * 1.1 * (pulse + tail), motion * calmDown);
   // CONVERGENCE VOLLEY: every ~3.3s a wave makes beads on ~1/3 of the curl threads rush to their node
   // end (at.x → 0) together → you repeatedly see sparks race inward and a node flare. Curl/mote-only
   // (1 - isArm), additive; q*q (never pow on a maybe-negative) keeps it NaN-safe.
@@ -663,11 +693,11 @@ struct FOut {
   let volley   = fract(tt * 0.30);                   // 0..1 every ~3.33s
   let q        = at.x - (1.0 - volley);              // bead racing toward the node end at.x = 0
   let conv     = exp(-q * q * 26.0);
-  glow = glow + (1.0 - isArm) * inVolley * conv * 1.3 * motion;
+  glow = glow + (1.0 - isArm) * inVolley * conv * 0.3 * motion;
   // NODE / RIM TWINKLE — scintillation, small amplitude to stay tasteful. The deep interior dust
   // (organic + small radial) glitters faster, so the volume sparkles as it counter-rotates.
   let dust = (1.0 - isArm) * (1.0 - smoothstep(0.18, 0.30, depth01)); // ~1 for deep motes / inner silk
-  let tw = 0.86 + 0.14 * sin(tt * 3.0 + sseed * 40.0) + dust * 0.18 * sin(tt * 7.0 + sseed * 90.0);
+  let tw = 0.94 + 0.06 * sin(tt * 1.4 + sseed * 40.0) + dust * 0.03 * sin(tt * 2.0 + sseed * 90.0);
   glow = glow * mix(1.0, tw, motion);
   // depth volume — widen the recession so the back of the deep tangle sinks further, and darken the
   // interior a touch vs the crust (a light-falloff cue that reads as a luminous WELL). On the PHONE
@@ -680,7 +710,7 @@ struct FOut {
   // SPOKES FIRE OUTWARD — a wave that travels core→rim every few seconds (only for armature lines)
   let aw = (0.5 - abs(fract(tt * 0.4 - at.w) - 0.5)) * 8.0;
   let armWave = exp(-aw * aw);
-  glow = mix(glow, glow * (0.5 + 2.0 * armWave), isArm * motion);
+  glow = mix(glow, glow * (0.8 + 0.6 * armWave), isArm * motion);
   // RING DASH SCROLL: a dash window marches around each gimbal ring (at.x = angle 0..1), each ring at
   // its own rate/direction (sseed), with a brighter head bead racing ahead — a calibrated "scale" cue.
   // mix-gated on isRing so it ONLY rewrites ring verts (spokes / silk / nucleus untouched).
@@ -697,14 +727,20 @@ struct FOut {
   // NUCLEUS SOMA GLOW — the core burns hot and throbs (additive, NOT depth-dimmed, so the heart
   // stays lit from any angle); the bloom pass lifts it into a luminous orb with no extra pass.
   let coreK = clamp((0.18 - at.w) / 0.18, 0.0, 1.0);
-  let somaBeat = 0.8 + 0.2 * sin(tt * 1.15) * motion;
+  let somaBeat = 0.94 + 0.06 * sin(tt * 0.8) * motion;
   // phone trim: the core's additive boosts land inside a ~40px disc on the small ball — every
   // centre-grazing vertex (nucleus sparks, core-trail tips, inner spoke dashes, deep motes) stacks
   // them into a hard white starburst. Ease both toward calmer phone amplitudes (eye.w lerp).
-  glow = glow + coreK * coreK * mix(1.5, 0.85, phone) * somaBeat; // was 2.6 → a softer, "glooming" core, no longer blown-out at the centre
+  glow = glow + coreK * coreK * mix(0.45, 0.3, phone) * somaBeat;
+  // Light the curved core strokes from one side, with a soft limb and a shaded
+  // back hemisphere. Keep their intensity independent of the spark pulse system.
+  let coreSurface = isCore * (1.0 - isHalo);
+  let diffuse = max(0.0, dot(sd, normalize(vec3<f32>(-0.5, 0.7, -0.8))));
+  let coreLight = at.z * (0.25 + 0.75 * diffuse) * mix(0.25, 1.0, frontness);
+  glow = mix(glow, coreLight * somaBeat, coreSurface);
   // FIRING WAVE — the instant the climb begins, a brightness wave discharges core→shell
   let fr = (at.w - clamp(morph * 2.4, 0.0, 1.4)) * 7.0;
-  glow = glow * (1.0 + mix(0.9, 0.5, phone) * exp(-fr * fr)); // was 1.6 → calms the over-bright core at home (this term peaks at the centre when morph=0)
+  glow = glow * (1.0 + smoothstep(0.0, 0.12, morph) * mix(0.9, 0.5, phone) * exp(-fr * fr));
 
   // PROJECTS FOLD GLOW (req 1): as the threads collapse onto the baseline the converged line should
   // read as a HOT glowing streak. The additive overlap already brightens it where the threads stack;
@@ -718,6 +754,21 @@ struct FOut {
   let cClip = F.vp * vec4<f32>(F_GLOBE_C, 1.0);
   let pinnedY = (cClip.y / cClip.w) * clip.w;
   o.pos = vec4<f32>(clip.x, mix(clip.y, pinnedY, fold), clip.z, clip.w);
+  // A local field, evaluated in the existing vertex pass. It softly parts the
+  // nearby silk and reveals its depth; the core/cage hold their shape. No extra
+  // geometry, render pass or per-pointer React updates are needed.
+  let delta = (F.ptr.xy - clip.xy / max(clip.w, 0.001)) * vec2<f32>(F.a.w, 1.0);
+  let distance = length(delta);
+  let field = (1.0 - smoothstep(0.04, 0.38, distance)) * F.ptr.z
+    * (1.0 - smoothstep(0.0, 0.2, morph)) * (1.0 - dial);
+  let tangent = vec2<f32>(-delta.y, delta.x);
+  let energy = F.ptr.w;
+  let displacement = (-delta * 0.035 + tangent * (0.025 + 0.04 * energy)) /
+    (0.12 + distance) * field * (1.0 - isArm) * motion;
+  o.pos = vec4<f32>(o.pos.xy + displacement / vec2<f32>(F.a.w, 1.0) * clip.w, o.pos.zw);
+  let wake = 0.5 + 0.5 * sin(distance * 28.0 - tt * 2.0);
+  glow = glow * (1.0 + field * (1.8 + 1.6 * energy) * frontness)
+    + field * (0.08 + 0.12 * wake * energy) * (1.0 - isCore);
   // the folded glowing line dissolves as the fold completes → the globe disappears. dialFade = 1 at
   // dial = 0 (home globe byte-identical) and 0 by dial = 1.
   let dialFade = 1.0 - smoothstep(0.80, 1.0, dial);
