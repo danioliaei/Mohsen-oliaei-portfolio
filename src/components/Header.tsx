@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { currentTheme, setTheme, subscribeTheme, type Theme } from "../theme";
 
 /* =========================================================================
    Header — a fixed top bar over the black hero, and the expanding FULL-SCREEN
@@ -15,6 +16,16 @@ import { useEffect, useRef, useState } from "react";
    its entrance is plain CSS (see index.css `header` animation) and the menu's
    open/close + staggered reveal are CSS transitions driven by React state — the
    no-`motion` budget that keeps the eager bundle tiny holds (see HYBRID.md).
+
+   THEME: an icon-only dark/light switch (a half-inked circle that turns over as
+   the sheet flips) sits FIRST in the right cluster at every breakpoint and is
+   mirrored in the overlay's top bar, so it is reachable from both the bar and the
+   phone menu. It is a `role="switch"` with a CONSTANT label ("Light theme") and
+   `aria-checked` = light, so a screen reader announces "Light theme, switch, on /
+   off" rather than a label that contradicts the state it just flipped to. Both
+   copies read the same state (src/theme.ts is the single owner; this component
+   only subscribes), so they can never disagree. The glyph's 180° turn is CSS
+   (`.theme-btn[aria-checked="true"] .theme-glyph`), keeping this file motion-free.
 
    Typography is Hanken Grotesk (--nav), light/regular weights, tight negative
    tracking — see index.css. The menu opens a black overlay that fades + slides
@@ -75,8 +86,25 @@ const GROUPS: { title: string; links: Link[] }[] = [
   },
 ];
 
+// the theme control's instrument glyph: a 20×20 circle stroke + the right half inked. Rotated 180°
+// by CSS when the light theme is on (the inked half swaps sides — the sheet turned over).
+function ThemeGlyph() {
+  return (
+    <svg className="theme-glyph" viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+      <circle cx="10" cy="10" r="7.25" fill="none" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M10 2.75a7.25 7.25 0 0 1 0 14.5z" fill="currentColor" />
+    </svg>
+  );
+}
+
 export default function Header() {
   const [open, setOpen] = useState(false);
+  // the theme mirror: seeded from the stamped document, then kept in step by the module's event
+  // (subscribeTheme returns its unsubscribe, which is exactly the effect's cleanup)
+  const [theme, setThemeState] = useState<Theme>(currentTheme);
+  useEffect(() => subscribeTheme(setThemeState), []);
+  const isLight = theme === "light";
+  const toggleTheme = () => setTheme(isLight ? "dark" : "light");
   const menuBtnRef = useRef<HTMLButtonElement>(null);
   const closeBtnRef = useRef<HTMLButtonElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
@@ -152,6 +180,17 @@ export default function Header() {
             breakpoint — desktop never shows the button, phones never show the inline nav,
             and everything still lives in the full-screen overlay for the phone menu. */}
         <div className="header-right">
+          {/* the dark/light switch — first in the cluster, visible at every breakpoint */}
+          <button
+            type="button"
+            className="theme-btn"
+            role="switch"
+            aria-checked={isLight}
+            aria-label="Light theme"
+            onClick={toggleTheme}
+          >
+            <ThemeGlyph />
+          </button>
           <nav className="header-nav" aria-label="Primary">
             {PRIMARY.map((item) => (
               <a
@@ -202,15 +241,31 @@ export default function Header() {
             >
               Daniel Oliaei
             </a>
-            <button
-              ref={closeBtnRef}
-              type="button"
-              className="menu-btn"
-              tabIndex={tab}
-              onClick={closeMenu}
-            >
-              Close
-            </button>
+            {/* the switch is mirrored here so the phone menu can flip the theme too. The backdrop
+                closer tests e.target === e.currentTarget, so a click on it never closes the menu;
+                the focus trap's `button:not([disabled])` query already puts it in the tab ring. */}
+            <div className="menu-bar-right">
+              <button
+                type="button"
+                className="theme-btn"
+                role="switch"
+                aria-checked={isLight}
+                aria-label="Light theme"
+                tabIndex={tab}
+                onClick={toggleTheme}
+              >
+                <ThemeGlyph />
+              </button>
+              <button
+                ref={closeBtnRef}
+                type="button"
+                className="menu-btn"
+                tabIndex={tab}
+                onClick={closeMenu}
+              >
+                Close
+              </button>
+            </div>
           </div>
 
           {/* the large primary links */}

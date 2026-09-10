@@ -27,6 +27,8 @@ import type { PerfHandle } from "../perf/harness";
 import type { SceneInfo } from "../perf/types";
 import { STATIONS } from "../data/stations";
 import { PROJECTS, formatMonthYearLong, decimalYear, timeFrac, TIMELINE_TICKS, SPLIT_YEAR } from "../data/projects";
+import { currentTheme, subscribeTheme } from "../theme";
+import { globeNutation } from "../gpu/globeMotion";
 
 /* =========================================================================
    RidgelineStage — mounts the monochrome ridgeline experiment.
@@ -689,6 +691,7 @@ export default function RidgelineStage() {
       const PITCH_SENS = 0.55; // vertical tilt is gentler than the free spin
       const PITCH_SOFT = 0.28; // rad — cushion zone where the tilt eases into a limit
       const SMOOTH_TAU = 0.13; // s — how loosely the camera trails the target
+      const ARC_PITCH = 0.04; // rad (~2.3 deg) — the eye lifts a touch as the massif rises, peaking mid-pour (mc 0.466) and settling EXACTLY onto the hero pose; 0 removes the move at zero cost
       const INERTIA_TAU = 0.7; // s — a brief, controlled drift, not a runaway spin
       const MAX_VEL = 2.0; // rad/s — cap so even a hard flick stays calm
       const DETENT = 0.5; // rad (~29°) between haptic notches around the turn
@@ -786,6 +789,15 @@ export default function RidgelineStage() {
       let globeSpin = 0;        // radians about Y; advances whenever the globe shows, eased to rest as terrain forms
       const mix01 = (a: number, b: number, t: number) => a + (b - a) * t;
       let hintOpacity = 0;      // eased opacity of the bottom "drag to rotate" cue (globe-only, loop-owned)
+
+      // ---- theme crossfade (F.drs.z): a constant-DURATION clock shaped by smootherstep, like the morph, so the
+      // GPU "ink on paper" fade lands EXACTLY on 0/1 in step with the 0.3 s CSS transitions. Starts SNAPPED
+      // to the current theme (no fade on load); reduced motion snaps every switch. The subscription is the
+      // only theme-side effect the loop owns; its unsubscribe rides the teardown list like every listener. ----
+      const THEME_DUR = 0.3;   // s — keep equal to the .theme-transition duration in index.css
+      let themeTarget = currentTheme() === "light" ? 1 : 0;
+      let themeClock = themeTarget;
+      teardown.push(subscribeTheme((th) => { themeTarget = th === "light" ? 1 : 0; }));
 
       // ---- ONE-SHOT mountain reveal (req 1): the contour-model → realistic sweep used to ping-pong
       // forever in the shader (cos(time)), so the finished mountain kept flickering between the two
@@ -1555,6 +1567,7 @@ export default function RidgelineStage() {
         vp: Float32Array,
         eye: Float32Array,
         spin: number,
+        nut: { ax: number; az: number; angle: number },
         m: number,
         W: number,
         H: number,
@@ -1568,13 +1581,16 @@ export default function RidgelineStage() {
         // near the core, outer ones near the rim, so the letters are MIXED IN among the filaments at
         // every depth. As the mountain forms they rain toward their ring anchor and fade — the
         // decomposed "ball of letters" settling onto the contour bands.
-        // fade the glyphs out a touch EARLIER than they rain home (fall completes ~0.62), so they
+        // fade the glyphs out a touch EARLIER than they rain home (fall completes 0.66), so they
         // are mostly gone before the GPU drain funnel peaks → the additive climax stays one source.
         const charVis = 1 - smooth(0.52, 0.72, m); // hold the glyphs legible until the funnel peak, then clear just before the halo blooms
-        const fall = smooth(0.30, 0.66, m); // 0 on the globe → 1 raining onto the ring band, in step with the funnel/emerge
-        // per-frame hoists: the globe spin's sin/cos (the inlined rotY) and the seven ring anchors
-        // projected ONCE (each glyph rains toward one of these — identical math to projectToScreen).
+        const fall = smooth(0.36, 0.66, m); // rain starts WITH the pour (POUR_A 0.36): 0 on the globe → 1 raining onto the ring band
+        // per-frame hoists: the globe spin's sin/cos (the inlined rotY), the lean's axis + sin/cos (the
+        // inlined Rodrigues tilt — identical to globeMotion.tiltH, kept inline so the loop stays
+        // allocation-free), and the seven ring anchors projected ONCE (each glyph rains toward one of
+        // these — identical math to projectToScreen).
         const ss = Math.sin(spin), cs = Math.cos(spin);
+        const kx = nut.ax, kz = nut.az, nc = Math.cos(nut.angle), ns = Math.sin(nut.angle), om = 1 - nc;
         if (fall > 0.001) {
           for (let k = 0; k < stationAnchors.length; k++) {
             const a = stationAnchors[k];
@@ -1593,9 +1609,14 @@ export default function RidgelineStage() {
           if (i >= charCount) { el.style.display = "none"; continue; }
           if (charVis <= 0.002) { el.style.opacity = "0"; continue; }
           const cr = charRadii[i];
-          // inlined rotY (Y-rotation by `spin`, sin/cos hoisted): rx = dx·c + dz·s, ry = dy, rz = −dx·s + dz·c
+          // the same rigid chain as the GPU crust, in the same order: the inlined rotY (spin) FIRST, then
+          // the lean — Rodrigues about the horizontal axis k = (kx, 0, kz). Identity when angle is +0.
           const bx = charDirs[i * 3], by = charDirs[i * 3 + 1], bz = charDirs[i * 3 + 2];
-          const rx = bx * cs + bz * ss, ry = by, rz = -bx * ss + bz * cs;
+          const rx0 = bx * cs + bz * ss, ry0 = by, rz0 = -bx * ss + bz * cs;   // inlined rotY (spin) — first, exactly as the GPU crust
+          const kd = kx * rx0 + kz * rz0;                                        // then the lean (Rodrigues about the horizontal axis k)
+          const rx = rx0 * nc - kz * ry0 * ns + kx * kd * om;
+          const ry = ry0 * nc + (kz * rx0 - kx * rz0) * ns;
+          const rz = rz0 * nc + kx * ry0 * ns + kz * kd * om;
           const Px = GLOBE.cx + GLOBE.r * cr * rx, Py = GLOBE.cy + GLOBE.r * cr * ry, Pz = GLOBE.cz + GLOBE.r * cr * rz;
           const vx = eye[0] - Px, vy = eye[1] - Py, vz = eye[2] - Pz;
           const vl = Math.hypot(vx, vy, vz) || 1;
@@ -1926,6 +1947,12 @@ export default function RidgelineStage() {
         const mc = reduceMotion
           ? mClock
           : mClock * mClock * mClock * (mClock * (mClock * 6 - 15) + 10);
+        // the theme clock: the same constant-duration shape as the morph (linear time, clamped, then ONE
+        // smootherstep), so themeAmt is exactly 0 in dark and exactly 1 in light at rest — the composite's
+        // light branch is skipped bit-exactly at 0. Reduced motion steps the whole way in one frame.
+        const thDir = themeClock < themeTarget ? 1 : themeClock > themeTarget ? -1 : 0;
+        themeClock = Math.max(0, Math.min(1, themeClock + thDir * (reduceMotion ? 1 : dt / THEME_DUR)));
+        const themeAmt = themeClock * themeClock * themeClock * (themeClock * (themeClock * 6 - 15) + 10);
 
         // ---- Projects TIMELINE clocks. projAmt eases in only once the globe is actually present
         // (mc<0.15), so opening from CV waits for the mountain to dissolve. The scrub eases toward
@@ -2049,6 +2076,12 @@ export default function RidgelineStage() {
         // the GPU globe + the DOM letter-cloud both read this summed spin, so the ball turns 1:1
         // with the knob (dialAngle) while the dial is open and resumes its idle drift when closed.
         const spinOut = globeSpin + dialAngle * projAmt;
+        // the axis lean (nutation): a rigid tilt about a horizontal axis that walks a slow circle (one
+        // turn per 48 s), applied LAST after the spin by the GPU ball, the terrain's sphere skin and the
+        // DOM letters alike, from these same three numbers. Its angle is EXACTLY +0 once the morph passes
+        // 0.30, once Projects passes 0.15, and under reduced motion — so the mountain, the fold and a still
+        // ball are byte-identical to a world without the lean.
+        const nut = globeNutation(t, mc, projAmt, reduceMotion);
         const landed = mc > 0.985;
 
         // advance the one-shot reveal once the mountain has landed, then hold at 1 (req 1). Latched so
@@ -2108,6 +2141,13 @@ export default function RidgelineStage() {
         yaw += (tYaw - yaw) * k;
         pitch += (tPitch - pitch) * k;
 
+        // ---- THE ONE CAMERA: everything below (GPU, letter cloud, survey) reads camYaw/camPitch. The morph crane is a
+        // product of two smoothsteps (never sin), so arcEnv is EXACTLY 0 at mc 0 and 1 (byte-identical globe / mountain
+        // framing); skipped under reduced motion (mc snaps 0/1 there anyway). Peak 0.9691 at mc 0.466. The pointer
+        // tilt is eased further down (it needs this frame's field), so camYaw/camPitch are ASSEMBLED there. ----
+        const arcEnv = reduceMotion ? 0 : smooth(0.0, 0.50, mc) * (1 - smooth(0.42, 1.0, mc));
+        const arcPitch = ARC_PITCH * arcEnv;
+
         // hover pulse — never a jump: the wash CROSS-DISSOLVES between slices. When
         // the pointer wants a different band than the one currently shown (or moves
         // off the mountain), ease the current wash OUT to zero first; once it's faded
@@ -2163,8 +2203,10 @@ export default function RidgelineStage() {
         const focalX = 0.5, focalY = 0.5;
         if (tlActive) {
           const W = cvs.clientWidth, H = cvs.clientHeight;
+          // pitch + arcPitch: a Home-return tail at mc < 0.15 still carries arcEnv ≤ 0.216 (0.0086 rad), and
+          // the red line must weld to the camera the fold actually renders with
           const cu = projectToScreen(
-            ridgeCamera(yaw, pitch, aspectNow, t, rscale, 0, 0).vp,
+            ridgeCamera(yaw, pitch + arcPitch, aspectNow, t, rscale, 0, 0).vp,
             GLOBE.cx, GLOBE.cy, GLOBE.cz, W, H,
           );
           // clamp to a sensible band so an extreme tilt can never shove the line off-screen. The band
@@ -2191,7 +2233,7 @@ export default function RidgelineStage() {
         let shiftYTarget = 0;
         const selBand = selectedRef.current;
         if (selBand != null) {
-          const { vp } = ridgeCamera(yaw, pitch, aspectNow, t, radiusScale, focusShift);
+          const { vp } = ridgeCamera(yaw, pitch + arcPitch, aspectNow, t, radiusScale, focusShift);
           const anc = ringAnchor(STATIONS[selBand].radius);
           const rcy = vp[1] * anc.x + vp[5] * anc.y + vp[9] * anc.z + vp[13];
           const rcw = vp[3] * anc.x + vp[7] * anc.y + vp[11] * anc.z + vp[15];
@@ -2246,13 +2288,19 @@ export default function RidgelineStage() {
         const tiltEase = 1 - Math.exp(-dt / 0.45);
         pointerTiltYaw += ((reduceMotion ? 0 : tiltX * 0.09) - pointerTiltYaw) * tiltEase;
         pointerTiltPitch += ((reduceMotion ? 0 : -tiltY * 0.06) - pointerTiltPitch) * tiltEase;
+        // the one camera value the GPU, the letter cloud and the survey all read this frame
+        const camYaw = yaw + pointerTiltYaw;
+        const camPitch = pitch + pointerTiltPitch + arcPitch;
 
         gpu.render({
           time: t,
-          yaw: yaw + pointerTiltYaw,
-          pitch: pitch + pointerTiltPitch,
+          yaw: camYaw,
+          pitch: camPitch,
           morph: mc,
           globeSpin: spinOut,
+          nutAxisX: nut.ax,
+          nutAxisZ: nut.az,
+          nutAngle: nut.angle,
           motion: reduceMotion ? 0 : 1,
           hoverBand: landed ? shownBand : -1,
           hoverGlow: landed ? hoverGlow : 0,
@@ -2265,6 +2313,7 @@ export default function RidgelineStage() {
           focalY,
           projAmt,
           reveal,
+          theme: themeAmt,
           pointerX: fieldX,
           pointerY: fieldY,
           pointerStrength: fieldStrength,
@@ -2288,9 +2337,9 @@ export default function RidgelineStage() {
         if (mc < 0.999) {
           // reuse aspectNow from the top of the frame — the canvas can't resize
           // mid-frame, so a second clientWidth/clientHeight read would be redundant.
-          const cam = ridgeCamera(yaw + pointerTiltYaw, pitch + pointerTiltPitch, aspectNow, t, rscale, focusShift, fShiftY);
-          // spinOut (idle + scrub roll) so the cloud co-rotates with the GPU ball in BOTH phases
-          updateCloud(cam.vp, cam.eye, spinOut, mc, cvs.clientWidth, cvs.clientHeight);
+          const cam = ridgeCamera(camYaw, camPitch, aspectNow, t, rscale, focusShift, fShiftY);
+          // spinOut (idle + scrub roll) + the lean, so the cloud co-rotates with the GPU ball in BOTH phases
+          updateCloud(cam.vp, cam.eye, spinOut, nut, mc, cvs.clientWidth, cvs.clientHeight);
           // the chaotic letter-cloud is part of "the mess" — fade it out as the trace organises
           if (cloudRef.current) cloudRef.current.style.opacity = (1 - projAmt).toFixed(3);
           // plot the Projects survey line — pure screen space, its baseline welded to the folding globe
@@ -2299,7 +2348,7 @@ export default function RidgelineStage() {
         } else if (cloudRef.current && cloudRef.current.style.visibility !== "hidden") {
           cloudRef.current.style.visibility = "hidden"; // mountain is whole — drop the cloud
         }
-        updateSurvey(yaw + pointerTiltYaw, pitch + pointerTiltPitch, t, dt, rscale, focusShift, fShiftY, mc);
+        updateSurvey(camYaw, camPitch, t, dt, rscale, focusShift, fShiftY, mc);
         raf = requestAnimationFrame(frame);
       };
       raf = requestAnimationFrame(frame);

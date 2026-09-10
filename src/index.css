@@ -1,13 +1,126 @@
+/* ---------------- theme tokens ----------------
+   The dark theme IS the piece: ivory light on a black sheet. The light theme is the SAME drawing
+   pulled as a print — ink on warm paper — so the two are literal negatives of each other and the
+   monochrome identity is untouched. Every colour in this file is one of the tokens below.
+   :root = today's dark values BYTE-EXACT (every token equals the literal it replaced);
+   :root[data-theme="light"] overrides. <html data-theme> is stamped before first paint by the
+   inline script in index.html (stored "light" wins, anything else is dark — the OS is not
+   followed) and driven after that by src/theme.ts; the WebGPU canvas mirrors the switch through
+   its own eased theme uniform (the composite's ink-on-paper grade), so the frame flips as one. */
 :root {
+  color-scheme: dark;
   /* the site UI typeface, used at many weights */
   --sans: "Inter", "Helvetica Neue", Helvetica, Arial, sans-serif;
   /* the fixed header + full-screen menu typeface — a friendly grotesque (req 5). The look
      I'm after is ABC Dinamo "Social"; "ABC Social" leads the stack as an @font-face swap
      point (see below) and falls through to Hanken Grotesk until it's licensed + dropped in. */
   --nav: "ABC Social", "Hanken Grotesk", "Inter", "Helvetica Neue", Helvetica, Arial, sans-serif;
+
+  /* ---- surfaces ---- */
+  --bg: #000;
+  --bg-rgb: 0, 0, 0;
+  --bg-deep: #06070a;             /* the ProjectsMobile opaque sheet */
+  --vignette-rgb: 3, 4, 6;        /* its corner pool */
+
+  /* ---- ink ---- */
   --ink: #f4f1ea;
-  /* accent used by the WebGPU-required notice eyebrow */
-  --c-education: #ffc45c;
+  --ink-rgb: 244, 241, 234;
+  --ink-hot-rgb: 255, 250, 240;   /* hotter than ink: focus rings, the selected timeline nubs */
+  --ink-hot2-rgb: 248, 246, 240;  /* the selected timeline line (a hair cooler than -hot in dark) */
+  --ink-warm-rgb: 255, 240, 214;  /* the hover bloom: strokes + nubs */
+  --ink-warm2-rgb: 255, 244, 228; /* the hover bloom: the hovered project name */
+  --ink-code-rgb: 228, 230, 236;  /* the cool code-plate text */
+
+  /* ---- TEXT tiers: --tx-NN is "the text alpha that is 0.NN in dark". Only `color:` on real text
+     uses them (25 declarations); borders, hairlines, fills and strokes keep their raw alpha so the
+     drawing stays delicate. Dark = today's exact alpha. Light lifts each tier so ink-on-paper meets
+     or beats the contrast of its dark twin (alpha on paper loses ~25-30 % versus alpha on black at
+     the same value) AND clears WCAG on paper: every READING tier (40 and up: footers, captions,
+     section titles, code notes) is >= 0.60 => >= 4.5:1 AA; the affordance tiers 30-34 (the dial's
+     "drag" hint, the year ruler) are >= 0.46 => >= 3:1; only 18 (the far-future year ghosts) stays
+     deliberately below, as decoration. The light ladder is therefore compressed (0.60-0.70) —
+     legibility over hierarchy on the print. ---- */
+  --tx-18: 0.18; --tx-30: 0.30; --tx-32: 0.32; --tx-34: 0.34; --tx-40: 0.40; --tx-42: 0.42;
+  --tx-45: 0.45; --tx-50: 0.50; --tx-52: 0.52; --tx-54: 0.54; --tx-56: 0.56;
+
+  /* ---- glass / plates / halos / shadows ---- */
+  --glass-rgb: 6, 7, 10;          /* frosts + scrims (+ the timeline text-shadow halos) */
+  --glass-warm-rgb: 6, 4, 2;      /* the no-WebGPU notice's warm radial */
+  --plate-rgb: 8, 9, 12;          /* chips, pills, the close ✕, nav buttons, the code plate, the beacon label */
+  --plate-b-rgb: 10, 12, 16;      /* the dossier image plate */
+  --plate2-rgb: 20, 22, 28;       /* plate hover state */
+  --card-rgb: 12, 14, 18;         /* book cards */
+  --halo-rgb: 0, 0, 0;            /* text-shadow / drop-shadow halos around type (a paper glow in light) */
+  --halo-warm-rgb: 18, 8, 2;      /* the header's warm halo */
+  --glow-rgb: 244, 241, 234;      /* ivory GLOWS (the beacon's breath, hover halos, the selected timeline line's bloom):
+                                     LIGHT, not ink: paper in the light theme, so they vanish instead of turning into dark blurs */
+  --shadow-rgb: 0, 0, 0;          /* box-shadows + the image-plate fill (STAY shadows in light: a warm grey) */
+  --sheen-rgb: 255, 255, 255;     /* inset 1px top highlights */
+
+  /* ---- the one accent ---- */
+  --accent: #ffc45c;
+  --accent-rgb: 255, 196, 92;        /* graphic uses: borders, spokes, the caret */
+  --accent-glow-rgb: 255, 196, 92;   /* glows / pools / text-shadow halos (never text) */
+  --accent-glow2-rgb: 255, 198, 110; /* the timeline hover glows */
+  --accent-t90: rgba(var(--accent-rgb), 0.9);  /* the three amber-at-alpha TEXT uses (light: full ochre, AA) */
+  --accent-t82: rgba(var(--accent-rgb), 0.82);
+  --accent-t72: rgba(var(--accent-rgb), 0.72);
+  --c-education: var(--accent);   /* legacy name (the notice eyebrow, the selected name, the fees) — an alias */
+
+  /* ---- frost + grain ---- */
+  --frost-bright: 0.84;           /* backdrop-filter brightness under the dossier prose (.role-frost) */
+  --frost-bright-heavy: 0.82;     /* .book-frost */
+  --grain-blend: overlay;
+  --grain-opacity: 0.04;
+}
+
+/* light — paper #f4f1ea (the dark ink), ink #141312 (16.45 : 1), burnt ochre #8a5a0c (5.25 : 1 AA).
+   Glass = the paper itself (a near-white frost over empty paper would read as a lighter slab);
+   frost brightness 1.0 (never brighten a near-white ground); shadows a whisper of warm grey (0.4 over
+   paper is two levels under it), glows a pale tan — warmth, never a stain behind ink type. */
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --bg: #f4f1ea;
+  --bg-rgb: 244, 241, 234;
+  --bg-deep: #f4f1ea;
+  --vignette-rgb: 226, 221, 210;
+
+  --ink: #141312;
+  --ink-rgb: 20, 19, 18;
+  --ink-hot-rgb: 0, 0, 0;
+  --ink-hot2-rgb: 0, 0, 0;
+  --ink-warm-rgb: 52, 34, 8;
+  --ink-warm2-rgb: 52, 34, 8;
+  --ink-code-rgb: 26, 28, 34;
+
+  --tx-18: 0.26; --tx-30: 0.46; --tx-32: 0.47; --tx-34: 0.48; --tx-40: 0.60; --tx-42: 0.61;
+  --tx-45: 0.62; --tx-50: 0.64; --tx-52: 0.66; --tx-54: 0.68; --tx-56: 0.70;
+
+  --glass-rgb: 244, 241, 234;
+  --glass-warm-rgb: 244, 241, 234;
+  --plate-rgb: 252, 250, 246;
+  --plate-b-rgb: 252, 250, 246;
+  --plate2-rgb: 255, 255, 255;
+  --card-rgb: 253, 252, 249;
+  --halo-rgb: 248, 246, 240;
+  --halo-warm-rgb: 250, 247, 240;
+  --glow-rgb: 244, 241, 234;
+  --shadow-rgb: 205, 198, 184;
+  --sheen-rgb: 255, 255, 255;
+
+  --accent: #8a5a0c;
+  --accent-rgb: 138, 90, 12;
+  --accent-glow-rgb: 212, 190, 150;
+  --accent-glow2-rgb: 212, 190, 150;
+  --accent-t90: rgb(138, 90, 12);
+  --accent-t82: rgb(138, 90, 12);
+  --accent-t72: rgb(138, 90, 12);
+
+  --frost-bright: 1.0;
+  --frost-bright-heavy: 1.0;
+  --grain-blend: multiply;
+  --grain-opacity: 0.06;
 }
 
 /* ABC Dinamo "Social" swap point — drop the licensed files in and the header + menu pick it
@@ -33,6 +146,38 @@
   padding: 0;
   box-sizing: border-box;
 }
+
+/* ---- theme switch crossfade: theme.ts holds .theme-transition on <html> for 380 ms around a
+   toggle so every colour property eases (0.3 s — the GPU canvas crossfades its ink-on-paper grade
+   over the same 0.3 s, so the DOM and the drawing land together) instead of snapping. ZERO
+   specificity (:where + *), so any element with its own `transition` keeps it — the hover eases,
+   the menu's slide, the beacon label's reveal and the timeline blooms are untouched (the few that
+   must ALSO fade colour have `color 0.3s` added to their own lists — .wordmark, .header-nav a,
+   .menu-btn, .theme-btn, .menu-search input, .menu-overlay background-color). Only colour-ish
+   properties are listed: opacity / transform are never included, so the elements the rAF loop
+   drives through inline opacity+transform (.survey-callout, .cloud-char, .ridge-beacon,
+   .globe-hint, .tl-*, .pmd-tick, .tl-now, .tl-year, .tl-nub, .tl-tip, .tl-label) are unaffected.
+   Gradient backgrounds, box-/text-shadows and backdrop brightness are not animatable and snap;
+   the 0.3 s colour fade masks it. */
+:where(.theme-transition) *,
+:where(.theme-transition) *::before,
+:where(.theme-transition) *::after {
+  transition:
+    color 0.3s ease,
+    background-color 0.3s ease,
+    border-color 0.3s ease,
+    outline-color 0.3s ease,
+    fill 0.3s ease,
+    stroke 0.3s ease,
+    stop-color 0.3s ease;
+}
+@media (prefers-reduced-motion: reduce) {
+  :where(.theme-transition) *,
+  :where(.theme-transition) *::before,
+  :where(.theme-transition) *::after {
+    transition: none;
+  }
+}
 html,
 body {
   height: 100%;
@@ -45,19 +190,19 @@ body {
   overflow-x: hidden;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
-  /* the ridgeline canvas owns the frame in solid black; the body sits behind it */
-  background: #000;
+  /* the ridgeline canvas owns the frame in the theme's ground (black; paper in light); the body sits behind it */
+  background: var(--bg);
 }
 
-/* film grain */
+/* film grain: overlay on black (screens the highlights), multiply on paper (a tooth) - see --grain-* */
 body::after {
   content: "";
   position: fixed;
   inset: 0;
   pointer-events: none;
   z-index: 60;
-  opacity: 0.04;
-  mix-blend-mode: overlay;
+  opacity: var(--grain-opacity);
+  mix-blend-mode: var(--grain-blend);
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
 }
 
@@ -87,8 +232,8 @@ header {
   padding: 26px 34px;
   /* a crisp, tight shadow keeps the wordmark + button legible over the bright summit */
   text-shadow:
-    0 1px 2px rgba(18, 8, 2, 0.5),
-    0 2px 16px rgba(18, 8, 2, 0.34);
+    0 1px 2px rgba(var(--halo-warm-rgb), 0.5),
+    0 2px 16px rgba(var(--halo-warm-rgb), 0.34);
 }
 .wordmark {
   pointer-events: auto; /* the bar is click-through; its controls are not */
@@ -100,7 +245,7 @@ header {
   text-decoration: none;
   white-space: nowrap;
   -webkit-font-smoothing: antialiased;
-  transition: opacity 0.25s ease;
+  transition: opacity 0.25s ease, color 0.3s ease;
 }
 .wordmark:hover {
   opacity: 0.6;
@@ -130,7 +275,7 @@ header {
   white-space: nowrap;
   -webkit-font-smoothing: antialiased;
   -webkit-tap-highlight-color: transparent;
-  transition: opacity 0.25s ease;
+  transition: opacity 0.25s ease, color 0.3s ease;
 }
 .header-nav a:hover {
   opacity: 0.6;
@@ -151,10 +296,55 @@ header {
   cursor: pointer;
   -webkit-font-smoothing: antialiased;
   -webkit-tap-highlight-color: transparent;
-  transition: opacity 0.25s ease;
+  transition: opacity 0.25s ease, color 0.3s ease;
 }
 .menu-btn:hover {
   opacity: 0.6;
+}
+/* the theme toggle — an icon-only instrument control (a half-inked circle), in the right cluster
+   BEFORE the nav / Menu at every breakpoint, and mirrored in the overlay's bar. Same hover-opacity
+   voice as the links; the shared :focus-visible ring applies. It is a role="switch" whose
+   aria-checked mirrors the light theme (Header.tsx); the inked half turns over when checked so the
+   instrument shows its state without a label flip. */
+.theme-btn {
+  pointer-events: auto; /* the bar is click-through; its controls are not */
+  display: inline-grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: opacity 0.25s ease, color 0.3s ease;
+}
+.theme-btn:hover {
+  opacity: 0.6;
+}
+.theme-glyph {
+  display: block;
+  width: 18px;
+  height: 18px;
+  /* the same crisp halo the wordmark's text-shadow gives the type */
+  filter: drop-shadow(0 1px 2px rgba(var(--halo-warm-rgb), 0.5));
+  transition: transform 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+}
+/* light: the inked half turns over to the other side */
+.theme-btn[aria-checked="true"] .theme-glyph {
+  transform: rotate(180deg);
+}
+/* the overlay bar's right pair (toggle + Close) mirrors the header cluster's spacing */
+.menu-bar-right {
+  display: flex;
+  align-items: center;
+  gap: clamp(20px, 2.6vw, 40px);
+}
+@media (prefers-reduced-motion: reduce) {
+  .theme-glyph {
+    transition: none;
+  }
 }
 /* desktop: a normal header — show the inline nav, hide the bar's hamburger entirely.
    (Scoped to `header` so the overlay's own "Close" button — which reuses .menu-btn —
@@ -187,7 +377,7 @@ header {
   position: fixed;
   inset: 0;
   z-index: 50; /* above the header (40); below the film grain (60) */
-  background: #000;
+  background: var(--bg);
   color: var(--ink);
   overflow-y: auto;
   overscroll-behavior: contain;
@@ -200,7 +390,8 @@ header {
   transition:
     opacity 0.5s cubic-bezier(0.22, 1, 0.36, 1),
     transform 0.5s cubic-bezier(0.22, 1, 0.36, 1),
-    visibility 0s linear 0.5s; /* hold visibility until the fade-out finishes */
+    visibility 0s linear 0.5s, /* hold visibility until the fade-out finishes */
+    background-color 0.3s ease; /* the sheet eases on a theme switch (permanent: it only ever changes then) */
 }
 .menu-overlay.is-open {
   opacity: 1;
@@ -210,7 +401,8 @@ header {
   transition:
     opacity 0.5s cubic-bezier(0.22, 1, 0.36, 1),
     transform 0.5s cubic-bezier(0.22, 1, 0.36, 1),
-    visibility 0s;
+    visibility 0s,
+    background-color 0.3s ease;
 }
 .menu-inner {
   min-height: 100%;
@@ -235,9 +427,12 @@ header {
 .menu-foot {
   opacity: 0;
   transform: translateY(14px);
+  /* color 0.3s: this class-specific list would otherwise beat the zero-specificity theme crossfade
+     and snap the footer's colour when the theme is switched from the overlay's own toggle */
   transition:
     opacity 0.55s cubic-bezier(0.22, 1, 0.36, 1),
-    transform 0.55s cubic-bezier(0.22, 1, 0.36, 1);
+    transform 0.55s cubic-bezier(0.22, 1, 0.36, 1),
+    color 0.3s ease;
 }
 .menu-overlay.is-open .menu-primary a,
 .menu-overlay.is-open .menu-search,
@@ -281,7 +476,7 @@ header {
   width: 100%;
   padding: 10px 2px;
   border: 0;
-  border-bottom: 1px solid rgba(244, 241, 234, 0.28);
+  border-bottom: 1px solid rgba(var(--ink-rgb), 0.28);
   background: transparent;
   font-family: var(--nav);
   font-size: clamp(18px, 2.4vw, 24px);
@@ -290,14 +485,14 @@ header {
   color: var(--ink);
   -webkit-appearance: none;
   appearance: none;
-  transition: border-color 0.25s ease;
+  transition: border-color 0.25s ease, color 0.3s ease;
 }
 .menu-search input::placeholder {
-  color: rgba(244, 241, 234, 0.4);
+  color: rgba(var(--ink-rgb), var(--tx-40));
 }
 .menu-search input:focus {
   outline: none;
-  border-bottom-color: rgba(244, 241, 234, 0.7);
+  border-bottom-color: rgba(var(--ink-rgb), 0.7);
 }
 /* drop the native search decorations so the field stays a clean underline */
 .menu-search input::-webkit-search-decoration,
@@ -311,7 +506,7 @@ header {
   grid-template-columns: 1fr;
   gap: clamp(24px, 4vw, 48px) clamp(24px, 5vw, 64px);
   padding-top: clamp(20px, 3vh, 34px);
-  border-top: 1px solid rgba(244, 241, 234, 0.1); /* hairline divider above the groups */
+  border-top: 1px solid rgba(var(--ink-rgb), 0.1); /* hairline divider above the groups */
 }
 .menu-group-title {
   margin: 0 0 14px;
@@ -320,7 +515,7 @@ header {
   font-weight: 500;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: rgba(244, 241, 234, 0.42); /* small, muted grey section header */
+  color: rgba(var(--ink-rgb), var(--tx-42)); /* small, muted grey section header */
 }
 .menu-group ul {
   list-style: none;
@@ -335,7 +530,7 @@ header {
   font-size: 20px;
   font-weight: 300;
   letter-spacing: -0.01em;
-  color: rgba(244, 241, 234, 0.86);
+  color: rgba(var(--ink-rgb), 0.86);
   text-decoration: none;
   transition: color 0.25s ease, opacity 0.25s ease;
 }
@@ -353,7 +548,7 @@ header {
   font-size: 13px;
   font-weight: 400;
   letter-spacing: -0.005em;
-  color: rgba(244, 241, 234, 0.4);
+  color: rgba(var(--ink-rgb), var(--tx-40));
 }
 
 /* matches the header/menu mobile-padding breakpoint (760px) so the layout switches at one width */
@@ -378,12 +573,12 @@ header {
   .menu-group,
   .menu-foot {
     transform: none;
-    transition: opacity 0.001s, color 0.25s ease;
+    transition: opacity 0.001s, color 0.3s ease;
   }
 }
 
 :where(a, button):focus-visible {
-  outline: 2px solid rgba(255, 250, 240, 0.85);
+  outline: 2px solid rgba(var(--ink-hot-rgb), 0.85);
   outline-offset: 4px;
   border-radius: 2px;
 }
@@ -394,9 +589,9 @@ header {
   padding: 40px;
   background: radial-gradient(
     120% 100% at 50% 50%,
-    rgba(6, 4, 2, 0.55) 0%,
-    rgba(6, 4, 2, 0.3) 48%,
-    rgba(6, 4, 2, 0) 78%
+    rgba(var(--glass-warm-rgb), 0.55) 0%,
+    rgba(var(--glass-warm-rgb), 0.3) 48%,
+    rgba(var(--glass-warm-rgb), 0) 78%
   );
 }
 .gpu-notice-eyebrow {
@@ -414,14 +609,14 @@ header {
   letter-spacing: -0.02em;
   color: var(--ink);
   margin-bottom: 18px;
-  text-shadow: 0 2px 30px rgba(0, 0, 0, 0.6);
+  text-shadow: 0 2px 30px rgba(var(--halo-rgb), 0.6);
 }
 .gpu-notice-body {
   font-size: 15px;
   font-weight: 300;
   line-height: 1.62;
-  color: rgba(244, 241, 234, 0.78);
-  text-shadow: 0 1px 18px rgba(0, 0, 0, 0.5);
+  color: rgba(var(--ink-rgb), 0.78);
+  text-shadow: 0 1px 18px rgba(var(--halo-rgb), 0.5);
 }
 
 /* phones: tighten the bar, and keep the menu overlay's inner padding in lock-step with
@@ -454,13 +649,16 @@ header {
 }
 
 /* ---------------- monochrome ridgeline study ----------------
-   A pure-black full-screen stage for the ridgeline mountain. No warm scrims, no
+   A full-screen stage in the theme's ground (--bg: black; paper in light). No warm scrims, no
    scroll wrap — the WebGPU canvas owns the whole frame and the header floats
    over it. */
 .ridge-stage {
   position: fixed;
   inset: 0;
-  background: #000;
+  background: var(--bg);
+  /* the ground crossfades with the theme (visible only in the Suspense fallback / no-WebGPU
+     state — the canvas covers it otherwise) */
+  transition: background-color 0.3s ease;
   overflow: hidden;
   z-index: 0;
 }
@@ -505,7 +703,7 @@ canvas#ridge:active {
 }
 .survey-leader {
   fill: none;
-  stroke: rgba(244, 241, 234, 0.5);
+  stroke: rgba(var(--ink-rgb), 0.5);
   stroke-width: 1;
   opacity: 0;
 }
@@ -526,8 +724,8 @@ canvas#ridge:active {
   color: var(--ink);
   /* a crisp, dark halo so the whole block stays legible over the bright summit */
   text-shadow:
-    0 0 12px rgba(0, 0, 0, 0.8),
-    0 1px 3px rgba(0, 0, 0, 0.72);
+    0 0 12px rgba(var(--halo-rgb), 0.8),
+    0 1px 3px rgba(var(--halo-rgb), 0.72);
   will-change: transform, opacity;
 }
 /* desktop: the role title with the company beneath it. A leader runs from the ring
@@ -553,7 +751,7 @@ canvas#ridge:active {
   line-height: 1.1;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: rgba(244, 241, 234, 0.7);
+  color: rgba(var(--ink-rgb), 0.7);
 }
 /* the compact ORG 'YY — only on the narrow mobile flank (toggled below) */
 .survey-short {
@@ -563,7 +761,7 @@ canvas#ridge:active {
   line-height: 1;
   letter-spacing: 0.22em;
   text-transform: uppercase;
-  color: rgba(244, 241, 234, 0.88);
+  color: rgba(var(--ink-rgb), 0.88);
 }
 @media (max-width: 760px) {
   .survey-full {
@@ -580,11 +778,11 @@ canvas#ridge:active {
   }
   .survey-callout {
     text-shadow:
-      0 0 8px rgba(0, 0, 0, 0.92),
-      0 1px 3px rgba(0, 0, 0, 0.95);
+      0 0 8px rgba(var(--halo-rgb), 0.92),
+      0 1px 3px rgba(var(--halo-rgb), 0.95);
   }
   .survey-leader {
-    stroke: rgba(244, 241, 234, 0.42);
+    stroke: rgba(var(--ink-rgb), 0.42);
   }
 }
 
@@ -612,14 +810,14 @@ canvas#ridge:active {
   align-items: center;
   gap: 12px;
   transform: translateX(-50%);
-  color: rgba(244, 241, 234, 0.75); /* ~4.5:1 on black (AA) — the dark drop-shadow keeps it a whisper */
+  color: rgba(var(--ink-rgb), 0.75); /* ~4.5:1 on black (AA) — the dark drop-shadow keeps it a whisper */
   opacity: 0; /* the rAF loop owns this */
   pointer-events: none;
   -webkit-user-select: none;
   user-select: none;
   filter:
-    drop-shadow(0 0 7px rgba(0, 0, 0, 0.65))
-    drop-shadow(0 1px 2px rgba(0, 0, 0, 0.6));
+    drop-shadow(0 0 7px rgba(var(--halo-rgb), 0.65))
+    drop-shadow(0 1px 2px rgba(var(--halo-rgb), 0.6));
   animation: globe-hint-breathe 4.2s 1.6s ease-in-out infinite;
 }
 .globe-hint-text {
@@ -705,7 +903,7 @@ canvas#ridge:active {
      left, where the text needs the blur. */
   -webkit-backdrop-filter: blur(1.5px) saturate(1.06) brightness(0.98);
   backdrop-filter: blur(1.5px) saturate(1.06) brightness(0.98);
-  background: rgba(6, 7, 10, 0.06);
+  background: rgba(var(--glass-rgb), 0.06);
 }
 
 /* a HEAVY frost stacked on the base, masked to the LEFT so it builds up only behind
@@ -723,12 +921,12 @@ canvas#ridge:active {
      sits — gets only the light base layer, never this 22px blur. */
   background: linear-gradient(
     104deg,
-    rgba(6, 7, 10, 0.62) 0%,
-    rgba(6, 7, 10, 0.4) 44%,
-    rgba(6, 7, 10, 0) 70%
+    rgba(var(--glass-rgb), 0.62) 0%,
+    rgba(var(--glass-rgb), 0.4) 44%,
+    rgba(var(--glass-rgb), 0) 70%
   );
-  -webkit-backdrop-filter: blur(22px) saturate(1.05) brightness(0.84);
-  backdrop-filter: blur(22px) saturate(1.05) brightness(0.84);
+  -webkit-backdrop-filter: blur(22px) saturate(1.05) brightness(var(--frost-bright));
+  backdrop-filter: blur(22px) saturate(1.05) brightness(var(--frost-bright));
   -webkit-mask-image: linear-gradient(104deg, #000 0%, #000 44%, transparent 62%, transparent 100%);
   mask-image: linear-gradient(104deg, #000 0%, #000 44%, transparent 62%, transparent 100%);
   /* hold the heavy frost back a beat. On open, the camera dollies in and pans the lit
@@ -753,7 +951,7 @@ canvas#ridge:active {
   position: absolute;
   width: 13px;
   height: 13px;
-  border: 0 solid rgba(244, 241, 234, 0.7);
+  border: 0 solid rgba(var(--ink-rgb), 0.7);
 }
 .tick.tl {
   top: -1px;
@@ -795,9 +993,9 @@ canvas#ridge:active {
   font-weight: 500;
   letter-spacing: 0.18em;
   text-transform: uppercase;
-  color: rgba(244, 241, 234, 0.62);
+  color: rgba(var(--ink-rgb), 0.62);
   cursor: pointer;
-  text-shadow: 0 1px 16px rgba(0, 0, 0, 0.6);
+  text-shadow: 0 1px 16px rgba(var(--halo-rgb), 0.6);
   transition:
     color 0.3s ease,
     gap 0.3s ease;
@@ -818,8 +1016,8 @@ canvas#ridge:active {
   font-family: var(--mono);
   font-size: 11px;
   letter-spacing: 0.16em;
-  color: rgba(244, 241, 234, 0.5);
-  text-shadow: 0 1px 16px rgba(0, 0, 0, 0.5);
+  color: rgba(var(--ink-rgb), var(--tx-50));
+  text-shadow: 0 1px 16px rgba(var(--halo-rgb), 0.5);
 }
 
 /* close — the predictable top-right control, dropped below the site header so it
@@ -834,12 +1032,12 @@ canvas#ridge:active {
   justify-content: center;
   width: 38px;
   height: 38px;
-  border: 1px solid rgba(244, 241, 234, 0.16);
+  border: 1px solid rgba(var(--ink-rgb), 0.16);
   border-radius: 999px;
-  background: rgba(8, 9, 12, 0.34);
+  background: rgba(var(--plate-rgb), 0.34);
   -webkit-backdrop-filter: blur(8px);
   backdrop-filter: blur(8px);
-  color: rgba(244, 241, 234, 0.7);
+  color: rgba(var(--ink-rgb), 0.7);
   cursor: pointer;
   transition:
     color 0.25s ease,
@@ -853,8 +1051,8 @@ canvas#ridge:active {
 }
 .role-close:hover {
   color: var(--ink);
-  border-color: rgba(244, 241, 234, 0.42);
-  background: rgba(20, 22, 28, 0.5);
+  border-color: rgba(var(--ink-rgb), 0.42);
+  background: rgba(var(--plate2-rgb), 0.5);
   transform: rotate(90deg);
 }
 
@@ -876,9 +1074,9 @@ canvas#ridge:active {
     clamp(34px, 6vw, 128px);
   background: linear-gradient(
     90deg,
-    rgba(6, 7, 10, 0.46) 0%,
-    rgba(6, 7, 10, 0.26) 34%,
-    rgba(6, 7, 10, 0) 58%
+    rgba(var(--glass-rgb), 0.46) 0%,
+    rgba(var(--glass-rgb), 0.26) 34%,
+    rgba(var(--glass-rgb), 0) 58%
   );
   /* fade scrolling content out before it slides under the fixed site header, so
      the nav never collides with the record */
@@ -889,19 +1087,19 @@ canvas#ridge:active {
    transparent gutter), the page's quiet navigation line. */
 .role-scroll {
   scrollbar-width: thin;
-  scrollbar-color: rgba(244, 241, 234, 0.22) transparent;
+  scrollbar-color: rgba(var(--ink-rgb), 0.22) transparent;
 }
 .role-scroll::-webkit-scrollbar {
   width: 11px;
 }
 .role-scroll::-webkit-scrollbar-thumb {
-  background: rgba(244, 241, 234, 0.22);
+  background: rgba(var(--ink-rgb), 0.22);
   border-radius: 999px;
   border: 3px solid transparent;
   background-clip: content-box;
 }
 .role-scroll::-webkit-scrollbar-thumb:hover {
-  background: rgba(244, 241, 234, 0.36);
+  background: rgba(var(--ink-rgb), 0.36);
   background-clip: content-box;
 }
 .role-scroll::-webkit-scrollbar-track {
@@ -922,7 +1120,7 @@ canvas#ridge:active {
   font-weight: 500;
   letter-spacing: 0.22em;
   text-transform: uppercase;
-  color: rgba(244, 241, 234, 0.62);
+  color: rgba(var(--ink-rgb), 0.62);
 }
 .role-title {
   margin: 0;
@@ -935,8 +1133,8 @@ canvas#ridge:active {
   /* feather insurance: a wide glow + a tight dark shadow keep the masthead legible
      even if it lands over a snow-bright slice (mobile sits over the upper ridge) */
   text-shadow:
-    0 2px 28px rgba(0, 0, 0, 0.55),
-    0 1px 2px rgba(0, 0, 0, 0.5);
+    0 2px 28px rgba(var(--halo-rgb), 0.55),
+    0 1px 2px rgba(var(--halo-rgb), 0.5);
 }
 .role-summary {
   margin: 4px 0 0;
@@ -944,11 +1142,11 @@ canvas#ridge:active {
   font-size: clamp(16px, 1.5vw, 20px);
   font-weight: 300;
   line-height: 1.58;
-  color: rgba(244, 241, 234, 0.86);
+  color: rgba(var(--ink-rgb), 0.86);
   max-width: clamp(38ch, 46vw, 58ch);
   text-shadow:
-    0 1px 18px rgba(0, 0, 0, 0.5),
-    0 1px 2px rgba(0, 0, 0, 0.4);
+    0 1px 18px rgba(var(--halo-rgb), 0.5),
+    0 1px 2px rgba(var(--halo-rgb), 0.4);
 }
 .role-tools {
   display: flex;
@@ -961,16 +1159,16 @@ canvas#ridge:active {
 }
 .role-chip {
   padding: 7px 13px;
-  border: 1px solid rgba(244, 241, 234, 0.16);
+  border: 1px solid rgba(var(--ink-rgb), 0.16);
   border-radius: 999px;
-  background: rgba(8, 9, 12, 0.3);
+  background: rgba(var(--plate-rgb), 0.3);
   -webkit-backdrop-filter: blur(6px);
   backdrop-filter: blur(6px);
   font-size: 10.5px;
   font-weight: 500;
   letter-spacing: 0.13em;
   text-transform: uppercase;
-  color: rgba(244, 241, 234, 0.74);
+  color: rgba(var(--ink-rgb), 0.74);
 }
 .role-section {
   display: flex;
@@ -993,13 +1191,13 @@ canvas#ridge:active {
   font-weight: 600;
   letter-spacing: 0.2em;
   text-transform: uppercase;
-  color: rgba(244, 241, 234, 0.52);
+  color: rgba(var(--ink-rgb), var(--tx-52));
 }
 .role-h::after {
   content: "";
   flex: 1;
   height: 1px;
-  background: linear-gradient(90deg, rgba(244, 241, 234, 0.18), transparent);
+  background: linear-gradient(90deg, rgba(var(--ink-rgb), 0.18), transparent);
 }
 .role-highlights {
   display: grid;
@@ -1016,7 +1214,7 @@ canvas#ridge:active {
   font-size: 15px;
   font-weight: 300;
   line-height: 1.5;
-  color: rgba(244, 241, 234, 0.86);
+  color: rgba(var(--ink-rgb), 0.86);
 }
 /* a small surveyor benchmark mark (rotated square) before each win */
 .role-highlights li::before {
@@ -1026,7 +1224,7 @@ canvas#ridge:active {
   top: 0.5em;
   width: 6px;
   height: 6px;
-  background: rgba(244, 241, 234, 0.55);
+  background: rgba(var(--ink-rgb), 0.55);
   transform: translateY(-1px) rotate(45deg);
 }
 
@@ -1050,7 +1248,7 @@ canvas#ridge:active {
   object-fit: cover;
   border-radius: 14px;
   display: block;
-  background: rgba(0, 0, 0, 0.3);
+  background: rgba(var(--shadow-rgb), 0.3);
 }
 .role-media-empty {
   position: relative;
@@ -1060,22 +1258,22 @@ canvas#ridge:active {
   place-items: center;
   overflow: hidden;
   background:
-    radial-gradient(120% 120% at 50% 30%, rgba(244, 241, 234, 0.05), transparent 70%),
-    rgba(10, 12, 16, 0.32);
+    radial-gradient(120% 120% at 50% 30%, rgba(var(--ink-rgb), 0.05), transparent 70%),
+    rgba(var(--plate-b-rgb), 0.32);
   -webkit-backdrop-filter: blur(6px);
   backdrop-filter: blur(6px);
 }
 .role-media-frame {
   position: absolute;
   inset: 12px;
-  border: 1px dashed rgba(244, 241, 234, 0.16);
+  border: 1px dashed rgba(var(--ink-rgb), 0.16);
   border-radius: 9px;
   pointer-events: none;
 }
 .role-media-glyph svg {
   width: 30px;
   height: 30px;
-  color: rgba(244, 241, 234, 0.4);
+  color: rgba(var(--ink-rgb), var(--tx-40));
 }
 .role-media-tag {
   position: absolute;
@@ -1086,22 +1284,22 @@ canvas#ridge:active {
   font-family: var(--mono);
   font-size: 9.5px;
   letter-spacing: 0.14em;
-  color: rgba(244, 241, 234, 0.4);
+  color: rgba(var(--ink-rgb), var(--tx-40));
 }
 .role-media-cap {
   font-size: 11px;
   font-weight: 500;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: rgba(244, 241, 234, 0.5);
+  color: rgba(var(--ink-rgb), var(--tx-50));
 }
 
 /* code plate — a tasteful, copyable snippet for the build-heavy roles */
 .role-code {
-  border: 1px solid rgba(244, 241, 234, 0.12);
+  border: 1px solid rgba(var(--ink-rgb), 0.12);
   border-radius: 14px;
   overflow: hidden;
-  background: rgba(8, 9, 12, 0.5);
+  background: rgba(var(--plate-rgb), 0.5);
   -webkit-backdrop-filter: blur(10px);
   backdrop-filter: blur(10px);
   max-width: 680px;
@@ -1111,8 +1309,8 @@ canvas#ridge:active {
   align-items: center;
   gap: 12px;
   padding: 10px 12px;
-  border-bottom: 1px solid rgba(244, 241, 234, 0.1);
-  background: rgba(255, 255, 255, 0.02);
+  border-bottom: 1px solid rgba(var(--ink-rgb), 0.1);
+  background: rgba(var(--sheen-rgb), 0.02);
 }
 .role-code-dots {
   display: inline-flex;
@@ -1122,26 +1320,26 @@ canvas#ridge:active {
   width: 9px;
   height: 9px;
   border-radius: 999px;
-  background: rgba(244, 241, 234, 0.2);
+  background: rgba(var(--ink-rgb), 0.2);
 }
 .role-code-name {
   font-family: var(--mono);
   font-size: 12px;
-  color: rgba(244, 241, 234, 0.8);
+  color: rgba(var(--ink-rgb), 0.8);
 }
 .role-code-lang {
   margin-left: auto;
   font-size: 10px;
   letter-spacing: 0.12em;
   text-transform: uppercase;
-  color: rgba(244, 241, 234, 0.42);
+  color: rgba(var(--ink-rgb), var(--tx-42));
 }
 .role-code-copy {
   padding: 5px 11px;
-  border: 1px solid rgba(244, 241, 234, 0.16);
+  border: 1px solid rgba(var(--ink-rgb), 0.16);
   border-radius: 999px;
   background: transparent;
-  color: rgba(244, 241, 234, 0.74);
+  color: rgba(var(--ink-rgb), 0.74);
   font-family: var(--sans);
   font-size: 10px;
   font-weight: 500;
@@ -1155,8 +1353,8 @@ canvas#ridge:active {
 }
 .role-code-copy:hover {
   color: var(--ink);
-  border-color: rgba(244, 241, 234, 0.4);
-  background: rgba(244, 241, 234, 0.06);
+  border-color: rgba(var(--ink-rgb), 0.4);
+  background: rgba(var(--ink-rgb), 0.06);
 }
 .role-code-body {
   margin: 0;
@@ -1165,7 +1363,7 @@ canvas#ridge:active {
   font-family: var(--mono);
   font-size: 12.5px;
   line-height: 1.62;
-  color: rgba(228, 230, 236, 0.92);
+  color: rgba(var(--ink-code-rgb), 0.92);
   tab-size: 2;
 }
 .role-code-note {
@@ -1173,7 +1371,7 @@ canvas#ridge:active {
   padding: 0 18px 14px;
   font-size: 11px;
   font-style: italic;
-  color: rgba(244, 241, 234, 0.45);
+  color: rgba(var(--ink-rgb), var(--tx-45));
 }
 
 /* walk the career — a full-bleed footer with the buttons pinned to the page ENDS
@@ -1189,7 +1387,7 @@ canvas#ridge:active {
   margin-left: calc(-1 * clamp(34px, 6vw, 128px));
   margin-right: calc(-1 * clamp(40px, 5vw, 90px));
   padding: 22px clamp(24px, 4vw, 56px) 0;
-  border-top: 1px solid rgba(244, 241, 234, 0.08);
+  border-top: 1px solid rgba(var(--ink-rgb), 0.08);
 }
 .role-nav-btn {
   display: flex;
@@ -1197,9 +1395,9 @@ canvas#ridge:active {
   gap: 6px;
   align-items: flex-start;
   padding: 14px 16px;
-  border: 1px solid rgba(244, 241, 234, 0.12);
+  border: 1px solid rgba(var(--ink-rgb), 0.12);
   border-radius: 14px;
-  background: rgba(8, 9, 12, 0.28);
+  background: rgba(var(--plate-rgb), 0.28);
   -webkit-backdrop-filter: blur(7px);
   backdrop-filter: blur(7px);
   color: var(--ink);
@@ -1215,8 +1413,8 @@ canvas#ridge:active {
   text-align: right;
 }
 .role-nav-btn:hover:not(:disabled) {
-  border-color: rgba(244, 241, 234, 0.3);
-  background: rgba(20, 22, 28, 0.42);
+  border-color: rgba(var(--ink-rgb), 0.3);
+  background: rgba(var(--plate2-rgb), 0.42);
 }
 .role-nav-btn:disabled {
   opacity: 0.28;
@@ -1230,7 +1428,7 @@ canvas#ridge:active {
   font-weight: 600;
   letter-spacing: 0.18em;
   text-transform: uppercase;
-  color: rgba(244, 241, 234, 0.5);
+  color: rgba(var(--ink-rgb), var(--tx-50));
 }
 .role-nav-dir svg {
   width: 14px;
@@ -1239,7 +1437,7 @@ canvas#ridge:active {
 .role-nav-role {
   font-size: 14px;
   font-weight: 500;
-  color: rgba(244, 241, 234, 0.9);
+  color: rgba(var(--ink-rgb), 0.9);
 }
 
 /* ---- mobile: a single full-width scrolling column over the lit ridge ----------
@@ -1257,9 +1455,9 @@ canvas#ridge:active {
   .role-frost {
     background: linear-gradient(
       180deg,
-      rgba(6, 7, 10, 0) 26%,
-      rgba(6, 7, 10, 0.5) 52%,
-      rgba(6, 7, 10, 0.66) 100%
+      rgba(var(--glass-rgb), 0) 26%,
+      rgba(var(--glass-rgb), 0.5) 52%,
+      rgba(var(--glass-rgb), 0.66) 100%
     );
     -webkit-mask-image: linear-gradient(180deg, transparent 0%, transparent 28%, #000 48%, #000 100%);
     mask-image: linear-gradient(180deg, transparent 0%, transparent 28%, #000 48%, #000 100%);
@@ -1273,9 +1471,9 @@ canvas#ridge:active {
        the record below reads on the frost. Blur-independent legibility floor. */
     background: linear-gradient(
       180deg,
-      rgba(6, 7, 10, 0.66) 0%,
-      rgba(6, 7, 10, 0.4) 26%,
-      rgba(6, 7, 10, 0) 52%
+      rgba(var(--glass-rgb), 0.66) 0%,
+      rgba(var(--glass-rgb), 0.4) 26%,
+      rgba(var(--glass-rgb), 0) 52%
     );
     /* the scroller fills the whole shell on mobile, so the desktop left-column top-fade
        mask doesn't apply */
@@ -1334,22 +1532,22 @@ canvas#ridge:active {
   font-size: clamp(14px, 1.25vw, 16px);
   font-weight: 300;
   line-height: 1.55;
-  color: rgba(244, 241, 234, 0.72);
+  color: rgba(var(--ink-rgb), 0.72);
   max-width: 52ch;
   text-shadow:
-    0 1px 16px rgba(0, 0, 0, 0.5),
-    0 1px 2px rgba(0, 0, 0, 0.4);
+    0 1px 16px rgba(var(--halo-rgb), 0.5),
+    0 1px 2px rgba(var(--halo-rgb), 0.4);
 }
 .assign-body {
   margin: 0;
   font-size: 15px;
   font-weight: 300;
   line-height: 1.62;
-  color: rgba(244, 241, 234, 0.84);
+  color: rgba(var(--ink-rgb), 0.84);
   max-width: 56ch;
   text-shadow:
-    0 1px 16px rgba(0, 0, 0, 0.5),
-    0 1px 2px rgba(0, 0, 0, 0.4);
+    0 1px 16px rgba(var(--halo-rgb), 0.5),
+    0 1px 2px rgba(var(--halo-rgb), 0.4);
 }
 /* the conversion block: a single glass pill (the established affordance vocabulary)
    over a quiet fallback line */
@@ -1365,9 +1563,9 @@ canvas#ridge:active {
   align-items: center;
   gap: 11px;
   padding: 15px 26px;
-  border: 1px solid rgba(244, 241, 234, 0.24);
+  border: 1px solid rgba(var(--ink-rgb), 0.24);
   border-radius: 999px;
-  background: rgba(8, 9, 12, 0.34);
+  background: rgba(var(--plate-rgb), 0.34);
   -webkit-backdrop-filter: blur(8px);
   backdrop-filter: blur(8px);
   color: var(--ink);
@@ -1379,10 +1577,10 @@ canvas#ridge:active {
   text-decoration: none;
   line-height: 1;
   cursor: pointer;
-  text-shadow: 0 1px 14px rgba(0, 0, 0, 0.55);
+  text-shadow: 0 1px 14px rgba(var(--halo-rgb), 0.55);
   box-shadow:
-    0 10px 34px rgba(0, 0, 0, 0.34),
-    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+    0 10px 34px rgba(var(--shadow-rgb), 0.34),
+    inset 0 1px 0 rgba(var(--sheen-rgb), 0.06);
   transition:
     color 0.3s ease,
     border-color 0.3s ease,
@@ -1391,13 +1589,13 @@ canvas#ridge:active {
     box-shadow 0.3s ease;
 }
 .assign-cta:hover {
-  border-color: rgba(244, 241, 234, 0.46);
-  background: rgba(20, 22, 28, 0.5);
+  border-color: rgba(var(--ink-rgb), 0.46);
+  background: rgba(var(--plate2-rgb), 0.5);
   gap: 16px;
   box-shadow:
-    0 12px 38px rgba(0, 0, 0, 0.4),
-    inset 0 1px 0 rgba(255, 255, 255, 0.08),
-    0 0 22px 1px rgba(244, 241, 234, 0.07);
+    0 12px 38px rgba(var(--shadow-rgb), 0.4),
+    inset 0 1px 0 rgba(var(--sheen-rgb), 0.08),
+    0 0 22px 1px rgba(var(--glow-rgb), 0.07);
 }
 .assign-cta-arrow {
   font-size: 15px;
@@ -1411,21 +1609,21 @@ canvas#ridge:active {
   font-size: 12.5px;
   font-weight: 300;
   line-height: 1.6;
-  color: rgba(244, 241, 234, 0.54);
+  color: rgba(var(--ink-rgb), var(--tx-54));
   max-width: 50ch;
-  text-shadow: 0 1px 14px rgba(0, 0, 0, 0.5);
+  text-shadow: 0 1px 14px rgba(var(--halo-rgb), 0.5);
 }
 .assign-foot a {
-  color: rgba(244, 241, 234, 0.82);
+  color: rgba(var(--ink-rgb), 0.82);
   text-decoration: none;
-  border-bottom: 1px solid rgba(244, 241, 234, 0.28);
+  border-bottom: 1px solid rgba(var(--ink-rgb), 0.28);
   transition:
     color 0.25s ease,
     border-color 0.25s ease;
 }
 .assign-foot a:hover {
   color: var(--ink);
-  border-color: rgba(244, 241, 234, 0.6);
+  border-color: rgba(var(--ink-rgb), 0.6);
 }
 
 /* ---- apex beacon: the floating "Your Assignment?" survey datum ---------------
@@ -1467,13 +1665,13 @@ canvas#ridge:active {
   border-radius: 50%;
   transform: translate(-50%, -50%);
   pointer-events: none;
-  box-shadow: 0 0 0 0 rgba(244, 241, 234, 0);
+  box-shadow: 0 0 0 0 rgba(var(--glow-rgb), 0);
   animation: ridge-beacon-breath 4.8s 0.4s ease-in-out infinite;
 }
 .ridge-beacon:hover::before,
 .ridge-beacon:focus-visible::before {
   animation: none;
-  box-shadow: 0 0 26px 3px rgba(244, 241, 234, 0.16);
+  box-shadow: 0 0 26px 3px rgba(var(--glow-rgb), 0.16);
 }
 /* the glass datum disc + its machined double-bezel, the stamped "?" the only mark */
 .beacon-core {
@@ -1483,23 +1681,23 @@ canvas#ridge:active {
   width: 36px;
   height: 36px;
   border-radius: 50%;
-  border: 1px solid rgba(244, 241, 234, 0.34);
+  border: 1px solid rgba(var(--ink-rgb), 0.34);
   background: radial-gradient(
     120% 120% at 50% 35%,
-    rgba(244, 241, 234, 0.12),
-    rgba(8, 9, 12, 0.46) 70%
+    rgba(var(--ink-rgb), 0.12),
+    rgba(var(--plate-rgb), 0.46) 70%
   );
   -webkit-backdrop-filter: blur(8px) saturate(1.05);
   backdrop-filter: blur(8px) saturate(1.05);
-  color: rgba(244, 241, 234, 0.92);
+  color: rgba(var(--ink-rgb), 0.92);
   font-family: var(--sans);
   font-size: 21px;
   font-weight: 500;
   line-height: 1;
-  text-shadow: 0 1px 12px rgba(0, 0, 0, 0.7);
+  text-shadow: 0 1px 12px rgba(var(--halo-rgb), 0.7);
   box-shadow:
-    0 6px 22px rgba(0, 0, 0, 0.45),
-    inset 0 1px 0 rgba(255, 255, 255, 0.07);
+    0 6px 22px rgba(var(--shadow-rgb), 0.45),
+    inset 0 1px 0 rgba(var(--sheen-rgb), 0.07);
   transition:
     color 0.3s ease,
     border-color 0.3s ease,
@@ -1524,10 +1722,10 @@ canvas#ridge:active {
   transition: opacity 0.3s ease;
   background-repeat: no-repeat;
   background-image:
-    linear-gradient(rgba(244, 241, 234, 0.6), rgba(244, 241, 234, 0.6)),
-    linear-gradient(rgba(244, 241, 234, 0.6), rgba(244, 241, 234, 0.6)),
-    linear-gradient(rgba(244, 241, 234, 0.6), rgba(244, 241, 234, 0.6)),
-    linear-gradient(rgba(244, 241, 234, 0.6), rgba(244, 241, 234, 0.6));
+    linear-gradient(rgba(var(--ink-rgb), 0.6), rgba(var(--ink-rgb), 0.6)),
+    linear-gradient(rgba(var(--ink-rgb), 0.6), rgba(var(--ink-rgb), 0.6)),
+    linear-gradient(rgba(var(--ink-rgb), 0.6), rgba(var(--ink-rgb), 0.6)),
+    linear-gradient(rgba(var(--ink-rgb), 0.6), rgba(var(--ink-rgb), 0.6));
   background-size: 1px 5px, 1px 5px, 5px 1px, 5px 1px;
   background-position: top center, bottom center, left center, right center;
 }
@@ -1537,7 +1735,7 @@ canvas#ridge:active {
   position: absolute;
   inset: 4px;
   border-radius: 50%;
-  border: 1px solid rgba(244, 241, 234, 0.16);
+  border: 1px solid rgba(var(--ink-rgb), 0.16);
   pointer-events: none;
 }
 /* a 1px plumb leader dropping from the disc toward the crest it marks */
@@ -1551,8 +1749,8 @@ canvas#ridge:active {
   pointer-events: none;
   background: linear-gradient(
     180deg,
-    rgba(244, 241, 234, 0.5),
-    rgba(244, 241, 234, 0)
+    rgba(var(--ink-rgb), 0.5),
+    rgba(var(--ink-rgb), 0)
   );
 }
 /* the invitation, a small glass PILL centred just below the disc (toward the snowy
@@ -1567,9 +1765,9 @@ canvas#ridge:active {
   transform: translateX(-50%) translateY(-7px);
   white-space: nowrap;
   padding: 6px 13px;
-  border: 1px solid rgba(244, 241, 234, 0.2);
+  border: 1px solid rgba(var(--ink-rgb), 0.2);
   border-radius: 999px;
-  background: rgba(8, 9, 12, 0.5);
+  background: rgba(var(--plate-rgb), 0.5);
   -webkit-backdrop-filter: blur(7px);
   backdrop-filter: blur(7px);
   font-family: var(--sans);
@@ -1577,11 +1775,11 @@ canvas#ridge:active {
   font-weight: 600;
   letter-spacing: 0.2em;
   text-transform: uppercase;
-  color: rgba(244, 241, 234, 0.88);
-  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.6);
+  color: rgba(var(--ink-rgb), 0.88);
+  text-shadow: 0 1px 6px rgba(var(--halo-rgb), 0.6);
   box-shadow:
-    0 8px 22px rgba(0, 0, 0, 0.36),
-    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    0 8px 22px rgba(var(--shadow-rgb), 0.36),
+    inset 0 1px 0 rgba(var(--sheen-rgb), 0.05);
   opacity: 0;
   filter: blur(4px);
   pointer-events: none;
@@ -1592,7 +1790,7 @@ canvas#ridge:active {
 }
 .ridge-beacon:hover .beacon-core,
 .ridge-beacon:focus-visible .beacon-core {
-  border-color: rgba(244, 241, 234, 0.6);
+  border-color: rgba(var(--ink-rgb), 0.6);
   color: var(--ink);
 }
 .ridge-beacon:hover .beacon-core::before,
@@ -1612,10 +1810,10 @@ canvas#ridge:active {
 @keyframes ridge-beacon-breath {
   0%,
   100% {
-    box-shadow: 0 0 0 0 rgba(244, 241, 234, 0);
+    box-shadow: 0 0 0 0 rgba(var(--glow-rgb), 0);
   }
   50% {
-    box-shadow: 0 0 20px 2px rgba(244, 241, 234, 0.1);
+    box-shadow: 0 0 20px 2px rgba(var(--glow-rgb), 0.1);
   }
 }
 /* a slow buoy-like float + a small inquisitive sway for the "?" (centred on the
@@ -1654,7 +1852,7 @@ canvas#ridge:active {
   /* no breath / no float / no slide — a single static glow + a plain label fade */
   .ridge-beacon::before {
     animation: none;
-    box-shadow: 0 0 14px 1px rgba(244, 241, 234, 0.08);
+    box-shadow: 0 0 14px 1px rgba(var(--glow-rgb), 0.08);
   }
   .beacon-glyph {
     animation: none;
@@ -1698,8 +1896,8 @@ canvas#ridge:active {
   color: var(--ink);
   /* a crisp dark halo so the glyphs stay legible over the bright limb of the ball */
   text-shadow:
-    0 0 12px rgba(0, 0, 0, 0.85),
-    0 1px 3px rgba(0, 0, 0, 0.75);
+    0 0 12px rgba(var(--halo-rgb), 0.85),
+    0 1px 3px rgba(var(--halo-rgb), 0.75);
   will-change: transform, opacity;
 }
 /* a single decomposed glyph adrift in the volume — a tracked, instrument-like character */
@@ -1708,7 +1906,7 @@ canvas#ridge:active {
   font-weight: 500;
   letter-spacing: 0;
   text-transform: uppercase;
-  color: rgba(244, 241, 234, 0.86);
+  color: rgba(var(--ink-rgb), 0.86);
 }
 
 /* ===========================================================================
@@ -1753,14 +1951,14 @@ canvas#ridge:active {
   --fx: 50%;
   --fy: 50%;
   background:
-    radial-gradient(44% 44% at var(--fx) var(--fy), rgba(255, 196, 92, 0.05) 0%, rgba(255, 196, 92, 0) 70%),
-    radial-gradient(150% 130% at var(--fx) var(--fy), rgba(6, 7, 10, 0) 34%, rgba(6, 7, 10, 0.5) 100%),
+    radial-gradient(44% 44% at var(--fx) var(--fy), rgba(var(--accent-glow-rgb), 0.05) 0%, rgba(var(--accent-glow-rgb), 0) 70%),
+    radial-gradient(150% 130% at var(--fx) var(--fy), rgba(var(--glass-rgb), 0) 34%, rgba(var(--glass-rgb), 0.5) 100%),
     linear-gradient(
       180deg,
-      rgba(6, 7, 10, 0.5) 0%,
-      rgba(6, 7, 10, 0) 20%,
-      rgba(6, 7, 10, 0) 78%,
-      rgba(6, 7, 10, 0.5) 100%
+      rgba(var(--glass-rgb), 0.5) 0%,
+      rgba(var(--glass-rgb), 0) 20%,
+      rgba(var(--glass-rgb), 0) 78%,
+      rgba(var(--glass-rgb), 0.5) 100%
     );
   opacity: 0;
   animation: tl-frost-in 0.55s cubic-bezier(0.22, 1, 0.36, 1) 0.1s forwards;
@@ -1797,7 +1995,7 @@ canvas#ridge:active {
    drawn". The rAF loop owns its x-extent + opacity. */
 .tl-axis-future {
   fill: none;
-  stroke: rgba(244, 241, 234, 0.42);
+  stroke: rgba(var(--ink-rgb), 0.42);
   stroke-width: 1;
   stroke-linecap: butt;
   stroke-dasharray: 2 7;
@@ -1827,9 +2025,9 @@ canvas#ridge:active {
   margin-left: -0.5px;
   background: linear-gradient(
     180deg,
-    rgba(244, 241, 234, 0) 0%,
-    rgba(244, 241, 234, 0.3) 50%,
-    rgba(244, 241, 234, 0) 100%
+    rgba(var(--ink-rgb), 0) 0%,
+    rgba(var(--ink-rgb), 0.3) 50%,
+    rgba(var(--ink-rgb), 0) 100%
   );
 }
 .tl-now-cap {
@@ -1842,8 +2040,8 @@ canvas#ridge:active {
   font-weight: 400;
   letter-spacing: 0.2em;
   text-transform: lowercase;
-  color: rgba(244, 241, 234, 0.4);
-  text-shadow: 0 0 8px rgba(6, 7, 10, 0.9);
+  color: rgba(var(--ink-rgb), var(--tx-40));
+  text-shadow: 0 0 8px rgba(var(--glass-rgb), 0.9);
   white-space: nowrap;
 }
 /* the MOBILE reading-head playhead — a small amber caret pinned to screen-centre, sitting just below the
@@ -1860,10 +2058,10 @@ canvas#ridge:active {
   height: 0;
   border-left: 6px solid transparent;
   border-right: 6px solid transparent;
-  border-bottom: 8px solid rgba(255, 196, 92, 0.72);
+  border-bottom: 8px solid rgba(var(--accent-rgb), 0.72);
   transform: translate(-50%, 7px);
   pointer-events: none;
-  filter: drop-shadow(0 1px 4px rgba(6, 7, 10, 0.9));
+  filter: drop-shadow(0 1px 4px rgba(var(--glass-rgb), 0.9));
 }
 /* the straight vertical branches rising (and the valley studies dropping) out of the baseline.
    ALL hairline, the same mono off-white as the filaments (req 2/4): faint by default; flagship
@@ -1872,7 +2070,7 @@ canvas#ridge:active {
    a hairline (no amber on the lines). */
 .tl-branch {
   fill: none;
-  stroke: rgba(244, 241, 234, 0.3);
+  stroke: rgba(var(--ink-rgb), 0.3);
   stroke-width: 1;
   stroke-linecap: butt;
   /* stroke + glow are CSS-class-driven (the loop only writes the geometry `d` + opacity), so they
@@ -1882,17 +2080,17 @@ canvas#ridge:active {
     filter 0.28s cubic-bezier(0.22, 1, 0.36, 1);
 }
 .tl-branch.is-major {
-  stroke: rgba(244, 241, 234, 0.5);
+  stroke: rgba(var(--ink-rgb), 0.5);
 }
 /* a mouse hover blooms the line to a warm near-white with an amber halo (req 2) — distinct from the
    selected (cool white) state, so hovering reads as "previewing" rather than "selected". */
 .tl-branch.is-hover {
-  stroke: rgba(255, 240, 214, 0.92);
-  filter: drop-shadow(0 0 5px rgba(255, 198, 110, 0.5));
+  stroke: rgba(var(--ink-warm-rgb), 0.92);
+  filter: drop-shadow(0 0 5px rgba(var(--accent-glow2-rgb), 0.5));
 }
 .tl-branch.is-selected {
-  stroke: rgba(248, 246, 240, 0.95);
-  filter: drop-shadow(0 0 4px rgba(244, 241, 234, 0.5));
+  stroke: rgba(var(--ink-hot2-rgb), 0.95);
+  filter: drop-shadow(0 0 4px rgba(var(--glow-rgb), 0.5));
 }
 
 /* the FOOT NUBS — a small SQUARE node at each line's root on the baseline (req 4): the SAME as the
@@ -1910,7 +2108,7 @@ canvas#ridge:active {
   width: 4px;
   height: 4px;
   margin: -2px 0 0 -2px; /* centre the square on the (x, baseY) the loop translates it to */
-  background: rgba(244, 241, 234, 0.5);
+  background: rgba(var(--ink-rgb), 0.5);
   opacity: 0; /* the rAF loop owns transform + opacity */
   will-change: transform, opacity;
   transition: background 0.28s cubic-bezier(0.22, 1, 0.36, 1);
@@ -1919,10 +2117,10 @@ canvas#ridge:active {
   width: 6px;
   height: 6px;
   margin: -3px 0 0 -3px;
-  background: rgba(255, 250, 240, 0.95);
+  background: rgba(var(--ink-hot-rgb), 0.95);
 }
 .tl-nub.is-hover {
-  background: rgba(255, 240, 214, 0.98);
+  background: rgba(var(--ink-warm-rgb), 0.98);
 }
 
 /* the TIP nubs — a tiny crisp SQUARE at each line's far end, IDENTICAL to the foot nubs (req 4), so
@@ -1941,7 +2139,7 @@ canvas#ridge:active {
   width: 4px;
   height: 4px;
   margin: -2px 0 0 -2px; /* centre the square on the (x, tipY) the loop translates it to */
-  background: rgba(244, 241, 234, 0.5);
+  background: rgba(var(--ink-rgb), 0.5);
   opacity: 0; /* the rAF loop owns transform + opacity */
   will-change: transform, opacity;
   transition: background 0.28s cubic-bezier(0.22, 1, 0.36, 1);
@@ -1950,10 +2148,10 @@ canvas#ridge:active {
   width: 6px;
   height: 6px;
   margin: -3px 0 0 -3px;
-  background: rgba(255, 250, 240, 0.95);
+  background: rgba(var(--ink-hot-rgb), 0.95);
 }
 .tl-tip.is-hover {
-  background: rgba(255, 240, 214, 0.98);
+  background: rgba(var(--ink-warm-rgb), 0.98);
 }
 
 /* the year ruler — a faint date legend sitting just BELOW the baseline, POSITIONED by the rAF loop
@@ -1973,14 +2171,14 @@ canvas#ridge:active {
   font-size: 11px;
   font-weight: 400;
   letter-spacing: 0.06em;
-  color: rgba(244, 241, 234, 0.34);
-  text-shadow: 0 1px 10px rgba(0, 0, 0, 0.6);
+  color: rgba(var(--ink-rgb), var(--tx-34));
+  text-shadow: 0 1px 10px rgba(var(--halo-rgb), 0.6);
   will-change: transform;
 }
 /* the future milestones (2030 / 2035 / 2040) read fainter than the dense past ticks — present, but a
    quiet horizon rather than a hard date. */
 .tl-year.is-future {
-  color: rgba(244, 241, 234, 0.18);
+  color: rgba(var(--ink-rgb), var(--tx-18));
   letter-spacing: 0.1em;
 }
 
@@ -2018,7 +2216,7 @@ canvas#ridge:active {
   will-change: transform, opacity;
 }
 .tl-label:focus-visible {
-  outline: 2px solid rgba(255, 250, 240, 0.85);
+  outline: 2px solid rgba(var(--ink-hot-rgb), 0.85);
   outline-offset: 3px;
   border-radius: 3px;
 }
@@ -2032,12 +2230,12 @@ canvas#ridge:active {
   font-weight: 400;
   line-height: 1;
   letter-spacing: -0.005em;
-  color: rgba(244, 241, 234, 0.56);
+  color: rgba(var(--ink-rgb), var(--tx-56));
   /* a stronger halo keeps a name legible where a column overruns a far line (req 3) */
   text-shadow:
-    0 0 8px rgba(6, 7, 10, 0.95),
-    0 0 3px rgba(6, 7, 10, 0.95),
-    0 1px 2px rgba(0, 0, 0, 0.6);
+    0 0 8px rgba(var(--glass-rgb), 0.95),
+    0 0 3px rgba(var(--glass-rgb), 0.95),
+    0 1px 2px rgba(var(--halo-rgb), 0.6);
   transition:
     color 0.26s cubic-bezier(0.22, 1, 0.36, 1),
     transform 0.26s cubic-bezier(0.22, 1, 0.36, 1),
@@ -2046,27 +2244,27 @@ canvas#ridge:active {
 }
 /* major projects read a touch brighter — they carry more weight in the trace */
 .tl-label.is-major .tl-label-name {
-  color: rgba(244, 241, 234, 0.86);
+  color: rgba(var(--ink-rgb), 0.86);
 }
 /* hover bloom (req 2): the name brightens to a warm white, grows a touch and gains an amber glow —
    in lock-step with its line lighting up. Source-ordered BEFORE is-selected so the selected amber
    colour still wins on a hovered-and-selected name, while the scale/spacing lift carries through. */
 .tl-label.is-hover .tl-label-name {
-  color: rgba(255, 244, 228, 0.98);
+  color: rgba(var(--ink-warm2-rgb), 0.98);
   transform: scale(1.16);
   letter-spacing: 0.012em;
   text-shadow:
-    0 0 10px rgba(255, 198, 110, 0.55),
-    0 0 3px rgba(6, 7, 10, 0.95),
-    0 1px 2px rgba(0, 0, 0, 0.7);
+    0 0 10px rgba(var(--accent-glow2-rgb), 0.55),
+    0 0 3px rgba(var(--glass-rgb), 0.95),
+    0 1px 2px rgba(var(--halo-rgb), 0.7);
 }
 /* the selected name is the sparing amber accent */
 .tl-label.is-selected .tl-label-name {
   color: var(--c-education);
   text-shadow:
-    0 0 12px rgba(255, 196, 92, 0.5),
-    0 0 3px rgba(6, 7, 10, 0.9),
-    0 1px 2px rgba(0, 0, 0, 0.7);
+    0 0 12px rgba(var(--accent-glow-rgb), 0.5),
+    0 0 3px rgba(var(--glass-rgb), 0.9),
+    0 1px 2px rgba(var(--halo-rgb), 0.7);
 }
 
 /* a visually-hidden live region announces the selected project to screen readers */
@@ -2183,12 +2381,12 @@ canvas#ridge:active {
   pointer-events: auto;
   -webkit-tap-highlight-color: transparent;
   --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Fira Code", Menlo, Consolas, monospace;
-  /* an opaque sheet (the folded globe sits hidden behind it): an amber pool low at the
-     dial apex over a soft vignette on near-black */
+  /* an opaque sheet (the folded globe sits hidden behind it): an accent pool low at the
+     dial apex over a soft vignette on the deep sheet (near-black; paper in light) */
   background:
-    radial-gradient(70% 38% at 50% 74%, rgba(255, 196, 92, 0.1) 0%, rgba(255, 196, 92, 0) 70%),
-    radial-gradient(150% 100% at 50% 50%, rgba(6, 7, 10, 0) 30%, rgba(3, 4, 6, 0.7) 100%),
-    #06070a;
+    radial-gradient(70% 38% at 50% 74%, rgba(var(--accent-glow-rgb), 0.1) 0%, rgba(var(--accent-glow-rgb), 0) 70%),
+    radial-gradient(150% 100% at 50% 50%, rgba(var(--vignette-rgb), 0) 30%, rgba(var(--vignette-rgb), 0.7) 100%),
+    var(--bg-deep);
 }
 
 /* the dial stage — the drag surface AND the focusable ARIA slider (ticks positioned
@@ -2215,7 +2413,7 @@ canvas#ridge:active {
 /* keyboard focus on the dial — a subtle inset ring (never shown on touch / programmatic
    focus, only when the slider is reached by keyboard) */
 .pmd-stage:focus-visible {
-  outline: 2px solid rgba(255, 250, 240, 0.5);
+  outline: 2px solid rgba(var(--ink-hot-rgb), 0.5);
   outline-offset: -4px;
   border-radius: 6px;
 }
@@ -2237,8 +2435,8 @@ canvas#ridge:active {
   font-weight: 500;
   line-height: 1.15;
   letter-spacing: -0.018em;
-  color: rgba(244, 241, 234, 0.96);
-  text-shadow: 0 0 26px rgba(255, 196, 92, 0.28);
+  color: rgba(var(--ink-rgb), 0.96);
+  text-shadow: 0 0 26px rgba(var(--accent-glow-rgb), 0.28);
 }
 /* the curve */
 .pmd-arc {
@@ -2262,7 +2460,7 @@ canvas#ridge:active {
   width: 120px;
   height: 56px;
   transform: translate(-50%, -50%);
-  background: radial-gradient(closest-side, rgba(255, 196, 92, 0.16) 0%, rgba(255, 196, 92, 0) 100%);
+  background: radial-gradient(closest-side, rgba(var(--accent-glow-rgb), 0.16) 0%, rgba(var(--accent-glow-rgb), 0) 100%);
   pointer-events: none;
 }
 
@@ -2290,7 +2488,7 @@ canvas#ridge:active {
   width: 1px;
   height: 13px;
   border-radius: 1px;
-  background: linear-gradient(to top, rgba(244, 241, 234, 0.46), rgba(244, 241, 234, 0.03));
+  background: linear-gradient(to top, rgba(var(--ink-rgb), 0.46), rgba(var(--ink-rgb), 0.03));
   transition:
     height 0.32s cubic-bezier(0.22, 1, 0.36, 1),
     background 0.3s ease;
@@ -2302,7 +2500,7 @@ canvas#ridge:active {
   width: 2.5px;
   height: 2.5px;
   transform: translate(-50%, 50%);
-  background: rgba(244, 241, 234, 0.55);
+  background: rgba(var(--ink-rgb), 0.55);
   transition:
     width 0.3s cubic-bezier(0.22, 1, 0.36, 1),
     height 0.3s cubic-bezier(0.22, 1, 0.36, 1),
@@ -2310,12 +2508,12 @@ canvas#ridge:active {
 }
 .pmd-tick.is-major .pmd-spoke {
   height: 22px;
-  background: linear-gradient(to top, rgba(244, 241, 234, 0.74), rgba(244, 241, 234, 0.06));
+  background: linear-gradient(to top, rgba(var(--ink-rgb), 0.74), rgba(var(--ink-rgb), 0.06));
 }
 .pmd-tick.is-major .pmd-dot {
   width: 4px;
   height: 4px;
-  background: rgba(244, 241, 234, 0.85);
+  background: rgba(var(--ink-rgb), 0.85);
 }
 /* the SELECTED tick — a long amber readout rising to the name, a glowing node at its foot */
 .pmd-tick.is-selected .pmd-spoke {
@@ -2324,19 +2522,19 @@ canvas#ridge:active {
   left: -0.75px;
   background: linear-gradient(
     to top,
-    rgba(255, 196, 92, 0.95) 0%,
-    rgba(255, 196, 92, 0.5) 26%,
-    rgba(255, 196, 92, 0) 100%
+    rgba(var(--accent-rgb), 0.95) 0%,
+    rgba(var(--accent-rgb), 0.5) 26%,
+    rgba(var(--accent-rgb), 0) 100%
   );
-  box-shadow: 0 0 10px rgba(255, 196, 92, 0.4);
+  box-shadow: 0 0 10px rgba(var(--accent-glow-rgb), 0.4);
 }
 .pmd-tick.is-selected .pmd-dot {
   width: 8px;
   height: 8px;
   background: var(--c-education);
   box-shadow:
-    0 0 0 4px rgba(255, 196, 92, 0.12),
-    0 0 14px rgba(255, 196, 92, 0.7);
+    0 0 0 4px rgba(var(--accent-glow-rgb), 0.12),
+    0 0 14px rgba(var(--accent-glow-rgb), 0.7);
 }
 .pmd-hint {
   position: absolute;
@@ -2347,7 +2545,7 @@ canvas#ridge:active {
   font-size: 10px;
   letter-spacing: 0.26em;
   text-transform: uppercase;
-  color: rgba(244, 241, 234, 0.3);
+  color: rgba(var(--ink-rgb), var(--tx-30));
   pointer-events: none;
 }
 .pmd-hint::before {
@@ -2363,7 +2561,7 @@ canvas#ridge:active {
   flex: none;
   height: calc(196px + env(safe-area-inset-bottom, 0px));
   padding: 16px 24px calc(16px + env(safe-area-inset-bottom, 0px));
-  border-top: 1px solid rgba(244, 241, 234, 0.08);
+  border-top: 1px solid rgba(var(--ink-rgb), 0.08);
   overflow: hidden;
 }
 /* the position readout — the prev/next arrows are gone; the dial itself is the control */
@@ -2378,11 +2576,11 @@ canvas#ridge:active {
   font-size: 12px;
   font-weight: 450;
   letter-spacing: 0.14em;
-  color: rgba(244, 241, 234, 0.62);
+  color: rgba(var(--ink-rgb), 0.62);
   text-align: center;
 }
 .pmd-counter-sep {
-  color: rgba(244, 241, 234, 0.32);
+  color: rgba(var(--ink-rgb), var(--tx-32));
 }
 .pmd-meta {
   display: flex;
@@ -2393,19 +2591,19 @@ canvas#ridge:active {
   font-size: 12.5px;
   font-weight: 450;
   letter-spacing: 0;
-  color: rgba(244, 241, 234, 0.5);
+  color: rgba(var(--ink-rgb), var(--tx-50));
 }
 .pmd-meta-date {
-  color: rgba(244, 241, 234, 0.72);
+  color: rgba(var(--ink-rgb), 0.72);
 }
 .pmd-meta-date.is-major {
-  color: rgba(255, 196, 92, 0.9);
+  color: var(--accent-t90);
 }
 .pmd-meta-sep {
-  color: rgba(244, 241, 234, 0.3);
+  color: rgba(var(--ink-rgb), var(--tx-30));
 }
 .pmd-meta-place {
-  color: rgba(244, 241, 234, 0.5);
+  color: rgba(var(--ink-rgb), var(--tx-50));
 }
 .pmd-desc {
   margin-top: 9px;
@@ -2414,7 +2612,7 @@ canvas#ridge:active {
   font-weight: 450;
   line-height: 1.55;
   letter-spacing: -0.002em;
-  color: rgba(244, 241, 234, 0.72);
+  color: rgba(var(--ink-rgb), 0.72);
   /* clamp so a longer, multi-sentence record never grows the fixed-height panel */
   display: -webkit-box;
   -webkit-box-orient: vertical;
@@ -2446,12 +2644,12 @@ canvas#ridge:active {
   position: absolute;
   inset: 0;
   z-index: 0;
-  -webkit-backdrop-filter: blur(20px) saturate(1.05) brightness(0.82);
-  backdrop-filter: blur(20px) saturate(1.05) brightness(0.82);
+  -webkit-backdrop-filter: blur(20px) saturate(1.05) brightness(var(--frost-bright-heavy));
+  backdrop-filter: blur(20px) saturate(1.05) brightness(var(--frost-bright-heavy));
   /* a soft centre→edge vignette over an even scrim: pools the corners so the cards
      read, while the middle stays the least-darkened (the scene still glows through) */
   background:
-    radial-gradient(130% 110% at 50% 32%, rgba(6, 7, 10, 0.34) 0%, rgba(6, 7, 10, 0.66) 100%);
+    radial-gradient(130% 110% at 50% 32%, rgba(var(--glass-rgb), 0.34) 0%, rgba(var(--glass-rgb), 0.66) 100%);
   /* reuse the dossier's frost-in ramp so the two panels open with one grammar */
   opacity: 0;
   animation: role-frost-in 0.4s cubic-bezier(0.22, 1, 0.36, 1) 0.06s forwards;
@@ -2469,19 +2667,19 @@ canvas#ridge:active {
   -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 86px);
   mask-image: linear-gradient(180deg, transparent 0, #000 86px);
   scrollbar-width: thin;
-  scrollbar-color: rgba(244, 241, 234, 0.22) transparent;
+  scrollbar-color: rgba(var(--ink-rgb), 0.22) transparent;
 }
 .book-scroll::-webkit-scrollbar {
   width: 11px;
 }
 .book-scroll::-webkit-scrollbar-thumb {
-  background: rgba(244, 241, 234, 0.22);
+  background: rgba(var(--ink-rgb), 0.22);
   border-radius: 999px;
   border: 3px solid transparent;
   background-clip: content-box;
 }
 .book-scroll::-webkit-scrollbar-thumb:hover {
-  background: rgba(244, 241, 234, 0.36);
+  background: rgba(var(--ink-rgb), 0.36);
   background-clip: content-box;
 }
 .book-scroll::-webkit-scrollbar-track {
@@ -2505,7 +2703,7 @@ canvas#ridge:active {
   gap: clamp(16px, 2.4vw, 40px);
   margin: clamp(6px, 1.2vh, 14px) 0 clamp(2px, 0.6vh, 8px);
   max-width: 860px;
-  color: rgba(244, 241, 234, 0.62);
+  color: rgba(var(--ink-rgb), 0.62);
 }
 .book-axis-stop {
   flex: none;
@@ -2527,14 +2725,14 @@ canvas#ridge:active {
   width: 15px;
   height: 15px;
   flex: none;
-  color: rgba(244, 241, 234, 0.66);
+  color: rgba(var(--ink-rgb), 0.66);
 }
 .book-axis-coins {
   font-family: var(--mono);
   font-size: 12px;
   letter-spacing: 0.16em;
   line-height: 1;
-  color: rgba(244, 241, 234, 0.5);
+  color: rgba(var(--ink-rgb), var(--tx-50));
 }
 .book-axis-cap {
   margin-top: 1px;
@@ -2543,7 +2741,7 @@ canvas#ridge:active {
   letter-spacing: 0.16em;
   text-transform: uppercase;
   white-space: nowrap;
-  color: rgba(244, 241, 234, 0.5);
+  color: rgba(var(--ink-rgb), var(--tx-50));
 }
 /* the connecting line + arrowhead — a thin instrument rule sweeping right, aligned
    to the clock row at the top of each stop */
@@ -2560,15 +2758,15 @@ canvas#ridge:active {
   height: 1px;
   background: linear-gradient(
     90deg,
-    rgba(244, 241, 234, 0.12),
-    rgba(244, 241, 234, 0.42)
+    rgba(var(--ink-rgb), 0.12),
+    rgba(var(--ink-rgb), 0.42)
   );
 }
 .book-axis-arrow {
   width: 11px;
   height: 11px;
   flex: none;
-  color: rgba(244, 241, 234, 0.55);
+  color: rgba(var(--ink-rgb), 0.55);
 }
 
 /* ---- the session cards: a row of liquid-glass plates -------------------------- */
@@ -2596,16 +2794,16 @@ canvas#ridge:active {
   flex-direction: column;
   gap: 12px;
   padding: clamp(20px, 1.7vw, 28px);
-  border: 1px solid rgba(244, 241, 234, 0.14);
+  border: 1px solid rgba(var(--ink-rgb), 0.14);
   border-radius: 22px;
-  background: rgba(12, 14, 18, 0.42);
+  background: rgba(var(--card-rgb), 0.42);
   -webkit-backdrop-filter: blur(14px) saturate(1.06);
   backdrop-filter: blur(14px) saturate(1.06);
   color: var(--ink);
   text-decoration: none;
   box-shadow:
-    0 18px 50px rgba(0, 0, 0, 0.4),
-    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+    0 18px 50px rgba(var(--shadow-rgb), 0.4),
+    inset 0 1px 0 rgba(var(--sheen-rgb), 0.06);
   transition:
     transform 0.35s cubic-bezier(0.22, 1, 0.36, 1),
     border-color 0.35s ease,
@@ -2615,40 +2813,40 @@ canvas#ridge:active {
 .book-card:hover,
 .book-card:focus-visible {
   transform: translateY(-4px);
-  border-color: rgba(244, 241, 234, 0.34);
-  background: rgba(20, 22, 28, 0.5);
+  border-color: rgba(var(--ink-rgb), 0.34);
+  background: rgba(var(--plate2-rgb), 0.5);
   box-shadow:
-    0 24px 60px rgba(0, 0, 0, 0.46),
-    inset 0 1px 0 rgba(255, 255, 255, 0.09),
-    0 0 24px 1px rgba(244, 241, 234, 0.05);
+    0 24px 60px rgba(var(--shadow-rgb), 0.46),
+    inset 0 1px 0 rgba(var(--sheen-rgb), 0.09),
+    0 0 24px 1px rgba(var(--glow-rgb), 0.05);
 }
 /* the entry card — the booking-page answer to the reference slide's singled-out
    plate: a faint amber-tinted glass + amber hairline, the one accent on the page */
 .book-card--accent {
-  border-color: rgba(255, 196, 92, 0.34);
+  border-color: rgba(var(--accent-rgb), 0.34);
   background: linear-gradient(
     180deg,
-    rgba(255, 196, 92, 0.1) 0%,
-    rgba(12, 14, 18, 0.46) 70%
+    rgba(var(--accent-glow-rgb), 0.1) 0%,
+    rgba(var(--card-rgb), 0.46) 70%
   );
   box-shadow:
-    0 18px 50px rgba(0, 0, 0, 0.4),
-    inset 0 1px 0 rgba(255, 196, 92, 0.1),
-    0 0 30px -6px rgba(255, 196, 92, 0.18);
+    0 18px 50px rgba(var(--shadow-rgb), 0.4),
+    inset 0 1px 0 rgba(var(--accent-glow-rgb), 0.1),
+    0 0 30px -6px rgba(var(--accent-glow-rgb), 0.18);
 }
 .book-card--accent:hover,
 .book-card--accent:focus-visible {
   transform: translateY(-4px);
-  border-color: rgba(255, 196, 92, 0.55);
+  border-color: rgba(var(--accent-rgb), 0.55);
   background: linear-gradient(
     180deg,
-    rgba(255, 196, 92, 0.15) 0%,
-    rgba(20, 22, 28, 0.5) 70%
+    rgba(var(--accent-glow-rgb), 0.15) 0%,
+    rgba(var(--plate2-rgb), 0.5) 70%
   );
   box-shadow:
-    0 24px 60px rgba(0, 0, 0, 0.46),
-    inset 0 1px 0 rgba(255, 196, 92, 0.14),
-    0 0 34px -4px rgba(255, 196, 92, 0.26);
+    0 24px 60px rgba(var(--shadow-rgb), 0.46),
+    inset 0 1px 0 rgba(var(--accent-glow-rgb), 0.14),
+    0 0 34px -4px rgba(var(--accent-glow-rgb), 0.26);
 }
 .book-card-head {
   display: flex;
@@ -2661,7 +2859,7 @@ canvas#ridge:active {
   font-family: var(--mono);
   font-size: 11px;
   letter-spacing: 0.16em;
-  color: rgba(244, 241, 234, 0.42);
+  color: rgba(var(--ink-rgb), var(--tx-42));
 }
 .book-card-flag {
   font-size: 9.5px;
@@ -2672,9 +2870,9 @@ canvas#ridge:active {
 }
 .book-card-dur {
   padding: 4px 10px;
-  border: 1px solid rgba(244, 241, 234, 0.16);
+  border: 1px solid rgba(var(--ink-rgb), 0.16);
   border-radius: 999px;
-  background: rgba(8, 9, 12, 0.3);
+  background: rgba(var(--plate-rgb), 0.3);
   -webkit-backdrop-filter: blur(6px);
   backdrop-filter: blur(6px);
   font-size: 9.5px;
@@ -2682,7 +2880,7 @@ canvas#ridge:active {
   letter-spacing: 0.12em;
   text-transform: uppercase;
   white-space: nowrap;
-  color: rgba(244, 241, 234, 0.7);
+  color: rgba(var(--ink-rgb), 0.7);
 }
 .book-card-title {
   margin: 2px 0 0;
@@ -2701,19 +2899,19 @@ canvas#ridge:active {
   font-weight: 600;
   line-height: 1;
   letter-spacing: -0.02em;
-  color: rgba(244, 241, 234, 0.92);
+  color: rgba(var(--ink-rgb), 0.92);
 }
 .book-card-price .cur {
   font-size: 0.6em;
   font-weight: 500;
   margin-right: 1px;
-  color: rgba(244, 241, 234, 0.6);
+  color: rgba(var(--ink-rgb), 0.6);
 }
 .book-card--accent .book-card-price {
   color: var(--c-education);
 }
 .book-card--accent .book-card-price .cur {
-  color: rgba(255, 196, 92, 0.72);
+  color: var(--accent-t72);
 }
 .book-card-desc {
   margin: 0;
@@ -2721,7 +2919,7 @@ canvas#ridge:active {
   font-size: 13.5px;
   font-weight: 300;
   line-height: 1.55;
-  color: rgba(244, 241, 234, 0.76);
+  color: rgba(var(--ink-rgb), 0.76);
 }
 .book-card-cta {
   margin-top: 4px;
@@ -2732,7 +2930,7 @@ canvas#ridge:active {
   font-weight: 600;
   letter-spacing: 0.16em;
   text-transform: uppercase;
-  color: rgba(244, 241, 234, 0.56);
+  color: rgba(var(--ink-rgb), var(--tx-56));
   transition:
     color 0.3s ease,
     gap 0.3s ease;
@@ -2752,7 +2950,7 @@ canvas#ridge:active {
   transform: translateX(3px);
 }
 .book-card--accent .book-card-cta {
-  color: rgba(255, 196, 92, 0.82);
+  color: var(--accent-t82);
 }
 .book-card--accent:hover .book-card-cta,
 .book-card--accent:focus-visible .book-card-cta {
