@@ -27,6 +27,9 @@ import {
   BLUR_WGSL,
 } from "./ridgelineShaders";
 import type { SceneInfo } from "../perf/types";
+// the per-vertex tangent convention (chord projected into the endpoint's tangent plane, stored as an
+// angle in a fixed basis) lives ONCE in globeMotion.ts, twinned by the filament VS's decode
+import { tangentAngle, chordTangent } from "./globeMotion";
 
 const HDR: GPUTextureFormat = "rgba16float";
 
@@ -35,8 +38,8 @@ const HDR: GPUTextureFormat = "rgba16float";
    GLOBE_R consts in ridgelineShaders.ts (the GPU sphere) so the DOM letter-cloud, projected
    through the same camera here, sits exactly on the rendered ball. ---------------------- */
 export const GLOBE = { cx: 0, cy: 2120, cz: 8200, r: 3600 } as const;
-export const GLOBE_SPIN_RATE = 0.09; // rad/s — restrained rotation lets the inner layers read clearly
-export const MORPH_DUR = 2.35;       // s — globe → mountain assembly, hand-authored constant duration (snapped on reduced-motion)
+export const GLOBE_SPIN_RATE = 0.0872665; // rad/s = TAU / (18 beats * 4 s): 18 beats per revolution (was 0.09) — every periodic term on the ball is a rational multiple of the 4 s beat
+export const MORPH_DUR = 2.6;             // s — globe → mountain assembly, hand-authored constant duration (snapped on reduced-motion). Was 2.35: the drain/pour/lift beats needed room; 2.9 read as latency
 
 /* ---- letter-cloud content, drawn from the real career record (data/stations.ts): the record is
    DECOMPOSED into individual CHARACTERS scattered THROUGH the globe volume at many radii (see
@@ -124,25 +127,30 @@ export const CLOUD_CHARS: string[] = CHAR_CLOUD.chars;
    silk rather than tidy great circles. Fully deterministic (a seeded PRNG, never
    Math.random) so the tangle is identical across StrictMode remounts / reloads —
    like the letter lattice. Vertex = (x,y,z material dir, t, seed, brightness,
-   radial shell) → 7 floats; stride 28 B, matching the pipeline's attributes. ---- */
-export const FILAMENT_FLOATS_PER_VERT = 7;
+   radial shell, tangent angle) → 8 floats; stride 32 B, matching the pipeline's attributes.
+   The TANGENT ANGLE (the 8th float) is the segment's own chord projected into the vertex's
+   tangent plane, stored as an angle in the fixed basis of globeMotion.tangentBasis — the VS
+   decodes it with the same basis and rides it through every rigid rotation, so the material
+   (a hairline's Kajiya-Kay response to the one key lamp and to the heart) knows which way each
+   thread RUNS. Spokes store 0 and the VS substitutes the radial direction. ------------------ */
+export const FILAMENT_FLOATS_PER_VERT = 8; // + tangent angle
 const FIL_NODES = 48;       // bright convergence points (Fibonacci lattice)
-const FIL_PER_NODE = 12;    // threads spun out from each node (was 16 → an even calmer, less overdrawn tangle; the dominant segment count, so this is the main complexity lever)
+const FIL_PER_NODE = 10;    // threads spun out from each node (was 12 → exactly 2 threads per shell; the dominant segment count, so this is the main complexity lever)
 const FIL_STEPS = 28;       // points sampled per thread
 const FIL_STEP_ANG = 0.082; // radians advanced per step → a long sweeping arc (~2.2 rad)
-const FIL_SPARKS = 4;       // short bright segments crossing each surface node (was 5; slightly calmer node stars to match the lighter tangle)
+const FIL_SPARKS = 3;       // short bright segments crossing each surface node (was 4; the node stars are the ONE thing meant to bloom, three strokes read as a star)
 // nested radial shells the curl threads inhabit (a thread is assigned one by f % FIL_SHELLS.length)
 // so the ball reads as a deep, LAYERED VOLUME of filaments — five shells from the deep interior
 // (0.34) out to the crust (1.0), the layered "well" the eye can fall into.
 const FIL_SHELLS = [0.34, 0.52, 0.7, 0.86, 1.0] as const;
 const CORE_TRAIL_FRAC = 0.46; // fraction of curl threads that DIVE inward to the core near their tip
-const SPOKE_COUNT = 48;       // radial sight-lines from the nucleus out to the rim (the armature) (was 64 → fewer spokes for a simpler cage)
+const SPOKE_COUNT = 36;       // radial sight-lines from the nucleus out to the rim (the armature) (was 48 → a sparser cage; the rays no longer crowd the heart)
 const SPOKE_DASHES = 8;       // dash segments per spoke (read as travelling measurement ticks)
-const NUCLEUS_SPARKS = 64;    // short crossing sparks forming the glowing core AT the centre (was 96 → a simpler, less busy core to match the dimmer "glooming" centre)
+const NUCLEUS_SPARKS = 64;    // short surface arcs forming the SKIN of the nucleus body (the backdrop draws the body itself)
 // ---- THE DEEP ORRERY additions: interior dust filling the void between shells, counter-precessing
 // great-circle gimbal rings, and a slow halo orbiting the nucleus — all riding the EXISTING sentinel
 // classes so the morph (drain/lift/fade) is untouched and the morph=1 mountain stays byte-identical.
-const MOTE_COUNT = 1600;      // interior dust specks filling the void BETWEEN the shells (class [0,1)) — was 2400; thinner dust reads calmer while still texturing all depths
+const MOTE_COUNT = 1100;      // interior dust specks filling the void BETWEEN the shells (class [0,1)) — was 1600; thinner dust reads calmer while still texturing all depths
 const RING_COUNT = 7;         // great-circle gimbal rings that counter-precess (armature, class [1,2)) — was 10; fewer interlocking rings = a cleaner orrery cage
 const RING_SEGS = 132;        // segments per gimbal ring (smooth at globe scale)
 const HALO_SEGS = 96;         // segments per nucleus orbital-halo ring (class [2,3))
@@ -150,7 +158,8 @@ const HALO_SEGS = 96;         // segments per nucleus orbital-halo ring (class [
 // step()/fract(): curl threads + surface sparks + interior MOTES use seed ∈ [0,1) (organic, flows),
 // radial spokes + great-circle RINGS use [1,2) (rigid armature — a ring is flagged by fract ≥ 0.90),
 // the nucleus + its orbital HALO use [2,3) (the core that lifts to the summit — the halo flagged by
-// radial ≥ 0.12). The FRACTIONAL part stays the per-line phase seed the flow/twinkle math has used.
+// radial ≥ 0.10 == HALO_FLAG in the VS; the skin arcs sit at 0.078..0.086, the halo at 0.118). The
+// FRACTIONAL part stays the per-line phase seed the flow/pulse math has always used.
 
 type V3 = [number, number, number];
 const v3norm = (x: number, y: number, z: number): V3 => {
@@ -185,8 +194,8 @@ export function buildFilamentGeometry(phone = false): Float32Array<ArrayBuffer> 
   const nucleusSparks = phone ? PHONE_NUCLEUS_SPARKS : NUCLEUS_SPARKS;
   const filSparks = phone ? PHONE_FIL_SPARKS : FIL_SPARKS;
   const moteBias = phone ? PHONE_MOTE_BIAS : 1.35;
-  const spokePeak = phone ? PHONE_SPOKE_PEAK : 1.7;
-  const nucleusBright = phone ? PHONE_NUCLEUS_BRIGHT : 3.0;
+  const spokePeak = phone ? PHONE_SPOKE_PEAK : 0.8;     // spoke ROOT brightness (was 1.7 — the rays torched the heart; the rim end stays 0.42)
+  const nucleusBright = phone ? PHONE_NUCLEUS_BRIGHT : 1.4; // per-arc skin brightness ⇒ 0.22..0.36 stored: UNDER the 0.82 bloom threshold — the arcs are skin DETAIL on the backdrop's body, not the glow (was 3.0)
   // mulberry32 — a tiny deterministic PRNG (stable layout, no Math.random)
   let st = 0x1a2b3c4d >>> 0;
   const rnd = (): number => {
@@ -216,13 +225,26 @@ export function buildFilamentGeometry(phone = false): Float32Array<ArrayBuffer> 
   };
 
   const out: number[] = [];
-  const push = (d: V3, t: number, seed: number, bright: number, radial: number): void => {
-    out.push(d[0], d[1], d[2], t, seed, bright, radial);
+  // one line SEGMENT = two 8-float vertices: (dir xyz, t, seed, brightness, radial, tangent angle).
+  // The tangent is the segment's own chord projected into each endpoint's tangent plane (segments are
+  // 0.082 rad, so the chord IS the tangent to < 0.04 rad); spokes store 0 (the VS uses the radial dir).
+  // Consumes no rnd() — the layout PRNG sequence is untouched by the tangent work.
+  const seg = (a: V3, ta: number, ba: number, ra: number, b: V3, tb: number, bb: number, rb: number, seed: number, radialT = false): void => {
+    let angA = 0, angB = 0;
+    if (!radialT) {
+      angA = tangentAngle(a, chordTangent(a, b));
+      const back = chordTangent(b, a);                   // b -> a; negate so BOTH endpoints carry the forward a -> b direction
+      angB = tangentAngle(b, [-back[0], -back[1], -back[2]]);
+    }
+    out.push(a[0], a[1], a[2], ta, seed, ba, ra, angA, b[0], b[1], b[2], tb, seed, bb, rb, angB);
   };
 
-  // ---- CLASS A — curl-bent streamlines fanning out from every node, now layered across three
-  // nested shells, and with ~40% of them DIVING inward to the core near their tip (CORE-TRAILS) so
-  // the organic tangle physically converges on the centre rather than floating as a hollow crust.
+  // ---- CLASS A — curl-bent streamlines fanning out from every node, layered across five nested
+  // shells (two threads per shell per node), and with ~46% of them DIVING inward to the core near their
+  // tip (CORE-TRAILS) so the organic tangle physically converges on the centre rather than floating as
+  // a hollow crust. NOTE: the thread count went 12 → 10 per node; because every class below draws from
+  // the ONE PRNG stream, dropping threads shifts every later rnd() draw — the sparks, motes, spokes,
+  // rings, arcs and halo all got a NEW (still fully deterministic) layout, not today's.
   for (let n = 0; n < FIL_NODES; n++) {
     const base: V3 = [nodes[n * 3], nodes[n * 3 + 1], nodes[n * 3 + 2]];
     for (let f = 0; f < perNode; f++) {
@@ -245,7 +267,7 @@ export function buildFilamentGeometry(phone = false): Float32Array<ArrayBuffer> 
         // bright at the node, tapering to a faint wisp; lit again where it grazes another node
         const taper = 0.16 + 0.84 * Math.pow(1 - t, 1.15);
         const bright = (0.34 + 0.4 * seed) * taper + nearNodeGlow(d) * 0.58;
-        if (prev) { push(prev, prevT, seed, prevB, prevR); push(d, t, seed, bright, radial); }
+        if (prev) seg(prev, prevT, prevB, prevR, d, t, bright, radial, seed);
         prev = d; prevB = bright; prevT = t; prevR = radial;
         // bend the swirl axis by smooth noise so the path meanders like a real filament
         const nb = noiseVec(d, seed);
@@ -257,7 +279,8 @@ export function buildFilamentGeometry(phone = false): Float32Array<ArrayBuffer> 
   }
 
   // ---- node sparks: a few short bright crossing segments at each surface node so the convergence
-  // point reads as a hot, blooming star (sits on the outer shell with the letters) ----
+  // point reads as a hot, blooming star (sits on the outer shell with the letters). Brightness 1.9:
+  // the ONE class meant to cross the 0.82 bloom knee (was 2.2). ----
   for (let n = 0; n < FIL_NODES; n++) {
     const base: V3 = [nodes[n * 3], nodes[n * 3 + 1], nodes[n * 3 + 2]];
     for (let b = 0; b < filSparks; b++) {
@@ -266,8 +289,7 @@ export function buildFilamentGeometry(phone = false): Float32Array<ArrayBuffer> 
       const tang = v3norm(r[0] - base[0] * dp, r[1] - base[1] * dp, r[2] - base[2] * dp);
       const e1 = v3norm(base[0] + tang[0] * 0.028, base[1] + tang[1] * 0.028, base[2] + tang[2] * 0.028);
       const e2 = v3norm(base[0] - tang[0] * 0.028, base[1] - tang[1] * 0.028, base[2] - tang[2] * 0.028);
-      push(e1, 0, 0.5, 2.2, 1.0);
-      push(e2, 1, 0.5, 2.2, 1.0);
+      seg(e1, 0, 1.9, 1.0, e2, 1, 1.9, 1.0, 0.5);
     }
   }
 
@@ -286,15 +308,16 @@ export function buildFilamentGeometry(phone = false): Float32Array<ArrayBuffer> 
     const tang = v3norm(ax[0] - dir[0] * dp, ax[1] - dir[1] * dp, ax[2] - dir[2] * dp);
     const e1 = v3norm(dir[0] + tang[0] * len, dir[1] + tang[1] * len, dir[2] + tang[2] * len);
     const e2 = v3norm(dir[0] - tang[0] * len, dir[1] - tang[1] * len, dir[2] - tang[2] * len);
-    const b = 0.3 + 0.45 * rnd();                   // faint dust; scintillates in the VS
-    push(e1, 0, seed, b, rad);
-    push(e2, 1, seed, b, rad);
+    const b = 0.25 + 0.35 * rnd();                  // faint dust (was 0.30 + 0.45: the twinkle is gone, the dust is quieter)
+    seg(e1, 0, b, rad, e2, 1, b, rad, seed);
   }
 
-  // ---- CLASS B — RADIAL SIGHT-LINE SPOKES: a rigid armature of dashed rays from the nucleus
-  // (radial 0.06) out to the rim (radial 1.0), brightest at the inner end so light reads as
-  // emanating FROM the centre. Their own Fibonacci set (not the node dirs) so they form a distinct
-  // cage. seed sentinel ∈ [1,2) marks the class; t runs 0→1 inner→outer to steer the flow outward. */
+  // ---- CLASS B — RADIAL SIGHT-LINE SPOKES: a rigid armature of dashed rays from just outside the
+  // nucleus (radial 0.10 — clear of the 0.075 body and the 0.078..0.086 skin-arc band, inside the 0.118
+  // halo, so the rays no longer stack a "crown" on the heart) out to the rim (radial 1.0), a touch
+  // brighter at the inner end so light reads as emanating FROM the centre. Their own Fibonacci set (not
+  // the node dirs) so they form a distinct cage. seed sentinel ∈ [1,2) marks the class; t runs 0→1
+  // inner→outer. Tangent = 0 (radial): the VS substitutes the spun radial direction. */
   const spokeDirs = fibSphere(spokeCount, 2.1);
   for (let s = 0; s < spokeCount; s++) {
     const dir: V3 = [spokeDirs[s * 3], spokeDirs[s * 3 + 1], spokeDirs[s * 3 + 2]];
@@ -302,10 +325,9 @@ export function buildFilamentGeometry(phone = false): Float32Array<ArrayBuffer> 
     for (let i = 0; i < SPOKE_DASHES; i++) {
       const u0 = i / SPOKE_DASHES;
       const u1 = (i + 0.7) / SPOKE_DASHES; // 70% dash, 30% gap → a measurement-tick rhythm
-      const rA = 0.06 + 0.94 * u0;
-      const rB = 0.06 + 0.94 * u1;
-      push(dir, u0, sentinel, spokePeak + (0.42 - spokePeak) * u0, rA);
-      push(dir, u1, sentinel, spokePeak + (0.42 - spokePeak) * u1, rB);
+      const rA = 0.10 + 0.90 * u0;
+      const rB = 0.10 + 0.90 * u1;
+      seg(dir, u0, spokePeak + (0.42 - spokePeak) * u0, rA, dir, u1, spokePeak + (0.42 - spokePeak) * u1, rB, sentinel, true);
     }
   }
 
@@ -328,48 +350,55 @@ export function buildFilamentGeometry(phone = false): Float32Array<ArrayBuffer> 
     ];
     const ringR = 0.97 + 0.05 * rnd();              // 0.97..1.02 — a crisp band of orbits on the crust
     const sentinel = 1.0 + (0.9 + 0.0999 * rnd());  // class = arm, fract ∈ [0.90,1.0) → "ring"
-    let prev: V3 | null = null, prevT = 0;
+    let prev: V3 | null = null, prevT = 0, prevG = 0;
     for (let s = 0; s <= RING_SEGS; s++) {
       const a = (s / RING_SEGS) * Math.PI * 2;
       const ca = Math.cos(a), sa = Math.sin(a);
       const d = v3norm(u[0] * ca + v[0] * sa, u[1] * ca + v[1] * sa, u[2] * ca + v[2] * sa);
-      const t = s / RING_SEGS;                      // 0..1 around the ring → drives the dash scroll
-      // a faint base ring with periodic brighter "graduation" marks (a calibrated scale cue)
-      const grad = 0.32 + 0.26 * Math.pow(0.5 + 0.5 * Math.cos(t * Math.PI * 2 * 16), 6);
-      if (prev) { push(prev, prevT, sentinel, grad, ringR); push(d, t, sentinel, grad, ringR); }
-      prev = d; prevT = t;
+      const t = s / RING_SEGS;                      // 0..1 around the ring → drives the dash glide
+      // a faint base ring with periodic brighter "graduation" marks (a calibrated scale cue); base
+      // 0.40 (was 0.32) now that the VS no longer adds a racing head bead. Each vertex carries the
+      // mark of its OWN t, so a shared vertex reads the same from both segments (no seam).
+      const grad = 0.40 + 0.26 * Math.pow(0.5 + 0.5 * Math.cos(t * Math.PI * 2 * 16), 6);
+      if (prev) seg(prev, prevT, prevG, ringR, d, t, grad, ringR, sentinel);
+      prev = d; prevT = t; prevG = grad;
     }
   }
 
-  // A rounded nucleus made from short surface arcs. No segment crosses the centre:
-  // the old diameters accumulated into a flat white starburst. A Fibonacci shell
-  // distributes the strokes evenly; depth lighting in WGSL gives the core volume.
+  // The nucleus SKIN: short surface arcs on a shell of radial 0.078..0.086 (281..310 world units),
+  // 10.8+ units ABOVE the backdrop's 270-unit body (97 depth24 steps desktop / 31 phone at the globe
+  // camera), so the depth-tested arcs ride the ember's surface as drawn detail and never z-fight it.
+  // No segment crosses the centre: the old diameters accumulated into a flat white starburst. A
+  // Fibonacci shell distributes the strokes evenly; the VS lights them from the one key lamp.
   const coreDirs = fibSphere(nucleusSparks, 0.4);
   for (let b = 0; b < nucleusSparks; b++) {
     const dir: V3 = [coreDirs[b * 3], coreDirs[b * 3 + 1], coreDirs[b * 3 + 2]];
     const tangent = v3norm(dir[2], 0.02, -dir[0]);
-    const rad = 0.072 + 0.018 * rnd();
+    const rad = 0.078 + 0.008 * rnd();              // was 0.072 + 0.018: the floor clears the body, the ceiling stays under the 0.10 halo flag
     const sentinel = 2.0 + rnd() * 0.999;
     const brightness = nucleusBright * (0.16 + 0.1 * rnd());
+    const arcPoint = (t: number): V3 => {
+      const angle = (t - 0.5) * 0.48;
+      return v3norm(
+        dir[0] * Math.cos(angle) + tangent[0] * Math.sin(angle),
+        dir[1] * Math.cos(angle) + tangent[1] * Math.sin(angle),
+        dir[2] * Math.cos(angle) + tangent[2] * Math.sin(angle),
+      );
+    };
     for (let s = 0; s < 4; s++) {
-      for (const t of [s / 4, (s + 1) / 4]) {
-        const angle = (t - 0.5) * 0.48;
-        const point = v3norm(
-          dir[0] * Math.cos(angle) + tangent[0] * Math.sin(angle),
-          dir[1] * Math.cos(angle) + tangent[1] * Math.sin(angle),
-          dir[2] * Math.cos(angle) + tangent[2] * Math.sin(angle),
-        );
-        push(point, t, sentinel, brightness, rad);
-      }
+      const p0 = arcPoint(s / 4), p1 = arcPoint((s + 1) / 4);
+      seg(p0, s / 4, brightness, rad, p1, (s + 1) / 4, brightness, rad, sentinel);
     }
   }
 
-  // ---- NUCLEUS ORBITAL HALO: a bright slow ring just outside the core (radial ~0.16) — gives the
-  // luminous heart visible scale + a spin cue read against the still spokes. Nucleus class [2,3) →
-  // lifts to the summit AND fades with the core (never outlives 0.70). Two slightly tilted rings,
-  // riding radial ≈ 0.155..0.18 so the VS flags them distinct from the < 0.10 core sparks. ----
-  for (let ring = 0; ring < 2; ring++) {
-    const axis = v3norm(0.3 + 0.5 * ring, 1.0, 0.2 - 0.4 * ring); // deterministic, distinct tilt per ring
+  // ---- NUCLEUS ORBITAL HALO: ONE quiet ring just outside the body (radial 0.118 = 1.57 R) — gives the
+  // heart visible scale + a spin cue read against the still spokes, and passes BEHIND the body (the
+  // backdrop's depth hides its far half). Nucleus class [2,3) → lifts to the summit AND fades with the
+  // core (never outlives 0.70). radial >= 0.10 flags halo — mirrored by HALO_FLAG in the VS and the test.
+  // Stored brightness 1.0 (measured front 0.50 after the VS stack, back 0.43): quiet next to the 0.62 body.
+  // (Was two rings at 1.9 riding 0.155 / 0.180 — a second ring only competed with the ember.) ----
+  {
+    const axis = v3norm(0.3, 1.0, 0.2);             // deterministic tilt
     const ref: V3 = Math.abs(axis[1]) < 0.92 ? [0, 1, 0] : [1, 0, 0];
     const dp = ref[0] * axis[0] + ref[1] * axis[1] + ref[2] * axis[2];
     const u = v3norm(ref[0] - axis[0] * dp, ref[1] - axis[1] * dp, ref[2] - axis[2] * dp);
@@ -378,7 +407,7 @@ export function buildFilamentGeometry(phone = false): Float32Array<ArrayBuffer> 
       axis[2] * u[0] - axis[0] * u[2],
       axis[0] * u[1] - axis[1] * u[0],
     ];
-    const haloR = 0.155 + 0.025 * ring;             // 0.155 / 0.180 — distinct from the <0.10 core sparks
+    const haloR = 0.118;
     const sentinel = 2.0 + rnd() * 0.999;           // nucleus class; fract = phase
     let prev: V3 | null = null, prevT = 0;
     for (let s = 0; s <= HALO_SEGS; s++) {
@@ -386,7 +415,7 @@ export function buildFilamentGeometry(phone = false): Float32Array<ArrayBuffer> 
       const c = Math.cos(a), sn = Math.sin(a);
       const d = v3norm(u[0] * c + v[0] * sn, u[1] * c + v[1] * sn, u[2] * c + v[2] * sn);
       const t = s / HALO_SEGS;
-      if (prev) { push(prev, prevT, sentinel, 1.9, haloR); push(d, t, sentinel, 1.9, haloR); }
+      if (prev) seg(prev, prevT, 1.0, haloR, d, t, 1.0, haloR, sentinel);
       prev = d; prevT = t;
     }
   }
@@ -425,8 +454,8 @@ const phoneRender = (): boolean =>
   typeof matchMedia === "function" &&
   (matchMedia("(pointer: coarse)").matches || matchMedia("(max-width: 860px)").matches);
 const PHONE_NX = 520, PHONE_NZ = 290;  // terrain mesh LOD (vs 760×420 → ~150k tris, ~76% fewer — TBDR vertex/binning win; contour LINES are shader-drawn so density is unchanged)
-const PHONE_FIL_PER_NODE = 8;          // globe curl-threads per node (vs desktop 12 → a much lighter phone tangle, less additive overdraw + smaller init VBO)
-const PHONE_MOTE_COUNT = 760;          // globe interior dust motes (vs desktop 1600 → lighter phone dust, smaller init VBO)
+const PHONE_FIL_PER_NODE = 8;          // globe curl-threads per node (vs desktop 10 → a lighter phone tangle, less additive overdraw + smaller init VBO)
+const PHONE_MOTE_COUNT = 560;          // globe interior dust motes (vs desktop 1100 → lighter phone dust, smaller init VBO)
 const PHONE_LINE_SCALE = 1.25;         // contour spacing ×: 1 = desktop, 1.25 ≈ 20% fewer lines on the mountain (F.lod.x)
 const PHONE_SC_CAP = 2.75;             // HDR scene supersample cap (raised from 2.5 → crisper, more-supersampled hairlines on phone; paid for by the lighter globe/mountain geometry above)
 /* the globe is ~⅓ the physical size on a phone, so the SAME line counts pack ~4× the
@@ -434,12 +463,12 @@ const PHONE_SC_CAP = 2.75;             // HDR scene supersample cap (raised from
    centre starburst (every bright element converges inside a ~40px disc). These trims keep
    the composition but rebalance it for the small ball; the shader applies matching
    centre/depth trims via F.eye.w (see RIDGE_FILAMENT_WGSL). Desktop is untouched. */
-const PHONE_SPOKE_COUNT = 34;          // radial sight-line spokes (vs 48 — fewer rays converging at the nucleus)
-const PHONE_NUCLEUS_SPARKS = 42;       // centre-crossing core sparks (vs 64 — the heap still blooms, no longer blows out)
-const PHONE_FIL_SPARKS = 3;            // node-star crossing segments (vs 4 — calmer convergence stars)
+const PHONE_SPOKE_COUNT = 28;          // radial sight-line spokes (vs 36 — fewer rays converging at the nucleus)
+const PHONE_NUCLEUS_SPARKS = 42;       // nucleus skin arcs (vs 64 — a sparser skin on the small body)
+const PHONE_FIL_SPARKS = 2;            // node-star crossing segments (vs 3 — calmer convergence stars)
 const PHONE_MOTE_BIAS = 1.12;          // mote radial pow bias (vs 1.35 — spreads the dust off the packed centre)
-const PHONE_SPOKE_PEAK = 1.15;         // spoke inner-end brightness (vs 1.7 — the rays no longer torch the core; rim end stays 0.42)
-const PHONE_NUCLEUS_BRIGHT = 2.5;      // per-spark core brightness (vs 3.0 — still over the 0.82 bloom threshold)
+const PHONE_SPOKE_PEAK = 0.6;          // spoke root brightness (vs 0.8 — dim rays on the small ball; rim end stays 0.42)
+const PHONE_NUCLEUS_BRIGHT = 1.2;      // per-arc skin brightness (vs 1.4 — 0.19..0.31 stored, well under the 0.82 bloom threshold: skin detail, not glow)
 // DRS floor while the GLOBE shows (morph < 0.5): the landing view never drops below near-native
 // crispness even when a browser frame-cap (iOS Low Power Mode ≈ 30fps rAF) reads as permanent
 // "load" to the wall-clock controller — see the morph-aware floor in render(). 0.85 × the phone's
@@ -515,6 +544,20 @@ export interface RidgeFrame {
    *  lands and then HOLDS it at 1 (it no longer ping-pongs), so the detailed mountain stays put.
    *  Defaults to 1 (any caller that omits it renders the fully-revealed mountain). Packed into lod.w. */
   reveal?: number;
+  /** THEME amount 0..1 (F.drs.z): 0 = the black frame (today), 1 = "ink on paper" — the composite alone
+   *  re-reads the scene's luminance as ink density; a few passes keep per-pass exceptions (snow stays
+   *  paper-bright, the core becomes an ink sphere). Eased by the stage over the 0.3 s CSS crossfade so a
+   *  toggle never snaps. Defaults to 0 ⇒ every existing caller renders today's dark frame byte-identically. */
+  theme?: number;
+  /** NUTATION — the ball's spin axis leans a little and the lean's direction walks a slow circle (a
+   *  gyroscope, no wobble). (nutAxisX, 0, nutAxisZ) is the UNIT horizontal tilt axis and nutAngle the
+   *  tilt in radians; the filament ball, the terrain's sphere skin and the DOM letter cloud all apply
+   *  this same Rodrigues rotation LAST (after the spin), from globeMotion.globeNutation(). Defaults
+   *  (1, 0, 0) = identity: the stage sends EXACTLY +0 for every morph >= 0.30 / Projects / reduced-motion
+   *  frame, so the terrain's uniform "F.x2.z != 0.0" branch is skipped and those frames stay byte-identical. */
+  nutAxisX?: number;
+  nutAxisZ?: number;
+  nutAngle?: number;
 }
 
 /* ---- orbit camera: drag to spin a full turn around the summit -------------
@@ -1104,8 +1147,14 @@ export class RidgelineScene {
         vertex: { module: backdrop, entryPoint: "vs" },
         fragment: { module: backdrop, entryPoint: "fs", targets: [{ format: HDR }] },
         primitive: { topology: "triangle-list" },
-        // never write depth; the terrain (cleared depth 1.0) always draws over it
-        depthStencil: { format: "depth24plus", depthWriteEnabled: false, depthCompare: "always" },
+        // writes the nucleus body's true depth inside its fully-covered disc (1.0 = the clear elsewhere) so
+        // the depth-tested filaments BEHIND the body are hidden; the terrain draws after with "less" and
+        // still wins wherever it is nearer. On the Home branch the FS discards outside the body, so the
+        // depth store only lands on the ember disc. On the mountain (morph > HALO_A) nothing discards, so the
+        // pass stores the clear value 1.0 over the active target every frame: a redundant, constant-value
+        // depth24plus write the old depthWriteEnabled:false backdrop never made; kept because one pipeline
+        // is simpler and the store is bandwidth-only (compressed on IMR, on-tile on TBDR).
+        depthStencil: { format: "depth24plus", depthWriteEnabled: true, depthCompare: "always" },
       }),
       d.createRenderPipelineAsync({
         layout: framePL,
@@ -1134,10 +1183,11 @@ export class RidgelineScene {
         entryPoint: "vs",
         buffers: [
           {
-            arrayStride: 28, // 7 floats: vec3 dir + vec4 (t, seed, brightness, radial)
+            arrayStride: 32, // 8 floats: vec3 dir + vec4 (t, seed, brightness, radial) + f32 tangent angle
             attributes: [
               { shaderLocation: 0, offset: 0, format: "float32x3" },
               { shaderLocation: 1, offset: 12, format: "float32x4" },
+              { shaderLocation: 2, offset: 28, format: "float32" },
             ],
           },
         ],
@@ -1315,14 +1365,24 @@ export class RidgelineScene {
     // sweeps it 0→1 once after the massif lands and HOLDS at 1, so the detail no longer ping-pongs.
     // Defaults to 1 ⇒ a caller that omits it renders the finished, fully-revealed mountain.
     u[43] = s.reveal ?? 1;
-    // drs = (sceneRectX, sceneRectY, _, _): the fraction of the (max) HDR target the live scene
-    // occupies this frame. The composite folds it into every sceneTex tap. (1,1) at full scale.
+    // drs = (sceneRectX, sceneRectY, theme, _): xy = the fraction of the (max) HDR target the live scene
+    // occupies this frame — the composite folds it into every sceneTex tap, (1,1) at full scale; z = the
+    // eased THEME amount (0 dark … 1 light), exactly 0 for every caller that omits it (dark byte-identical).
     u[44] = this.aw / this.rw;
     u[45] = this.ah / this.rh;
+    u[46] = s.theme ?? 0;
     u[48] = s.pointerX ?? 0;
     u[49] = s.pointerY ?? 0;
     u[50] = s.pointerStrength ?? 0;
     u[51] = s.pointerEnergy ?? 0;
+    // x2 = (nutAxisX, nutAxisZ, nutAngle, 0): the ball's rigid axis lean (globeMotion.globeNutation). The
+    // defaults are the identity (angle +0), so the terrain skin's uniform lean branch is skipped.
+    // Byte offsets: vp 0..63 | a 64 | b 80 | post 96 | eye 112 | hov 128 | mph 144 | lod 160 | drs 176 |
+    // ptr 192 | x2 208..223 — 224 B of struct inside the 256 B buffer (frameBGL has no minBindingSize).
+    u[52] = s.nutAxisX ?? 1;
+    u[53] = s.nutAxisZ ?? 0;
+    u[54] = s.nutAngle ?? 0;
+    u[55] = 0;
     this.g.device.queue.writeBuffer(this.uBuf, 0, u.buffer, 0, 256);
   }
 

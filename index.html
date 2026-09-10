@@ -8,6 +8,20 @@
       content="Daniel Oliaei — BIM Specialist & Developer. A mountain, drawn live in WebGPU."
     />
     <meta name="theme-color" content="#000000" />
+    <script>
+      /* apply the saved theme BEFORE first paint (no flash). Mirrors src/theme.ts currentTheme():
+         a stored "light" wins, anything else is the black frame (the OS preference is NOT followed —
+         the dark piece is the default). Keep the storage key in sync with theme.ts (do:theme). The
+         single theme-color meta below is rewritten here and again by theme.ts on every switch. */
+      (function () {
+        var t = null;
+        try { t = localStorage.getItem("do:theme"); } catch (e) {}
+        if (t !== "light") t = "dark";
+        document.documentElement.setAttribute("data-theme", t);
+        var m = document.querySelector('meta[name="theme-color"]');
+        if (m) m.setAttribute("content", t === "light" ? "#f4f1ea" : "#000000");
+      })();
+    </script>
     <title>Daniel Oliaei — BIM Specialist & Developer</title>
 
     <!-- social-share cards. og:url, og:image and a favicon/apple-touch-icon still
