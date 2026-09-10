@@ -4,6 +4,9 @@ import { telemetryCollector } from "./telemetry-collector";
 
 // https://vite.dev/config/
 export default defineConfig({
+  // GitHub Pages serves a PROJECT site under /<repo>/ — the deploy workflow sets DEPLOY_BASE to
+  // "/Mohsen-oliaei-portfolio/"; local dev/preview and any root-hosted deploy keep "/".
+  base: process.env.DEPLOY_BASE ?? "/",
   // telemetryCollector mounts POST /telemetry on the dev/preview server (same origin,
   // so the HTTPS phone behind the tunnel can beacon to it). It adds nothing to the
   // client bundle and is inert on a real deploy.
