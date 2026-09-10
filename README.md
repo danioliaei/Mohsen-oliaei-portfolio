@@ -73,3 +73,19 @@ WGSL `RINGS` in `ridgelineShaders.ts` and the JS `RINGS` in `ridgeline.ts`
 - `prefers-reduced-motion` support and `:focus-visible` styles
 - High-DPI rendering capped at 2× on desktop / 2.5× on phone, with a supersample
   for clean hairlines
+
+## Globe interaction
+
+Home has a smaller desktop globe, a shaded core with a four-second pulse, and
+an orbital drag cue. Mouse movement adds a local light field, gently parts and
+swirls the silk, and tilts the camera; faster movement leaves a decaying wake.
+The field fades during dragging, navigation and overlays. Phone resolution and
+the latest phone rendering profile are preserved.
+
+The core uses short surface arcs and the existing backdrop pass, with no new
+textures or render passes. Home skips the invisible terrain mesh (about 638k
+desktop triangles per frame). The scene clock pauses with background rendering,
+and reduced-motion preferences freeze the ambient pulse and deformation.
+
+Run `node --test tests/globe.test.mjs` for the pointer-boundary and core-geometry
+regressions. Use the telemetry workflow for physical-phone performance checks.

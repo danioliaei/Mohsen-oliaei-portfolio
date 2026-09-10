@@ -18,8 +18,7 @@ export interface SceneInfo {
   hasF16: boolean;
   /** Adapter advertised timestamp queries (GPU-time telemetry capable). */
   hasTimestamp: boolean;
-  /** Draw calls submitted last frame (6 on the finished mountain, 7 with the
-   *  intro filament ball during the globe/morph phase). */
+  /** Draw calls submitted last frame: 6 on Home/CV; 7 during the morph. */
   drawCalls: number;
   /** Triangles rasterised last frame (terrain mesh + the full-screen passes). */
   triangles: number;
