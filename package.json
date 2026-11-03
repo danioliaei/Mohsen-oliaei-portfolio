@@ -26,6 +26,6 @@
     "@webgpu/types": "^0.1.70",
     "cross-env": "^10.1.0",
     "typescript": "^5.7.2",
-    "vite": "^6.0.5"
+    "vite": "^6.4.5"
   }
 }
